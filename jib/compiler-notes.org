@@ -1,0 +1,139 @@
+Compiler notes
+
+Let bindings need to support locals clearing at end of scope, so gc for locals can happen before function terminates. Actually, locals clearing could happen as soon as a local has been used for the last time. Really, let should have nothing to do with it. Each binding is completely isolated from the bindings that come after it. Perhaps it is time to decompose let in the ast into a series of nested 'bind' forms terminating in a 'do' form. In this model it makes sense to clear a binding when that binding's specific scope terminates. Not that different from just using let though. 
+
+Even intermediate function call params and results not part of a binding can have precomputed memory locations. 
+
+Determine if x64 zeroes memory or not when you pop things off the stack or add to the stack pointer.
+
+
+
+----------
+
+First
+Rest
+Cons
+Loop, tail recursion
+Keywords, literal symbols
+Alist as map, with map syntax
+
+------------
+
+Store parents in context path during traversal. 
+
+On finding a recur, look up path until you find a recur container (loop or func). 
+
+For the container, determine the expression paths that describe its tail positions. Nah. 
+
+When evaluating a child form, special forms manage a tail-position variable. Each child special form checks whether this is true, and sets it to false as needed. Recur able forms like loop reset this value when evaluating their subexpressions. 
+
+--------------------------
+
+Strip Comments (DONE)
+
+Currently we do not allow comments in the grammar, fix this.
+
+--------------------------
+
+Variable Arguments (DONE)
+
+Need a way to make the final argument specified in a function signature contain any variable number of arguments greater than the ones specified. This is a prerequisite for first-class functions as the standard library requires it.
+
+* Analyze: mark functions that take variable arguments (done)
+* Compile: when invoking functions, we have to inspect the function to determine if it is variadic, and if so, how many arguments it takes. the remainder should get stuffed into a builtin-list as the last argument. for now, all functions are statically declared and cannot be hidden behind bindings, so the compiler just needs to collect all the function forms and stuff them into the context map. for first-class functions, the compiler will need to generate reflection code to determine this at runtime.
+* how does c do this?
+* Compile: emit code that stores all the regular arguments normally, but use builtin-list to evaluate the variable arguments into a list, which can be the last argument to the function. Called functions go unchanged as the final argument is always just a list.
+
+--------------------------
+
+First class functions
+
+Builtins do not have to be functions inherently. We can define native func wrappers for all the builtins, so long as we provide some sort of escape hatch to invoke builtins behavior. 
+
+Is this a c call API? Could be.
+
+Could just be custom. (call-builtin builtins-plus ... In this scheme, call-builtin would not be a valid first class function. It is a special keyword to denote the escape hatch.
+
+For non-valid first class function names, we would want to catch their use as first class functions in the analysis phase. The names themselves could be bound lexically, which would be fine. But if there is not a specific binding for a name that otherwise cannot be a function, we should explode. 
+
+Really, referencing a function that does not exist should cause an explosion too. For this we would need to track the realm of defined functions at analysis time and enforce that they exist when they are referenced.
+
+1. (DONE) Add function value to runtime.
+2. (DONE) Add a special built-in form that can access internal behaviors. Use this to define first class functions for all builtins. Then remove specific 'builtin' function awareness from the analyzer and compiler. 
+3. Analyzer: identify when a function name is used as a value, this is a new form called an :fn-callable. it needs a unique id
+4. Analyzer: identify in the ast when an fn-call is calling an actual function by name, or just a binding to a value that presumably is fn-callable. if the function is literal, then it remains form ‘fn-call’. if the function is not, it becomes form ‘fn-call-dynamic’
+5. Compiler: identify and create singleton value for references to function symbols on init the way we do for constants. When generating fn-call code for a fn-callable binding, inspect the object, get the symbol from it, use that for calling the function. On function literal names we can just use the name.
+6. Implement map, reduce, and filter in the stdlib, using the first class functions.
+
+Turns out there is more to this. For literal function references, this is easy. For cases where a binding value is being invoked as a function, we have to be able to resolve that function value to a particular function address at runtime. This means knowing the function symbol is not enough. We need to create a function symbol lookup table such that function 01 can be mapped to a real symbol address. 
+
+https://stackoverflow.com/questions/31690073/x86-assembly-call-label-at-an-address-from-string
+
+It also occurs to me that at process bootstrap time, when creating the function values on the heap, we could pre-lookup the function addresses in the table and store it as part of the object. That means that invoke time we’d only need to make a single runtime call to get the address of the function.
+
+------------------------
+
+Closures
+
+1. Add a list of bindings to the function value data structure in the runtime.
+2. Add analysis support for closure syntax. Includes not descending into the fn definition for things like tail position analysis, binding discovery etc.
+3. Compile: emit a func definition for the fn. do this in a separate compile pass so the func comes before it's usage. Give it a generated unique name. Inside the func it will need to generate code that relies on the closed-over bindings. In-line, create a function object with all the existing bindings as parameters to it. When called, create a call-fn definition as normal. At call time there is no difference between a closure and a regular function.
+4. Implement apply with a fn.
+
+------------------------
+
+The code is getting hard to modify, write tests!
+
+1. Write specs for all major data structures
+2. Apply them to functions and figure out how to run with instrument.
+3. Make analyzer unit tests.
+4. Make compiler unit tests.
+
+—————————————
+
+Inferior Lisp Mode Support
+
+https://www.gnu.org/software/emacs/manual/html_node/emacs/External-Lisp.html
+
+
+This is cool, though maybe difficult until a repl is possible.
+
+=————————————————————
+
+Refactoring Compiler Code
+
+It makes sense to split out the runtime stuff into runtime.clj, none of the builtins should be used by it.
+Not sure how best to pass configuration like pointer-size, perhaps just put in constants ns for now.
+
+Started moving to multimethods for expression compilation. Uneasy about it. Seems like there's a better way. Really this opens a can of worms, to do with the builtins. They are all written with no assumptions around how their arg lists are handled. Some like the math ones do funky things trying to be efficient. Really though, all parameters to builtins just get evaluated and stuffed on the stack as normal, right? Anyway, let's ignore this refactor for now and focus on something else. 
+
+Simplify builtins?
+
+
+
+Fix GC
+
+Currently it is common for gc objects to be freed even though they are still referenced by the code. This is because in various places the code allocates multiple objects before saving them all in the stack. Either look more places like registers, or don't allocate a second object on the heap until the first object has been stored in the stack. 
+
+1. Revisit c builtins, move anything that can be written in native jib over to std.jib. May need to make it possible to refer to std.jib functions from the compiler-generated code itself. (Note that count() will be inefficient to implement this way in terms of gc until it is rewritten to not require allocation to iterate through the list. see The Way List Works)
+2. For the remainder of runtime things, consider just moving to asm generation. rt_alloc is the only thing that would remain on the c side. 
+3. Make rt_alloc not allocate more than a single thing when it runs.
+4. Make all generated code always store the return value of an fn call or builtin call in the stack before doing anything else. This will prevent things from being freed when they are still referenced. 
+5. Consider replacing all c calls (but alloc) with pure asm. 
+6. Consider what language features are needed to write the gc in jib. 
+
+The Way List Works
+
+Currently the runtime list implementation has to create intermediate list objects just to iterate through the list. (rest coll) is enough to cause this to happen. Ideally, (rest coll) would result in no allocations at all. In order for this to work, the data structure that represents list must be recursive. Currently a list object contains a reference either to a nil value, or to a cons value. Cons values have a head which can be any value type, and a tail, which must be either nil or a reference to another cons value.
+
+Rework the list data structure such that list objects have a tail that is a valid list object in some way. That way you just return a reference to something which already exists and can avoid intermediate data structures just to iterate.
+
+Primitive nil values
+
+Primitive nil values can be added as value pointers overridden by using the first few high bits as type indicators. This would be transparent to the language, completely on the runtime side. 
+
+Primitive nils: 
+1. Open the door for other primitives
+2. Makes fixing the eager gc problems easier
+3. Means I can restructure the list to avoid allocation when iterating
+4. Means I can implement things like count on lists efficiently in std.jib and make them not builtins.

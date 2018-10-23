@@ -1,0 +1,159 @@
+;; -*- mode: Clojure; fill-column: 75; comment-column: 50; -*-
+
+;; TODO: support inferior lisp mode
+
+(func count (n) (builtin "builtin-count" n))
+(func first (coll) (builtin "builtin-first" coll))
+(func second (coll)
+      (builtin "builtin-first"
+               (builtin "builtin-rest" coll)))
+(func rest (coll) (builtin "builtin-rest" coll))
+(func neg (a) (builtin "builtin-minus" 0 a))
+(func mod (a b) (builtin "builtin-mod" a b))
+
+(func + (& args)
+      (loop (result 0
+             remaining args)
+        (if (builtin "builtin-eq" (count remaining) 0)
+          result
+          (recur
+           (builtin "builtin-plus" result (first remaining))
+           (rest remaining)))))
+
+(func - (n & args)
+      (if (builtin "builtin-eq" (count args) 0)
+        (builtin "builtin-minus" 0 n)
+        (loop (result n
+               remaining args)
+          (if (builtin "builtin-eq" (count remaining) 0)
+            result
+            (recur
+             (builtin "builtin-minus" result (first remaining))
+             (rest remaining))))))
+
+(func * (& args)
+      (loop (result 1
+             remaining args)
+        (if (builtin "builtin-eq" (count remaining) 0)
+          result
+          (recur
+           (builtin "builtin-mult" result (first remaining))
+           (rest remaining)))))
+
+(func / (n & args)
+      (loop (result n
+             remaining args)
+        (if (builtin "builtin-eq" (count remaining) 0)
+          result
+          (recur
+           (builtin "builtin-div" result (first remaining))
+           (rest remaining)))))
+
+(func = (n & args)
+      (loop (result n
+             remaining args)
+        (if (builtin "builtin-eq" (count remaining) 0)
+          true
+          (if (builtin "builtin-eq" result (first remaining))
+            (recur (first remaining) (rest remaining))
+            false))))
+
+(func > (n & args)
+      (loop (result n
+             remaining args)
+        (if (builtin "builtin-eq" (count remaining) 0)
+          true
+          (if (builtin "builtin-gt" result (first remaining))
+            (recur (first remaining) (rest remaining))
+            false))))
+
+(func < (n & args)
+      (loop (result n
+             remaining args)
+        (if (builtin "builtin-eq" (count remaining) 0)
+          true
+          (if (builtin "builtin-lt" result (first remaining))
+            (recur (first remaining) (rest remaining))
+            false))))
+
+(func >= (n & args)
+      (loop (result n
+             remaining args)
+        (if (builtin "builtin-eq" (count remaining) 0)
+          true
+          (if (builtin "builtin-gte" result (first remaining))
+            (recur (first remaining) (rest remaining))
+            false))))
+
+(func <= (n & args)
+      (loop (result n
+             remaining args)
+        (if (builtin "builtin-eq" (count remaining) 0)
+          true
+          (if (builtin "builtin-lte" result (first remaining))
+            (recur (first remaining) (rest remaining))
+            false))))
+
+(func cons (x xs) (builtin "builtin-cons" x xs))
+(func list (& args) args)
+
+(func inc (n) (+ n 1))
+
+(func dec (n) (- n 1))
+
+(func zero? (n) (= n 0))
+
+(func nil? (n) (= nil n))
+
+(func empty? (n)
+      (if (nil? n)
+        true
+        (zero? (count n))))
+
+(func not (x) (if x false true))
+
+(func println (& args)
+      (loop (remaining args)
+        (if (not (empty? remaining))
+          (let (v (first remaining))
+            (builtin "builtin-println" v)
+            (recur (rest remaining)))
+          nil)))
+
+(func print-list (l)
+      (loop (remaining l)
+        (if (not (empty? remaining))
+          (let (x (first remaining))
+            (println x)
+            (recur (rest remaining))))))
+
+(func reverse (coll)
+      (loop (remaining coll
+             new (list))
+        (if (empty? remaining)
+          new
+          (recur
+           (rest remaining)
+           (cons (first remaining) new)))))
+
+(func map (f coll)
+      (loop (remaining coll
+                       new (list))
+        (if (empty? remaining)
+          (reverse new)
+          (recur
+           (rest remaining)
+           (cons (f (first remaining)) new)
+           ))))
+
+(func filter (f coll)
+      (loop (remaining coll
+             new (list))
+        (if (empty? remaining)
+          (reverse new)
+          (recur
+           (rest remaining)
+           (let (n (first remaining))
+             (if (f n)
+               (cons n new)
+               new))))))

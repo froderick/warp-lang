@@ -1,0 +1,8 @@
+cscope.*
+lexer
+test
+.#*
+core
+lexer-repl
+*.o
+*.dSYM

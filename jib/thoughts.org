@@ -1,0 +1,418 @@
+#+TITLE: Compiler Musings
+
+* TODO Runtime
+
+#+BEGIN_SRC c
+
+// runtime.h
+
+typedef struct s_GC *GC;
+
+GC gc_create(unsigned long max_heap_size);
+void gc_destroy(GC gc);
+
+typedef struct s_Value *Value;
+
+// creation
+Value val_create_nil(GC gc);
+Value val_create_str(GC gc, char** s);
+Value val_create_int(GC gc, int i);
+Value val_create_cons(GC gc, Value head, Value tail);
+
+// introspection
+typedef enum s_Type {
+  T_NIL,
+  T_STR,
+  T_INT,
+  T_CONS
+} as Type;
+Type val_type(Value v);
+unsigned long val_size(Value v);
+
+// language builtins
+Value val_first(Value v);
+Value val_rest(Value v);
+void val_prn(Value v);
+bool val_equals(Value a, Value b);
+bool val_truthy(Value v);
+
+// stack
+
+
+
+// value.c
+
+/*
+ * A gc allocatable and collectable item. All data are represented as a Values.
+ * Values can be:
+ * - integers
+ * - arbitrary-length strings
+ * - cons cells (head, tail)
+ */
+struct s_Value {
+  Type type;
+  union {
+    int i;
+    char **str;
+    s_Cons cons;
+  };
+}
+
+struct s_Cons {
+  s_Value* head;
+  s_Value* tail;
+}
+
+// stack.h
+
+
+// stack.c - this chunk of code is specifically aware of:
+// 1) 
+
+
+// gc.h
+
+
+// gc.c
+
+typedef struct s_Item {
+  Value value;
+  bool collectable;
+  s_Item* next;
+} Item;
+
+struct s_GC {
+  unsigned long max_heap_size;
+  IsLiveFn is_live_fn;
+  unsigned long current_heap_size;
+  Item* root;
+};
+
+GC gc_create(unsigned long max_heap_size, IsLiveFn is_live_fn) {
+  GC gc = malloc(sizeof(s_GC));
+  gc->max_heap_size = max_heap_size;
+  gc->current_heap_size = 0;
+  gc->root = NULL;
+  return gc;
+}
+
+bool space_available(GC gc, Value v) {
+  return gc->current_heap_size + val_size(v) >= gc->max_heap_size;
+}
+
+void add_item(GC gc, Value v) {
+  Item* newItem = malloc(sizeof(Item));
+  new_item->value = v;
+  new_item->collectable = 0;
+  new_item->next = gc->root;
+  gc->root = new_item;
+}
+
+// mark all objects in heap as 'not live'
+// look through the stack for any object references, for each one:
+//   - mark it as 'live'
+//   - recurse through all the objects it references
+//   - stop case is whenever we encounter an object that is already live, or run out of objects
+//
+// Here is an example of determing the stack bounds in linux: http://web.engr.illinois.edu/~maplant2/gc.html
+//    The interesting bit: asm volatile ("movl	%%ebp, %0" : "=r" (stack_top));
+// Here is some info on osx: http://stackoverflow.com/questions/10301542/getting-process-base-address-in-mac-osx
+// And in general: https://www.google.com/webhp?sourceid=chrome-instant&ion=1&espv=2&ie=UTF-8#q=linux+finding+the+bottom+of+the+stack
+// A blog about stack unwinding: http://blog.reverberate.org/2013/05/deep-wizardry-stack-unwinding.html
+//
+// So let's think about this. If everything in a stack frame 
+// - besides the base pointer and the ret pointer 
+// - is 16-byte aligned and exactly one QWORD (8 bytes) in length
+// - is a pointer to a gc-allocated Value
+// then walking the stack seems pretty straightforward:
+// - get the current stack pointer
+// - get the current base pointer
+// - check all the object references between them
+// - hop up to the next frame and repeat
+// - use whatever above to know when you've hit the top of the stack
+//
+// The other way to do this to pass the known set of root objects from the stack and elsewhere
+// from the generated code into the gc. The compiler should know where all the bindings are stored
+// in the stack. It could generate code to smash all the bindings into an array in the stack.
+// This seems wasteful, but it is better than requiring the gc to understand the stack memory 
+// layout without any of the metadata available at compile time.
+//
+// Seems gross to copy the stack items into a different shape just to avoid this knowlege in the gc.
+// Other ideas:
+// - put more metadata in the stack so it can be inspected reliably?
+// - ?
+
+#include <stdint.h>
+
+int64_t i2 = 0x0000444400004444LL;
+
+void mark(GC gc, int64_t basePointer, int64_t stackPointer) {
+  unsigned long long stack_top;
+}
+
+void sweep(GC gc) {
+  Item* current = gc->root;
+  while (current != NULL) {
+
+    if (current->collectable) {
+      val_destroy(current->value);
+    }
+    gc->root = current->next;
+    free(current);
+    current = gc->root;
+  }
+}
+
+void collect(GC gc) {
+  mark(gc);
+  sweep(gc);
+}
+
+bool gc_alloc_value(GC gc, Value v) {
+
+  if (!space_available(gc, v)) {
+    
+    // TODO: collect garbage
+
+    if (!space_available(gc, v)) {
+      return 0;
+    }
+  }
+
+  add_item(gc, v);
+
+  return 1;
+}
+
+void gc_destroy(GC gc) {
+
+  Item* current = gc->root;
+  while (current != NULL) {
+    val_destroy(current->value);
+    gc->root = current->next;
+    free(current);
+    current = gc->root;
+  }
+  
+  free(gc);
+}
+
+#+END_SRC
+
+
+What goes in the stack?
+- the base pointer, containing the location of the previous frame
+
+Presumably the stack looks like:
+[top] 0xFFFF
+
+
+--------------------------------------------------------------
+
+Ok, forget all that. I learned two things:
+
+1. The frame address in gdb for a given frame is the address the ~rbp~ (base 
+   pointer) contained *before* the ~call~ instruction was executed. After you
+   step into the function in gdb there's an extra 8 bytes between this address
+   and the address in ~rbp~ (the base pointer register). This 8 bytes contains
+   the value the ~rip~ (instruction pointer) should use for when the call 
+   returns.
+
+   -- frame 0 --------------------
+   saved ~rip~ (where to resume execution after call ~call~ pushes this)
+   saved ~rbp~ (previous stack frame's base pointer, this is pushed by convention)
+   binding reference (intermediate value)
+   binding reference (intermediate value)
+   binding reference (intermediate value)
+   param reference 2 (child call arg)
+   param reference 1 (child call arg)
+   result reference  (result allocated)
+   -- frame 1 --------------------
+   saved ~rip~ 
+   saved ~rbp~ 
+   ...
+
+   When the ~leave~ and ~ret~ are called at the end of the function, the
+   following happens:
+
+   ~leave~
+   1. ~rsp = rbp~    (stack pointer is set to base pointer)
+   2. ~rbp = $(rbp)~ (base pointer is set to previous base pointer)
+   3. pop previous ~rbp~ value from stack
+
+   ~ret~ transfers control of execution back to the previous stack frame's code
+
+2. I think I figured out a general pattern I could use for modeling data in the
+   stack so that the GC can traverse the root set. It would be a departure from
+   the c calling convention. This design presumes the use of a mark-and-sweep 
+   (tracing) gc.
+
+   The root objects from which gc sweeps are done are defined by the full set of
+   bindings held by the program. This includes global variables as well as
+   temporal bindings held on the stack. Bindings are defined as a mapping of
+   name to object reference pointer, and later bindings can override earlier
+   bindings.
+
+   I'm envisioning a tree of bindings, grouped by scope. The root node is the
+   full set of global variables. Child scopes are specific to threads/stacks.
+   For starts, we'd only have a single child of the root, for the single stack
+   this language will support up-front. A stack node would essentially turn into
+   a linked list where every stack frame gets its own node, for its own scope.
+
+   Technically this can be implemented with the stack itself, I suppose. I do 
+   control the shape of the stack:
+
+   -- frame 0 --------------------
+   call return instruction pointer (what to execute after call)
+   call return base pointer        (address of previous base pointer)
+   binding reference
+   binding reference
+   binding reference
+   param reference 2
+   param reference 1
+   result reference
+   -- frame 1 --------------------
+
+   If everything on the stack that's not a saved ~rip~ or ~rbp~ value is an
+   object reference, then it shouldn't be that hard to traverse the stack and
+   poke around from the gc side.
+
+   What does the runtime need to run the mark phase? Just the current ~rsp~ and
+   ~rbp~ values. From there it can hop up the stack frames. 
+
+   write a simple example of traversing up the stack frames in c:
+   - pass in ~rsp~, ~rbp~ from the asm side
+   - hop up the frames until we hit the top (what's at the top?)
+   
+   Actually, starting to think traversing the stack frames via base pointers is
+   a bad idea. It isn't really a standard any more, libunwind uses DWARF
+   instead. It is completely optional in amd64 anyway. And, at least with the
+   libc _start init stuff built into the executable, I can't figure out how to
+   reliably tell when I've hit the top of the stack.
+
+   An alternative could be to bake gc setup code into the main method,
+   specially. With that, I should be able to create a gc instance on the heap 
+   and store a pointer to it in a global variable. From that gc instance I could
+   allocate object references anywhere in the program. When allocating them, I
+   would store them in a chunk of memory in the current stack frame, with the
+   first 8 bytes being a pointer to the chunk of memory in the previous stack 
+   frame, and so on. The main stack frame would store a chunk of memory with
+   a null pointer, to indicate that we had hit the top of the stack.
+
+   OR: we could just store the ~rbp~ of the main method in a global variable so
+   that we'd know when to stop unwinding the stack. 
+
+   *This is the simplest answer!* 
+
+   So next up:
+
+   - investigate setting global variables in a .DATA section or some such when 
+     generating the main method.
+
+   - investigate making a c library that can be linked into the generated code,
+     and which the generated code can call functions from.
+
+   - write proof of concept code in the c library to traverse the stack based 
+     on the global 'stop' variable for the main method's base pointer. call this
+     from the generated code.
+
+   This will get me a shell of a runtime and gc that will actually work with my
+   language.
+
+* Much later on
+<2017-04-26 Wed>
+
+At this point I have demonstrated working gc against atoms and lists from
+assembly. It is a tracing mark-and-sweep jit as planned. Written in c. The
+assembly is hand-written, it lives in [[file:manual-gc-test.s]]. I haven't tested it
+extensively, there are bound to be bugs. That said, it is more interesting right
+now to move on to revisiting the compiler and attempting to use the runtime.
+Once the compiler works well enough, the tests can be expressed in the native
+language instead of assembly. This will make good tests much easier to write.
+
+Diving into the compiler revisit:
+1. both ast and IL code need to be reconsidered
+2. when setting up a main method, init and teardown runtime
+3. when allocating data structures, use runtime
+
+** what were the pain points in the previous iteration?
+   - it was hard to compose fragments of assembly
+   - it was hard to figure out how best to return values from functions
+   - it was hard to generate labels and other things that are supposed to be globally unique
+     without maintaining mutability
+   - the inst library wasn't consistent in its syntax for instructions, and awkward
+   - it didn't seem like there was much/enough information in the ast. what goes in there?
+
+** should probably start from scratch
+   Just use the old one as a reference.
+
+* Version 2
+<2017-05-13 Sat>
+
+I didn't quite start from scratch, but I did rewrite the entire compile phase. 
+All existing language features make use of the garbage-collected runtime I made. 
+I have if, let, constants, and a basic main entry point working such that all 
+the unit tests I had before pass, and then some (in the case of a working 'let').
+
+Now I'm looking for what to do next. From doing some overview, there are lots of
+possibilities. I'm looking for the particularly motivating ones, the ones that
+keep digging into core language functionality rather than feature-completeness.
+
+** Prospects
+
+   X. *Clean up Entry Point*: Currently the entry point is conflated with the function compilation. Ideally
+      you'd define a function with the right name ('-main' or whatever), and then when you run the program there is
+      standard logic to set up the runtime, and then invoke that method with the supplied unix arguments, etc.
+
+   X. *Basic Math*: I need 
+      X signed integers
+      X minus
+      X inc, dec, *, /, mod < > <= >=
+
+   X. I'm going to need to start a standard library.
+
+   X. I'm going to need list manipulation mechanisms. etc.
+      X first, rest, cons, count, empty?
+
+   X. I'm going to need a looping mechanism. A loop/recur equivalent.
+      
+   1. I'm going to need basic string manipulation, see clojure library for favorites
+
+** Other Ideas
+   It occurrs to me, if I'm not using registers heavily, I may as well start storing the runtime pointer in
+   there. I will need it all the time, and it will save on instructions and memory fussing. OCaml does this,
+   seems like a good idea.
+
+* On Keeping the Stack 16-byte aligned
+  <2017-05-14 Sun>
+
+  This is pretty annoying, it means rather than just pushing/popping from the stack (which is often natural)
+  I have to precompute the locations of everything in advance. It makes my code more complex. Rather than doing
+  this, I could just formally define the C calling conventions such that I only bother to align the stack when
+  calling a c method.
+
+  Of course, to know how to align the stack at any time means I need to know how big the stack is currently. I could
+  stick the start of the stack address in memory somewhere and refer to it when needed. But this seems gross. Ok fine
+  I will just align the damn stack.
+
+  It seems this is a MacOS ABI thing, at minimum. Might be true for other os's too.
+
+* revisit heap layout/visibility
+  <2017-05-14 Sun> I've noticed that for instance ocaml's compiler is aware of the layout of its heap, including
+  specific parts of the fields of things on the heap. It would be far more efficient...
+* new feature ideas
+  <2017-05-15 Mon>
+** how to implement lambdas
+   - add a new value type to the runtime
+   - contains the function symbol name
+   - contains any curried parameters for partial application
+   - support generating code to invoke it
+   - identify references to function during analysis, memoize this as a constant
+** how to implement closures
+   - add a new value type to the runtime
+   - contains the function symbol name
+   - contains a map of binding-name -> value pointer for all the closed-over bindings
+   - the generated code for the lambda takes these bindings as initial arguments to the function
+     specified in order of initial usage within the closure.
+   - support generating code to invoke it
+     - probably have to do some reflection to determine what kind of invocable it is?
