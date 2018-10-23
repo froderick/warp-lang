@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <wchar.h>
+#include <stdbool.h>
 
 typedef enum TokenType {
   // invalid token
@@ -23,6 +24,7 @@ typedef struct Token {
   wchar_t *text;
   unsigned long position;
   unsigned long length;
+  bool textAllocated; // if indicates whether or not the text string is on the heap
 } Token;
 
 void freeToken(Token *t);

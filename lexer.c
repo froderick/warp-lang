@@ -68,17 +68,20 @@ void clear(StringBuffer *b) {
  * Token Model and Lexer
  */
 
-Token* makeToken(TokenType type, wchar_t *text, unsigned long position, unsigned long length) {
+Token* makeToken(TokenType type, wchar_t *text, unsigned long position, unsigned long length, bool textAllocated) {
   Token *t = malloc(sizeof(Token));
   t->type = type;
   t->text = text;
   t->position = position;
   t->length = length;
+  t->textAllocated = textAllocated;
   return t;
 }
 
 void freeToken(Token *t) {
-  free(t->text);
+  if (t->textAllocated) {
+    free(t->text);
+  }
   free(t);
 }
 
@@ -152,7 +155,7 @@ Token* readNumber(FILE* stream, LexerState_t s, int *err, wchar_t first) {
       s->position = s->position - 1;
 
       wchar_t *text = makeStringFromBuffer(s->b);
-      Token* t = makeToken(T_NUMBER, text, s->position, s->b->usedChars);
+      Token* t = makeToken(T_NUMBER, text, s->position, s->b->usedChars, true);
       return t;
     }
   }
@@ -197,7 +200,7 @@ Token* readSymbol(FILE* stream, LexerState_t s, int *err, wchar_t first) {
         type = T_SYMBOL;
       }
 
-      return makeToken(type, text, s->position, s->b->usedChars);
+      return makeToken(type, text, s->position, s->b->usedChars, true);
     }
   }
 }
@@ -230,7 +233,7 @@ Token* readKeyword(FILE* stream, LexerState_t s, int *err) {
       }
 
       wchar_t *text = makeStringFromBuffer(s->b);
-      Token* t = makeToken(T_KEYWORD, text, s->position, s->b->usedChars);
+      Token* t = makeToken(T_KEYWORD, text, s->position, s->b->usedChars, true);
       return t;
     }
   }
@@ -253,7 +256,7 @@ Token* readString(FILE* stream, LexerState_t s, int *err) {
 
     if (!escape && ch == L'"') {
       wchar_t *text = makeStringFromBuffer(s->b);
-      return makeToken(T_STRING, text, s->position, s->b->usedChars);
+      return makeToken(T_STRING, text, s->position, s->b->usedChars, true);
     }
     else {
       append(s->b, ch);
@@ -265,14 +268,6 @@ Token* readString(FILE* stream, LexerState_t s, int *err) {
       }
     }
   }
-}
-
-wchar_t* makeString(wchar_t *s) {
-  int len = wcslen(s);
-  wchar_t *text = malloc((len * sizeof(wchar_t)) + 1);
-  wcsncpy(text, s, len);
-  text[len] = L'\0';
-  return text;
 }
 
 Token* readToken(FILE* stream, LexerState_t s, int *err) {
@@ -297,13 +292,13 @@ Token* readToken(FILE* stream, LexerState_t s, int *err) {
 
   // single-character tokens, do not require buffering
   if (ch == L'(') {
-    return makeToken(T_OPAREN, makeString(L"("), s->position, 1);
+    return makeToken(T_OPAREN, L"(", s->position, 1, false);
   }
   if (ch == L')') {
-    return makeToken(T_CPAREN, makeString(L")"), s->position, 1);
+    return makeToken(T_CPAREN, L")", s->position, 1, false);
   }
   if (ch == L'\'') {
-    return makeToken(T_QUOTE, makeString(L"'"), s->position, 1);
+    return makeToken(T_QUOTE, L"'", s->position, 1, false);
   }
 
   // multi-character tokens
