@@ -27,13 +27,13 @@ typedef struct Token {
   bool textAllocated; // if indicates whether or not the text string is on the heap
 } Token;
 
-void freeToken(Token *t);
+void tokenFree(Token *t);
 
 typedef struct LexerState *LexerState_t;
 
-LexerState_t makeLexerState();
+LexerState_t lexerStateMake();
 
-void freeLexerState(LexerState_t s);
+void lexerStateFree(LexerState_t s);
 
 /**
  * Attempts to read a token from the supplied stream. If it is successful, it
@@ -47,7 +47,7 @@ void freeLexerState(LexerState_t s);
  *
  * All other errors will result in setting the `err` pointer to ERR_IO.
  */
-Token* readToken(FILE* stream, LexerState_t s, int *err);
+Token* tokenRead(FILE *stream, LexerState_t s, int *err);
 
 char* tokenName(TokenType type);
 
@@ -57,5 +57,5 @@ typedef struct Tokens {
   unsigned long size;
 } Tokens;
 
-Tokens* readTokens(FILE* stream, int *err);
-void freeTokens(Tokens *l);
+Tokens* tokensRead(FILE *stream, int *err);
+void tokensFree(Tokens *l);

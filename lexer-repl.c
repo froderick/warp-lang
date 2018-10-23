@@ -3,11 +3,11 @@
 
 int main(void) {
 
-  LexerState_t s = makeLexerState();
+  LexerState_t s = lexerStateMake();
   int err;
   Token* t;
   while (1) {
-    t = readToken(stdin, s, &err);
+    t = tokenRead(stdin, s, &err);
     if (t == NULL) {
       printf("err: %i\n", err);
     }

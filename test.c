@@ -59,7 +59,7 @@ START_TEST(basic) {
   }
 
   int err;
-  Tokens *tokens = readTokens(stream, &err);
+  Tokens *tokens = tokensRead(stream, &err);
   fclose(stream);
 
   //printTokens(tokens);
@@ -76,7 +76,7 @@ START_TEST(basic) {
   assertToken(tokens->data[8], T_FALSE,   L"false", 32, 5);
   assertToken(tokens->data[9], T_NIL,     L"nil",   36, 3);
 
-  freeTokens(tokens);
+    tokensFree(tokens);
 }
 END_TEST
 

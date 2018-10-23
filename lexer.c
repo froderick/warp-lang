@@ -19,34 +19,33 @@ typedef struct StringBuffer {
   unsigned long usedChars;
 } StringBuffer;
 
-unsigned long allocatedBytes(StringBuffer *buf) {
+unsigned long bufferAllocatedBytes(StringBuffer *buf) {
   return sizeof(wchar_t) * buf->allocatedChars;
 }
 
-unsigned long usedBytes(StringBuffer *buf) {
+unsigned long bufferUnusedBytes(StringBuffer *buf) {
   return sizeof(wchar_t) * buf->usedChars;
 }
 
-StringBuffer* makeBuffer() {
+StringBuffer* bufferMake() {
   StringBuffer *b = malloc(sizeof(StringBuffer));
   b->usedChars = 0;
   b->allocatedChars = 256;
-  b->data = malloc(allocatedBytes(b));
-  bzero(b->data, allocatedBytes(b));
+  b->data = malloc(bufferAllocatedBytes(b));
+  bzero(b->data, bufferAllocatedBytes(b));
   return b;
 }
 
-void freeBuffer(StringBuffer *b) {
+void bufferFree(StringBuffer *b) {
   free(b->data);
   free(b);
 }
 
-int append(StringBuffer *b, wchar_t ch) {
+int bufferAppend(StringBuffer *b, wchar_t ch) {
 
   if (b->usedChars + 1 == (b->allocatedChars - 1)) {  
 
-
-    unsigned long oldSizeInBytes = allocatedBytes(b);
+    unsigned long oldSizeInBytes = bufferAllocatedBytes(b);
     unsigned long newSizeInBytes = oldSizeInBytes * 2;
 
     b->data= realloc(b->data, newSizeInBytes);
@@ -59,16 +58,23 @@ int append(StringBuffer *b, wchar_t ch) {
   return 0;
 }
 
-void clear(StringBuffer *b) {
-  bzero(b->data, usedBytes(b));
+void bufferClear(StringBuffer *b) {
+  bzero(b->data, bufferUnusedBytes(b));
   b->usedChars = 0;
+}
+
+wchar_t* bufferMakeString(StringBuffer *b) {
+  wchar_t *text = malloc(sizeof(wchar_t) * (b->usedChars + 1));
+  wcsncpy(text, b->data, b->usedChars);
+  text[b->usedChars] = L'\0';
+  return text;
 }
 
 /*
  * Token Model and Lexer
  */
 
-Token* makeToken(TokenType type, wchar_t *text, unsigned long position, unsigned long length, bool textAllocated) {
+Token* tokenMake(TokenType type, wchar_t *text, unsigned long position, unsigned long length, bool textAllocated) {
   Token *t = malloc(sizeof(Token));
   t->type = type;
   t->text = text;
@@ -78,7 +84,7 @@ Token* makeToken(TokenType type, wchar_t *text, unsigned long position, unsigned
   return t;
 }
 
-void freeToken(Token *t) {
+void tokenFree(Token *t) {
   if (t->textAllocated) {
     free(t->text);
   }
@@ -90,15 +96,15 @@ typedef struct LexerState {
   StringBuffer *b;
 } LexerState;
 
-LexerState_t makeLexerState() {
+LexerState_t lexerStateMake() {
   LexerState_t s = malloc(sizeof(LexerState));
   s->position = 0;
-  s->b = makeBuffer();
+  s->b = bufferMake();
   return s;
 }
 
-void freeLexerState(LexerState_t s) {
-  free(s->b);
+void lexerStateFree(LexerState_t s) {
+  bufferFree(s->b);
   free(s);
 }
 
@@ -124,15 +130,8 @@ bool isFalse(wchar_t *text) {
   return wcscmp(text, L"false") == 0;
 }
 
-wchar_t* makeStringFromBuffer(StringBuffer *b) {
-  wchar_t *text = malloc(sizeof(wchar_t) * (b->usedChars + 1));
-  wcsncpy(text, b->data, b->usedChars);
-  text[b->usedChars] = L'\0';
-  return text;
-}
-
 Token* readNumber(FILE* stream, LexerState_t s, int *err, wchar_t first) {
-  append(s->b, first);
+  bufferAppend(s->b, first);
   // keep reading until char is not numeric, then push back
   while (true) {
       
@@ -144,7 +143,7 @@ Token* readNumber(FILE* stream, LexerState_t s, int *err, wchar_t first) {
     s->position = s->position + 1;
 
     if (iswdigit(ch)) {
-      append(s->b, ch);
+      bufferAppend(s->b, ch);
     }
     else {
       wint_t result = ungetwc(ch, stream);
@@ -154,15 +153,15 @@ Token* readNumber(FILE* stream, LexerState_t s, int *err, wchar_t first) {
       }
       s->position = s->position - 1;
 
-      wchar_t *text = makeStringFromBuffer(s->b);
-      Token* t = makeToken(T_NUMBER, text, s->position, s->b->usedChars, true);
+      wchar_t *text = bufferMakeString(s->b);
+      Token* t = tokenMake(T_NUMBER, text, s->position, s->b->usedChars, true);
       return t;
     }
   }
 }
 
 Token* readSymbol(FILE* stream, LexerState_t s, int *err, wchar_t first) {
-  append(s->b, first);
+  bufferAppend(s->b, first);
   // keep reading until char is not alphanumeric, then push back
   while (true) {
       
@@ -174,7 +173,7 @@ Token* readSymbol(FILE* stream, LexerState_t s, int *err, wchar_t first) {
     s->position = s->position + 1;
 
     if (iswalnum(ch)) {
-      append(s->b, ch);
+      bufferAppend(s->b, ch);
     }
     else {
       wint_t result = ungetwc(ch, stream);
@@ -184,7 +183,7 @@ Token* readSymbol(FILE* stream, LexerState_t s, int *err, wchar_t first) {
       }
       s->position = s->position - 1;
 
-      wchar_t *text = makeStringFromBuffer(s->b);
+      wchar_t *text = bufferMakeString(s->b);
 
       TokenType type = T_NONE;
       if (isNil(text)) {
@@ -200,13 +199,14 @@ Token* readSymbol(FILE* stream, LexerState_t s, int *err, wchar_t first) {
         type = T_SYMBOL;
       }
 
-      return makeToken(type, text, s->position, s->b->usedChars, true);
+      return tokenMake(type, text, s->position, s->b->usedChars, true);
     }
   }
 }
 
 Token* readKeyword(FILE* stream, LexerState_t s, int *err) {
   // keep reading until char is not alphanumeric, then push back
+
   while (true) {
       
     wint_t ch = fgetwc(stream);
@@ -217,7 +217,7 @@ Token* readKeyword(FILE* stream, LexerState_t s, int *err) {
     s->position = s->position + 1;
 
     if (iswalnum(ch)) {
-      append(s->b, ch);
+      bufferAppend(s->b, ch);
     }
     else {
       wint_t result = ungetwc(ch, stream);
@@ -232,13 +232,12 @@ Token* readKeyword(FILE* stream, LexerState_t s, int *err) {
         return NULL;
       }
 
-      wchar_t *text = makeStringFromBuffer(s->b);
-      Token* t = makeToken(T_KEYWORD, text, s->position, s->b->usedChars, true);
+      wchar_t *text = bufferMakeString(s->b);
+      Token* t = tokenMake(T_KEYWORD, text, s->position, s->b->usedChars, true);
       return t;
     }
   }
 }
-
 
 Token* readString(FILE* stream, LexerState_t s, int *err) {
   // keep reading until char is a non-escaped quote
@@ -255,11 +254,11 @@ Token* readString(FILE* stream, LexerState_t s, int *err) {
     s->position = s->position + 1;
 
     if (!escape && ch == L'"') {
-      wchar_t *text = makeStringFromBuffer(s->b);
-      return makeToken(T_STRING, text, s->position, s->b->usedChars, true);
+      wchar_t *text = bufferMakeString(s->b);
+      return tokenMake(T_STRING, text, s->position, s->b->usedChars, true);
     }
     else {
-      append(s->b, ch);
+      bufferAppend(s->b, ch);
       if (!escape && ch == L'\\') {
         escape = true;
       }
@@ -270,9 +269,9 @@ Token* readString(FILE* stream, LexerState_t s, int *err) {
   }
 }
 
-Token* readToken(FILE* stream, LexerState_t s, int *err) {
+Token* tokenRead(FILE *stream, LexerState_t s, int *err) {
 
-  clear(s->b);
+  bufferClear(s->b);
 
   wint_t ch = fgetwc(stream);
   if (ch == WEOF) {
@@ -292,13 +291,13 @@ Token* readToken(FILE* stream, LexerState_t s, int *err) {
 
   // single-character tokens, do not require buffering
   if (ch == L'(') {
-    return makeToken(T_OPAREN, L"(", s->position, 1, false);
+    return tokenMake(T_OPAREN, L"(", s->position, 1, false);
   }
   if (ch == L')') {
-    return makeToken(T_CPAREN, L")", s->position, 1, false);
+    return tokenMake(T_CPAREN, L")", s->position, 1, false);
   }
   if (ch == L'\'') {
-    return makeToken(T_QUOTE, L"'", s->position, 1, false);
+    return tokenMake(T_QUOTE, L"'", s->position, 1, false);
   }
 
   // multi-character tokens
@@ -322,7 +321,7 @@ Token* readToken(FILE* stream, LexerState_t s, int *err) {
   return NULL;
 }
 
-Tokens* makeTokens() {
+Tokens* tokensMake() {
   Tokens *l = malloc(sizeof(Tokens));
   l->used = 0;
   l->size = 256;
@@ -331,15 +330,15 @@ Tokens* makeTokens() {
   return l;
 }
 
-void freeTokens(Tokens *l) {
+void tokensFree(Tokens *l) {
   for (unsigned long i=0; i < l->used; i++) {
-    freeToken(l->data[i]);
+    tokenFree(l->data[i]);
   }
   free(l->data);
   free(l);
 }
 
-int addToken(Tokens *l, Token *t) {
+int tokensAdd(Tokens *l, Token *t) {
 
   if (l->used == l->size) {
     l->size = l->size * 2;
@@ -352,22 +351,22 @@ int addToken(Tokens *l, Token *t) {
   return 0;
 }
 
-Tokens* readTokens(FILE* stream, int *err) {
-  LexerState_t s = makeLexerState();
-  Tokens *tokens = makeTokens();
+Tokens* tokensRead(FILE *stream, int *err) {
+  LexerState_t s = lexerStateMake();
+  Tokens *tokens = tokensMake();
 
   Token* t;
   while (1) {
-    t = readToken(stream, s, err);
+    t = tokenRead(stream, s, err);
     if (t == NULL) {
       break;
     }
     else {
-      addToken(tokens, t);
+      tokensAdd(tokens, t);
     }
   }
 
-  freeLexerState(s);
+  lexerStateFree(s);
   return tokens;
 }
 
