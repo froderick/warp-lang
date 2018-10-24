@@ -10,6 +10,10 @@ set(CMAKE_C_STANDARD 11)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(check REQUIRED check)
 
+add_library(errors errors.c)
+add_executable(errors-example errors-example.c)
+target_link_libraries(errors-example errors)
+
 add_library(lexer lexer.c)
 
 add_executable(tests test.c)
