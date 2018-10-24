@@ -1,7 +1,7 @@
 ## Building
 
 ```
-brew install check
+brew install check cmake
 ```
 
 ## Notables
