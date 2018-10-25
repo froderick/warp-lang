@@ -3,10 +3,16 @@
 #include "lexer.h"
 
 int main(void) {
-  LexerState_t s = lexerStateMake();
+
+  LexerState_t s;
+
+  if (tryLexerStateMake(&s)) {
+    goto error;
+  }
+
   Token* t;
   while (1) {
-    bool error = tokenRead(stdin, s, &t);
+    bool error = tryTokenRead(stdin, s, &t);
     if (error) {
       printf("encountered errors:\n");
       printErrors();
@@ -16,6 +22,11 @@ int main(void) {
     }
   }
   return 0;
+
+  error:
+    printf("encountered terminal errors:\n");
+    printErrors();
+    exit(-1);
 }
 
 

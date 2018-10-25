@@ -74,7 +74,7 @@ START_TEST(basic) {
 
   Tokens *tokens;
 
-  bool error = tokensRead(stream, &tokens);
+  bool error = tryTokensRead(stream, &tokens);
   if (error) {
     printErrors();
     ck_assert_msg(!error, "lexer encountered errors");

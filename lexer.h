@@ -31,7 +31,7 @@ void tokenFree(Token *t);
 
 typedef struct LexerState *LexerState_t;
 
-LexerState_t lexerStateMake();
+bool tryLexerStateMake(LexerState_t *ptr);
 
 void lexerStateFree(LexerState_t s);
 
@@ -49,7 +49,7 @@ void lexerStateFree(LexerState_t s);
  *
  * All other errors will result in setting the `err` pointer to ERR_IO.
  */
-bool tokenRead(FILE *stream, LexerState_t s, Token **token);
+bool tryTokenRead(FILE *stream, LexerState_t s, Token **token);
 
 const char* tokenName(TokenType type);
 
@@ -59,5 +59,5 @@ typedef struct Tokens {
   unsigned long size;
 } Tokens;
 
-bool tokensRead(FILE *stream, Tokens **tokens);
+bool tryTokensRead(FILE *stream, Tokens **tokens);
 void tokensFree(Tokens *l);
