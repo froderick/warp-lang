@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <execinfo.h>
 #include <check.h>
+#include <errno.h>
+#include "errors.h"
 #include "lexer.h"
 
 #define handle_error(msg) \
@@ -48,6 +50,18 @@ void assertToken(Token *t,
   ck_assert_int_eq(t->length, length);
 }
 
+#define SYSTEM "lexer-test"
+
+void printStacktrace() {
+  void* callstack[128];
+  int i, frames = backtrace(callstack, 128);
+  char** strs = backtrace_symbols(callstack, frames);
+  for (i = 0; i < frames; ++i) {
+    printf("%s\n", strs[i]);
+  }
+  free(strs);
+}
+
 START_TEST(basic) {
 
   const char * tmpFile = "/tmp/tmp.txt";
@@ -58,9 +72,20 @@ START_TEST(basic) {
     handle_error("fopen");
   }
 
-  int err;
-  Tokens *tokens = tokensRead(stream, &err);
-  fclose(stream);
+  Tokens *tokens;
+
+  bool error = tokensRead(stream, &tokens);
+  if (error) {
+    printErrors();
+    ck_assert_msg(!error, "lexer encountered errors");
+  }
+
+  if (fclose(stream) != 0) {
+    reportErrnoError(SYSTEM, "errno-error");
+    printErrors();
+    printStacktrace();
+    exit(-1);
+  }
 
   //printTokens(tokens);
 

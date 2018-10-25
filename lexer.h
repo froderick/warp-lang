@@ -35,7 +35,9 @@ LexerState_t lexerStateMake();
 
 void lexerStateFree(LexerState_t s);
 
+// TODO: these docs are out of date
 /**
+ *
  * Attempts to read a token from the supplied stream. If it is successful, it
  * returns a pointer to the newly allocated token struct. It is the caller's
  * job to free the token memory when it is no longer used. 
@@ -47,9 +49,9 @@ void lexerStateFree(LexerState_t s);
  *
  * All other errors will result in setting the `err` pointer to ERR_IO.
  */
-Token* tokenRead(FILE *stream, LexerState_t s, int *err);
+bool tokenRead(FILE *stream, LexerState_t s, Token **token);
 
-char* tokenName(TokenType type);
+const char* tokenName(TokenType type);
 
 typedef struct Tokens {
   Token **data;
@@ -57,5 +59,5 @@ typedef struct Tokens {
   unsigned long size;
 } Tokens;
 
-Tokens* tokensRead(FILE *stream, int *err);
+bool tokensRead(FILE *stream, Tokens **tokens);
 void tokensFree(Tokens *l);

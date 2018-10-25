@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <wchar.h>
 #include <stdbool.h>
+#include <string.h>
+#include <errno.h>
 
 #include "errors.h"
 
@@ -43,6 +45,13 @@ void reportError(const char* system, const char* id, wchar_t* description) {
   }
 
   queue[head] = e;
+}
+
+void reportErrnoError(const char* system, const char* id) {
+  wchar_t buf[100];
+  char *errorString = strerror(errno);
+  mbstowcs(buf, errorString, 100);
+  reportError(system, id, buf);
 }
 
 unsigned int errorDepth() {
@@ -102,6 +111,7 @@ void printErrors() {
     }
   }
 }
+
 
 
 

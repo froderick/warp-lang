@@ -17,11 +17,11 @@ target_link_libraries(errors-example errors)
 add_library(lexer lexer.c)
 
 add_executable(tests test.c)
-target_link_libraries(tests lexer check)
+target_link_libraries(tests check errors lexer)
 target_compile_options(tests PRIVATE -g)
 
 add_executable(lexer-repl lexer-repl.c)
-target_link_libraries(lexer-repl lexer)
+target_link_libraries(lexer-repl errors lexer)
 
 enable_testing()
 add_test(tests tests)
