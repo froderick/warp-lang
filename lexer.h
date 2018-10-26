@@ -35,6 +35,10 @@ bool tryLexerStateMake(LexerState_t *ptr);
 
 void lexerStateFree(LexerState_t s);
 
+#define LEX_SUCCESS  0
+#define LEX_EOF      1
+#define LEX_ERROR    2
+
 // TODO: these docs are out of date
 /**
  *
@@ -49,12 +53,12 @@ void lexerStateFree(LexerState_t s);
  *
  * All other errors will result in setting the `err` pointer to ERR_IO.
  */
-bool tryTokenRead(FILE *stream, LexerState_t s, Token **token);
+int tryTokenRead(FILE *stream, LexerState_t s, Token *token);
 
 const char* tokenName(TokenType type);
 
 typedef struct Tokens {
-  Token **data;
+  Token *data;
   unsigned long used;
   unsigned long size;
 } Tokens;

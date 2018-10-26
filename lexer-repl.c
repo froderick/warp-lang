@@ -10,15 +10,21 @@ int main(void) {
     goto error;
   }
 
-  Token* t;
+  Token t;
   while (1) {
-    bool error = tryTokenRead(stdin, s, &t);
-    if (error) {
+    int read = tryTokenRead(stdin, s, &t);
+    if (read == LEX_EOF) {
+      continue;
+    }
+    else if (read == LEX_ERROR) {
       printf("encountered errors:\n");
       printErrors();
     }
+    else if (read == LEX_SUCCESS) {
+      printf("token: %ls (%s) %lu %lu\n", t.text, tokenName(t.type), t.position, t.length);
+    }
     else {
-      printf("token: %ls (%s) %lu %lu\n", t->text, tokenName(t->type), t->position, t->length);
+      printf("encountered unknown response from lexer: %i\n", read);
     }
   }
   return 0;

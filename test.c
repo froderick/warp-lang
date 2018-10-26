@@ -37,8 +37,8 @@ void spit(const char* file, const wchar_t* text) {
 
 void printTokens(Tokens* l) {
   for (unsigned long i=0; i < l->used; i++) {
-    Token *t = l->data[i];
-    printf("token: '%ls' (%s) %lu %lu\n", t->text, tokenName(t->type), t->position, t->length);
+    Token t = l->data[i];
+    printf("token: '%ls' (%s) %lu %lu\n", t.text, tokenName(t.type), t.position, t.length);
   }
 }
 
@@ -89,19 +89,21 @@ START_TEST(basic) {
 
   //printTokens(tokens);
 
-  ck_assert_int_eq(tokens->used, 10);
-  assertToken(tokens->data[0], T_OPAREN,  L"(",      1, 1);
-  assertToken(tokens->data[1], T_SYMBOL,  L"one",    4, 3);
-  assertToken(tokens->data[2], T_KEYWORD, L"two",    9, 3);
-  assertToken(tokens->data[3], T_NUMBER,  L"345",   13, 3);
-  assertToken(tokens->data[4], T_QUOTE,   L"'",     15, 1);
-  assertToken(tokens->data[5], T_STRING,  L"six",   20, 3);
-  assertToken(tokens->data[6], T_CPAREN,  L")",     21, 1);
-  assertToken(tokens->data[7], T_TRUE,    L"true",  26, 4);
-  assertToken(tokens->data[8], T_FALSE,   L"false", 32, 5);
-  assertToken(tokens->data[9], T_NIL,     L"nil",   36, 3);
+  // TODO: have I screwed up the pointer to the token array, or is the below syntax really needed?
 
-    tokensFree(tokens);
+  ck_assert_int_eq(tokens->used, 10);
+  assertToken(&(tokens->data[0 * sizeof(Token)]), T_OPAREN,  L"(",      1, 1);
+  assertToken(&(tokens->data[1 * sizeof(Token)]), T_SYMBOL,  L"one",    4, 3);
+  assertToken(&(tokens->data[2 * sizeof(Token)]), T_KEYWORD, L"two",    9, 3);
+  assertToken(&(tokens->data[3 * sizeof(Token)]), T_NUMBER,  L"345",   13, 3);
+  assertToken(&(tokens->data[4 * sizeof(Token)]), T_QUOTE,   L"'",     15, 1);
+  assertToken(&(tokens->data[5 * sizeof(Token)]), T_STRING,  L"six",   20, 3);
+  assertToken(&(tokens->data[6 * sizeof(Token)]), T_CPAREN,  L")",     21, 1);
+  assertToken(&(tokens->data[7 * sizeof(Token)]), T_TRUE,    L"true",  26, 4);
+  assertToken(&(tokens->data[8 * sizeof(Token)]), T_FALSE,   L"false", 32, 5);
+  assertToken(&(tokens->data[9 * sizeof(Token)]), T_NIL,     L"nil",   36, 3);
+
+  tokensFree(tokens);
 }
 END_TEST
 
