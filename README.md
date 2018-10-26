@@ -22,3 +22,13 @@ Functions should clear the stack when errors have been appropriately handled.
 
 Note that the max stack size is fixed. After its limit of unhandled errors has
 been reached (16) it will begin to drop old errors to make room for new ones.
+
+## Lexer TODO
+* is the error handling I came up with overly complicated, should I just make errors 
+  into ints and use logging for debugging problems?
+* each token needs to be tied to a range of characters in the original source file
+* see if I can reduce the code duplication any
+* support vectors, etc
+
+## Parser TODO
+* see what is salvageable from the past
