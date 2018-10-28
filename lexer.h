@@ -1,7 +1,5 @@
 #include <stdio.h>
 #include <wchar.h>
-// TODO: remove me
-#include <stdbool.h>
 
 #define LEX_SUCCESS  0
 #define LEX_EOF      1
