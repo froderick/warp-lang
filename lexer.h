@@ -34,13 +34,12 @@ typedef struct Token {
 
 typedef struct TokenStream *TokenStream_t;
 
-// TODO: fix these duplicated implementations
 int tryStreamMakeFile(char *filename, TokenStream_t *s);
 int tryStreamMake(FILE *file, TokenStream_t *s);
 
 int tryStreamNext(TokenStream_t s, Token **ptr);
 int tryStreamPeek(TokenStream_t s, Token **ptr);
 void tokenFree(Token *t);
-int streamFree(TokenStream_t s);
+int tryStreamFree(TokenStream_t s);
 
 

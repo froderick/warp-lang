@@ -128,7 +128,7 @@ START_TEST(basic) {
   assertToken(t, T_NIL,     L"nil",   36, 3);
   free(t);
 
-  ck_assert_int_eq(streamFree(stream), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamFree(stream), LEX_SUCCESS);
 }
 END_TEST
 

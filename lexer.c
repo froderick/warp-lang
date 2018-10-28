@@ -572,7 +572,6 @@ typedef struct TokenStream {
 int tryStreamMakeFile(char *filename, TokenStream **ptr) {
 
   FILE *file;
-  LexerState *l;
   TokenStream *s;
 
   file = fopen(filename, "r");
@@ -581,19 +580,10 @@ int tryStreamMakeFile(char *filename, TokenStream **ptr) {
     goto error;
   }
 
-  if (tryLexerStateMake(&l)) {
-    if (DEBUG) { printf("error: malloc-ing LexerState\n"); }
+  int error = tryStreamMake(file, &s);
+  if (error != LEX_SUCCESS) {
     goto error;
   }
-
-  s = malloc(sizeof(TokenStream));
-  if (s == NULL) {
-    if (DEBUG) { printf("error: malloc-ing TokenStream\n"); }
-    goto error;
-  }
-  s->file = file;
-  s->lexer = l;
-  s->next = NULL;
 
   *ptr = s;
   return OK;
@@ -605,8 +595,7 @@ int tryStreamMakeFile(char *filename, TokenStream **ptr) {
         printf("error: closing stream %s\n", errorString);
       }
     }
-    lexerStateFree(l);
-    free(s);
+    tryStreamFree(s);
     return ERROR;
 }
 
@@ -686,7 +675,7 @@ int tryStreamPeek(TokenStream *s, Token **ptr) {
   return read;
 }
 
-int streamFree(TokenStream *s) {
+int tryStreamFree(TokenStream *s) {
   if (s == NULL) {
     return OK;
   }
