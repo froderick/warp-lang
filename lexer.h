@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <wchar.h>
+// TODO: remove me
 #include <stdbool.h>
 
 #define LEX_SUCCESS  0
@@ -26,16 +27,17 @@ typedef enum TokenType {
 typedef struct Token {
   TokenType type;
   const char* typeName;
-  wchar_t *text;
   unsigned long position;
   unsigned long length;
-  bool textAllocated; // if indicates whether or not the text string is on the heap
+  wchar_t text[];
 } Token;
 
 typedef struct TokenStream *TokenStream_t;
 
+// TODO: fix these duplicated implementations
 int tryStreamMakeFile(char *filename, TokenStream_t *s);
 int tryStreamMake(FILE *file, TokenStream_t *s);
+
 int tryStreamNext(TokenStream_t s, Token **ptr);
 int tryStreamPeek(TokenStream_t s, Token **ptr);
 void tokenFree(Token *t);
