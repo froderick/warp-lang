@@ -10,18 +10,14 @@ set(CMAKE_C_STANDARD 11)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(check REQUIRED check)
 
-add_library(errors errors.c)
-add_executable(errors-example errors-example.c)
-target_link_libraries(errors-example errors)
-
 add_library(lexer lexer.c)
 
 add_executable(tests test.c)
-target_link_libraries(tests check errors lexer)
+target_link_libraries(tests check lexer)
 target_compile_options(tests PRIVATE -g)
 
 add_executable(lexer-repl lexer-repl.c)
-target_link_libraries(lexer-repl errors lexer)
+target_link_libraries(lexer-repl lexer)
 
 enable_testing()
 add_test(tests tests)

@@ -7,15 +7,9 @@
 #include <wctype.h>
 #include <errno.h>
 
-#include "errors.h"
 #include "lexer.h"
 
-#define SYSTEM "lexer"
-#define E_EOF "eof"
-#define E_OOM "oom"
-#define E_INVALID_TOKEN "invalid-token"
-#define E_UNKNOWN "unknown"
-
+// TODO: move this to a config.h
 #define DEBUG true
 
 /*
@@ -43,7 +37,7 @@ bool tryBufferMake(StringBuffer **ptr) {
   wchar_t *data;
 
   if (NULL == (b = malloc(sizeof(StringBuffer)))) {
-    reportError(SYSTEM, E_OOM, L"failed to allocate memory for making a string buffer");
+    if (DEBUG) { printf("error: malloc-ing StringBuffer\n"); }
     goto error;
   }
 
@@ -51,7 +45,7 @@ bool tryBufferMake(StringBuffer **ptr) {
   b->allocatedChars = 256;
 
   if (NULL == (data = malloc(bufferAllocatedBytes(b)))) {
-    reportError(SYSTEM, E_OOM, L"failed to allocate memory for making a string buffer data array");
+    if (DEBUG) { printf("error: malloc-ing StringBuffer array\n"); }
     goto error;
   }
 
@@ -59,12 +53,12 @@ bool tryBufferMake(StringBuffer **ptr) {
 
   b->data = data;
   *ptr = b;
-  return OK;
+  return LEX_SUCCESS;
 
   error:
     free(b);
     free(data);
-    return ERROR;
+    return LEX_ERROR;
 }
 
 void bufferFree(StringBuffer *b) {
@@ -96,21 +90,6 @@ int tryBufferAppend(StringBuffer *b, wchar_t ch) {
 void bufferClear(StringBuffer *b) {
   bzero(b->data, bufferUnusedBytes(b));
   b->usedChars = 0;
-}
-
-bool tryBufferMakeString(StringBuffer *b, wchar_t** ptr) {
-  wchar_t *text = malloc(sizeof(wchar_t) * (b->usedChars + 1));
-
-  if (text == NULL) {
-    reportError(SYSTEM, E_OOM, L"failed to allocate memory for making a string from a buffer");
-    return ERROR;
-  }
-
-  wcsncpy(text, b->data, b->usedChars);
-  text[b->usedChars] = L'\0';
-
-  *ptr = text;
-  return OK;
 }
 
 const char* tokenName(TokenType type) {
@@ -151,7 +130,7 @@ int tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsigned
   t = malloc(sizeof(Token) + (sizeof(wchar_t) * length) + 1);
   if (t == NULL) {
     if (DEBUG) { printf("error: malloc-ing LexerState\n"); }
-    return ERROR;
+    return LEX_ERROR;
   }
 
   t->type = type;
@@ -163,7 +142,7 @@ int tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsigned
 
   *ptr = t;
 
-  return OK;
+  return LEX_SUCCESS;
 }
 
 typedef struct LexerState {
@@ -190,19 +169,19 @@ bool tryLexerStateMake(LexerState **ptr) {
 
   s = malloc(sizeof(LexerState));
   if (s == NULL) {
-    reportError(SYSTEM, E_OOM, L"failed to allocate memory for making a LexerState");
+    if (DEBUG) { printf("error: malloc-ing LexerState\n"); }
     goto error;
   }
 
   s->position = 0;
   s->b = b;
   *ptr = s;
-  return OK;
+  return LEX_SUCCESS;
 
   error:
     bufferFree(b);
     free(s);
-    return ERROR;
+    return LEX_ERROR;
 }
 
 void lexerStateFree(LexerState *s) {
@@ -237,7 +216,7 @@ int tryReadChar(FILE *stream, LexerState *s, wchar_t* ch) {
       return LEX_EOF;
     }
     else {
-      reportErrnoError(SYSTEM, "stream token read error");
+      if (DEBUG) { printf("error: failed to read token from stream ->  '%s'\n", strerror(errno)); }
       return LEX_ERROR;
     }
   }
@@ -248,7 +227,7 @@ int tryReadChar(FILE *stream, LexerState *s, wchar_t* ch) {
 int tryUnreadChar(FILE *stream, LexerState *s, wchar_t ch) {
   wint_t result = ungetwc(ch, stream);
   if (result == WEOF && s->b->usedChars == 0) {
-    reportError(SYSTEM, E_EOF, L"token file descriptor ungetwc error");
+    if (DEBUG) { printf("error: failed to push character back onto stream"); }
     return LEX_ERROR;
   }
   s->position = s->position - 1;
@@ -321,7 +300,7 @@ bool tryReadSymbol(FILE *stream, LexerState *s, wchar_t first, Token **token) {
   }
 
   if (s->b->usedChars == 0) {
-    reportError(SYSTEM, E_INVALID_TOKEN, L"invalid token");
+    if (DEBUG) { printf("error: symbol token type cannot be empty"); }
     return LEX_ERROR;
   }
 
@@ -376,8 +355,8 @@ bool tryReadKeyword(FILE *stream, LexerState *s, Token **token) {
       }
 
       if (s->b->usedChars == 0) {
-        reportError(SYSTEM, E_INVALID_TOKEN, L"invalid token");
-        return ERROR;
+        if (DEBUG) { printf("error: keyword token type cannot be empty"); }
+        return LEX_ERROR;
       }
 
       int error = tryTokenInitFromLexer(s, T_KEYWORD, token);
@@ -385,7 +364,7 @@ bool tryReadKeyword(FILE *stream, LexerState *s, Token **token) {
         return LEX_ERROR;
       }
 
-      return OK;
+      return LEX_SUCCESS;
     }
   }
 }
@@ -410,7 +389,7 @@ bool tryReadString(FILE *stream, LexerState *s, Token **token) {
         return LEX_ERROR;
       }
 
-      return OK;
+      return LEX_SUCCESS;
     }
     else {
       tryBufferAppend(s->b, ch);
@@ -434,7 +413,7 @@ int tryTokenRead(FILE *stream, LexerState *s, Token **token) {
       return LEX_EOF; // end of stream, no tokens left to parse
     }
     else {
-      reportErrnoError(SYSTEM, "stream token read error");
+      if (DEBUG) { printf("error: error reading tokenf from stream -> '%s'\n", strerror(errno)); }
       return LEX_ERROR;
     }
   }
@@ -447,7 +426,7 @@ int tryTokenRead(FILE *stream, LexerState *s, Token **token) {
         return LEX_EOF;
       }
       else {
-        reportError(SYSTEM, E_EOF, L"put eof error here");
+        if (DEBUG) { printf("error: error reading tokenf from stream -> '%s'\n", strerror(errno)); }
         return LEX_ERROR;
       }
     }
@@ -493,74 +472,9 @@ int tryTokenRead(FILE *stream, LexerState *s, Token **token) {
 
   // invalid token
   else {
-    reportError(SYSTEM, E_INVALID_TOKEN, L"encountered invalid token: ...");
-    return ERROR;
+    if (DEBUG) { printf("error: unrecognized token '%lc'\n", ch); };
+    return LEX_ERROR;
   }
-}
-
-typedef struct Tokens {
-  Token *data;
-  unsigned long used;
-  unsigned long size;
-} Tokens;
-
-bool tryTokensMake(Tokens **ptr) {
-
-  Tokens *l;
-  Token *tokens;
-
-  if (NULL == (l = malloc(sizeof(Tokens)))) {
-    reportError(SYSTEM, E_OOM, L"failed to create Tokens");
-    goto error;
-  }
-
-  l->used = 0;
-  l->size = 256;
-
-  if (NULL == (tokens = malloc(l->size * sizeof(Token)))) {
-    reportError(SYSTEM, E_OOM, L"failed to create Tokens buffer array");
-    goto error;
-  }
-
-  l->data = tokens;
-  bzero(l->data, l->size * sizeof(Token));
-
-  *ptr = l;
-  return OK;
-
-  error:
-    free(l);
-    free(tokens);
-    return ERROR;
-}
-
-void tokensFree(Tokens *l) {
-  if (l != NULL) {
-    free(l->data);
-  }
-  free(l);
-}
-
-/*
- * if the token data array is full, double its size
- * return a pointer to the next free token address in the array
- */
-bool tryTokensGrow(Tokens *l, Token **t) {
-
-  if (l->used == l->size) {
-    l->size = l->size * 2;
-    l->data = realloc(l->data, l->size * sizeof(Token));
-
-    if (l->data == NULL) {
-      reportError(SYSTEM, E_OOM, L"failed to double size of token buffer via realloc");
-      return ERROR;
-    }
-  }
-
-  *t = l->data + (l->used * sizeof(Token));
-  l->used = l->used + 1;
-
-  return OK;
 }
 
 typedef struct TokenStream {
@@ -586,7 +500,7 @@ int tryStreamMakeFile(char *filename, TokenStream **ptr) {
   }
 
   *ptr = s;
-  return OK;
+  return LEX_SUCCESS;
 
   error:
     if (file != NULL && fclose(file) != 0) {
@@ -596,9 +510,10 @@ int tryStreamMakeFile(char *filename, TokenStream **ptr) {
       }
     }
     tryStreamFree(s);
-    return ERROR;
+    return LEX_ERROR;
 }
 
+// TODO: update all docs on errors returned
 int tryStreamMake(FILE *file, TokenStream **ptr) {
 
   LexerState *l;
@@ -619,12 +534,12 @@ int tryStreamMake(FILE *file, TokenStream **ptr) {
   s->next = NULL;
 
   *ptr = s;
-  return OK;
+  return LEX_SUCCESS;
 
   error:
   lexerStateFree(l);
   free(s);
-  return ERROR;
+  return LEX_ERROR;
 }
 
 int tryStreamNext(TokenStream *s, Token **ptr) {
@@ -677,7 +592,7 @@ int tryStreamPeek(TokenStream *s, Token **ptr) {
 
 int tryStreamFree(TokenStream *s) {
   if (s == NULL) {
-    return OK;
+    return LEX_SUCCESS;
   }
 
   int closeError = 0;

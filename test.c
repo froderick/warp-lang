@@ -5,7 +5,6 @@
 #include <execinfo.h>
 #include <check.h>
 #include <errno.h>
-#include "errors.h"
 #include "lexer.h"
 
 #define handle_error(msg) \

@@ -1,5 +1,4 @@
 #include <stdlib.h>
-#include "errors.h"
 #include "lexer.h"
 
 int main(void) {
@@ -17,8 +16,7 @@ int main(void) {
       continue;
     }
     else if (read == LEX_ERROR) {
-      printf("encountered errors:\n");
-      printErrors();
+      printf("> encountered lexer error\n\n");
     }
     else if (read == LEX_SUCCESS) {
       printf("token: %ls (%s) %lu %lu\n", t->text, t->typeName, t->position, t->length);
@@ -31,8 +29,7 @@ int main(void) {
   return 0;
 
   error:
-    printf("encountered terminal errors:\n");
-    printErrors();
+    printf("encountered terminal errors\n");
     exit(-1);
 }
 
