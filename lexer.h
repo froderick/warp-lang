@@ -27,8 +27,6 @@ typedef struct Token {
   bool textAllocated; // if indicates whether or not the text string is on the heap
 } Token;
 
-void tokenFree(Token *t);
-
 typedef struct LexerState *LexerState_t;
 
 bool tryLexerStateMake(LexerState_t *ptr);
@@ -65,3 +63,15 @@ typedef struct Tokens {
 
 bool tryTokensRead(FILE *stream, Tokens **tokens);
 void tokensFree(Tokens *l);
+
+typedef struct TokenStream *TokenStream_t;
+
+int tryStreamMake(char *filename, TokenStream_t *s);
+int tryStreamNext(TokenStream_t s, Token **ptr);
+int tryStreamPeek(TokenStream_t s, Token **ptr);
+int streamFree(TokenStream_t s);
+
+/*
+ * token - units of the stream
+ * stream - a sequence of tokens
+ */

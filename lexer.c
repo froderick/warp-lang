@@ -5,6 +5,7 @@
 #include <strings.h>
 #include <stdbool.h>
 #include <wctype.h>
+#include <errno.h>
 
 #include "errors.h"
 #include "lexer.h"
@@ -130,8 +131,10 @@ void tokenInit(TokenType type, wchar_t *text, unsigned long position, unsigned l
 }
 
 void tokenFree(Token *t) {
-  if (t->textAllocated) {
-    free(t->text);
+  if (t != NULL) {
+    if (t->textAllocated) {
+      free(t->text);
+    }
   }
   free(t);
 }
@@ -563,6 +566,129 @@ bool tryTokensRead(FILE *stream, Tokens **ptr) {
     lexerStateFree(s);
     tokensFree(tokens);
     return ERROR;
+}
+
+#define DEBUG true
+
+typedef struct TokenStream {
+  FILE *file;
+  LexerState *lexer;
+  Token* next;
+} TokenStream;
+
+int tryStreamMake(char *filename, TokenStream **ptr) {
+
+  FILE *file;
+  LexerState *l;
+  TokenStream *s;
+
+  file = fopen(filename, "r");
+  if (file == NULL) {
+    if (DEBUG) { printf("error: making stream %s\n", strerror(errno)); }
+    goto error;
+  }
+
+  if (tryLexerStateMake(&l)) {
+    if (DEBUG) { printf("error: malloc-ing LexerState\n"); }
+    goto error;
+  }
+
+  s = malloc(sizeof(TokenStream));
+  if (s == NULL) {
+    if (DEBUG) { printf("error: malloc-ing TokenStream\n"); }
+    goto error;
+  }
+  s->file = file;
+  s->lexer = l;
+  s->next = NULL;
+
+  *ptr = s;
+  return OK;
+
+  error:
+    if (file != NULL && fclose(file) != 0) {
+      if (DEBUG) {
+        char *errorString = strerror(errno);
+        printf("error: closing stream %s\n", errorString);
+      }
+    }
+    lexerStateFree(l);
+    free(s);
+    return ERROR;
+}
+
+int tryStreamNext(TokenStream *s, Token **ptr) {
+
+  if (s->next != NULL) {
+    *ptr = s->next;
+    s->next = NULL;
+    return LEX_SUCCESS;
+  }
+
+  Token *t = malloc(sizeof(Token));
+  if (t == NULL) {
+    if (DEBUG) { printf("error: malloc-ing Token\n"); }
+    return LEX_ERROR;
+  }
+
+  int read = tryTokenRead(s->file, s->lexer, t);
+
+  if (read == LEX_ERROR) {
+    free(t);
+  }
+  else {
+    *ptr = t;
+  }
+
+  return read;
+}
+
+int tryStreamPeek(TokenStream *s, Token **ptr) {
+
+  if (s->next != NULL) {
+    *ptr = s->next;
+    s->next = NULL;
+    return LEX_SUCCESS;
+  }
+
+  Token *t = malloc(sizeof(Token));
+  if (t) {
+    if (DEBUG) { printf("error: malloc-ing Token\n"); }
+    return LEX_ERROR;
+  }
+
+  int read = tryTokenRead(s->file, s->lexer, t);
+
+  if (read == LEX_ERROR) {
+    free(t);
+  }
+  else {
+    s->next = t;
+    *ptr = t;
+  }
+
+  return read;
+}
+
+int streamFree(TokenStream *s) {
+  if (s == NULL) {
+    return OK;
+  }
+
+  int closeError = 0;
+  if (s->file != NULL && fclose(s->file) != 0) {
+    if (DEBUG) {
+      char *errorString = strerror(errno);
+      printf("error closing stream: %s\n", errorString);
+    }
+    closeError = 1;
+  }
+
+  lexerStateFree(s->lexer);
+  tokenFree(s->next);
+  free(s);
+
+  return closeError;
 }
 
 const char* tokenName(TokenType type) {

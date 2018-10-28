@@ -64,46 +64,78 @@ void printStacktrace() {
 
 START_TEST(basic) {
 
-  const char * tmpFile = "/tmp/tmp.txt";
+  char * tmpFile = "/tmp/tmp.txt";
   spit(tmpFile, L"(one :two 345 '\"six\") true false nil");
 
-  FILE *stream = fopen(tmpFile, "r");
-  if (stream == NULL) {
-    handle_error("fopen");
-  }
-
-  Tokens *tokens;
-
-  bool error = tryTokensRead(stream, &tokens);
-  if (error) {
-    printErrors();
-    ck_assert_msg(!error, "lexer encountered errors");
-  }
-
-  if (fclose(stream) != 0) {
-    reportErrnoError(SYSTEM, "errno-error");
-    printErrors();
-    printStacktrace();
-    exit(-1);
-  }
-
+//  FILE *stream = fopen(tmpFile, "r");
+//  if (stream == NULL) {
+//    handle_error("fopen");
+//  }
+//
+//  Tokens *tokens;
+//
+//  bool error = tryTokensRead(stream, &tokens);
+//  if (error) {
+//    printErrors();
+//    ck_assert_msg(!error, "lexer encountered errors");
+//  }
+//
+//  if (fclose(stream) != 0) {
+//    reportErrnoError(SYSTEM, "errno-error");
+//    printErrors();
+//    printStacktrace();
+//    exit(-1);
+//  }
   //printTokens(tokens);
-
   // TODO: have I screwed up the pointer to the token array, or is the below syntax really needed?
 
-  ck_assert_int_eq(tokens->used, 10);
-  assertToken(&(tokens->data[0 * sizeof(Token)]), T_OPAREN,  L"(",      1, 1);
-  assertToken(&(tokens->data[1 * sizeof(Token)]), T_SYMBOL,  L"one",    4, 3);
-  assertToken(&(tokens->data[2 * sizeof(Token)]), T_KEYWORD, L"two",    9, 3);
-  assertToken(&(tokens->data[3 * sizeof(Token)]), T_NUMBER,  L"345",   13, 3);
-  assertToken(&(tokens->data[4 * sizeof(Token)]), T_QUOTE,   L"'",     15, 1);
-  assertToken(&(tokens->data[5 * sizeof(Token)]), T_STRING,  L"six",   20, 3);
-  assertToken(&(tokens->data[6 * sizeof(Token)]), T_CPAREN,  L")",     21, 1);
-  assertToken(&(tokens->data[7 * sizeof(Token)]), T_TRUE,    L"true",  26, 4);
-  assertToken(&(tokens->data[8 * sizeof(Token)]), T_FALSE,   L"false", 32, 5);
-  assertToken(&(tokens->data[9 * sizeof(Token)]), T_NIL,     L"nil",   36, 3);
 
-  tokensFree(tokens);
+  TokenStream_t stream;
+  ck_assert_int_eq(tryStreamMake(tmpFile, &stream), LEX_SUCCESS);
+
+  Token *t;
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  assertToken(t, T_OPAREN, L"(", 1, 1);
+  free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  assertToken(t, T_SYMBOL,  L"one",    4, 3);
+  free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  assertToken(t, T_KEYWORD, L"two",    9, 3);
+  free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  assertToken(t, T_NUMBER,  L"345",   13, 3);
+  free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  assertToken(t, T_QUOTE,   L"'",     15, 1);
+  free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  assertToken(t, T_STRING,  L"six",   20, 3);
+  free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  assertToken(t, T_CPAREN,  L")",     21, 1);
+  free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  assertToken(t, T_TRUE,    L"true",  26, 4);
+  free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  assertToken(t, T_FALSE,   L"false", 32, 5);
+  free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_EOF);
+  assertToken(t, T_NIL,     L"nil",   36, 3);
+  free(t);
+
+  ck_assert_int_eq(streamFree(stream), LEX_SUCCESS);
 }
 END_TEST
 
