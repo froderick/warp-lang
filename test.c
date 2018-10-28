@@ -35,13 +35,6 @@ void spit(const char* file, const wchar_t* text) {
   }
 }
 
-void printTokens(Tokens* l) {
-  for (unsigned long i=0; i < l->used; i++) {
-    Token t = l->data[i];
-    printf("token: '%ls' (%s) %lu %lu\n", t.text, tokenName(t.type), t.position, t.length);
-  }
-}
-
 void assertToken(Token *t,
                  TokenType type, wchar_t *text, unsigned long position, unsigned long length) {
   ck_assert_int_eq(t->type, type);
@@ -91,7 +84,7 @@ START_TEST(basic) {
 
 
   TokenStream_t stream;
-  ck_assert_int_eq(tryStreamMake(tmpFile, &stream), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamMakeFile(tmpFile, &stream), LEX_SUCCESS);
 
   Token *t;
 

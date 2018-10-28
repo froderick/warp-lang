@@ -2,6 +2,10 @@
 #include <wchar.h>
 #include <stdbool.h>
 
+#define LEX_SUCCESS  0
+#define LEX_EOF      1
+#define LEX_ERROR    2
+
 typedef enum TokenType {
   // invalid token
   T_NONE,
@@ -21,57 +25,20 @@ typedef enum TokenType {
 
 typedef struct Token {
   TokenType type;
+  const char* typeName;
   wchar_t *text;
   unsigned long position;
   unsigned long length;
   bool textAllocated; // if indicates whether or not the text string is on the heap
 } Token;
 
-typedef struct LexerState *LexerState_t;
-
-bool tryLexerStateMake(LexerState_t *ptr);
-
-void lexerStateFree(LexerState_t s);
-
-#define LEX_SUCCESS  0
-#define LEX_EOF      1
-#define LEX_ERROR    2
-
-// TODO: these docs are out of date
-/**
- *
- * Attempts to read a token from the supplied stream. If it is successful, it
- * returns a pointer to the newly allocated token struct. It is the caller's
- * job to free the token memory when it is no longer used. 
- *
- * If `EOF` is encountered, the `err` pointer will be set to `ERR_EOF`.
- *
- * If `EOF` is encountered unexpectedly (only a partial token has been read),
- * the `err` pointer will be set to `ERR_UNEXPECTED_EOF`.
- *
- * All other errors will result in setting the `err` pointer to ERR_IO.
- */
-int tryTokenRead(FILE *stream, LexerState_t s, Token *token);
-
-const char* tokenName(TokenType type);
-
-typedef struct Tokens {
-  Token *data;
-  unsigned long used;
-  unsigned long size;
-} Tokens;
-
-bool tryTokensRead(FILE *stream, Tokens **tokens);
-void tokensFree(Tokens *l);
-
 typedef struct TokenStream *TokenStream_t;
 
-int tryStreamMake(char *filename, TokenStream_t *s);
+int tryStreamMakeFile(char *filename, TokenStream_t *s);
+int tryStreamMake(FILE *file, TokenStream_t *s);
 int tryStreamNext(TokenStream_t s, Token **ptr);
 int tryStreamPeek(TokenStream_t s, Token **ptr);
+void tokenFree(Token *t);
 int streamFree(TokenStream_t s);
 
-/*
- * token - units of the stream
- * stream - a sequence of tokens
- */
+

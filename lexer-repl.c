@@ -4,15 +4,15 @@
 
 int main(void) {
 
-  LexerState_t s;
-
-  if (tryLexerStateMake(&s)) {
-    goto error;
+  TokenStream_t stream;
+  int error = tryStreamMake(stdin, &stream);
+  if (error) {
+    printf("whoops 1");
   }
 
-  Token t;
+  Token *t;
   while (1) {
-    int read = tryTokenRead(stdin, s, &t);
+    int read = tryStreamNext(stream, &t);
     if (read == LEX_EOF) {
       continue;
     }
@@ -21,11 +21,12 @@ int main(void) {
       printErrors();
     }
     else if (read == LEX_SUCCESS) {
-      printf("token: %ls (%s) %lu %lu\n", t.text, tokenName(t.type), t.position, t.length);
+      printf("token: %ls (%s) %lu %lu\n", t->text, t->typeName, t->position, t->length);
     }
     else {
       printf("encountered unknown response from lexer: %i\n", read);
     }
+    free(t);
   }
   return 0;
 

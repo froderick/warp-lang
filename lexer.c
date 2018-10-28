@@ -110,12 +110,40 @@ bool tryBufferMakeString(StringBuffer *b, wchar_t** ptr) {
   return OK;
 }
 
+const char* tokenName(TokenType type) {
+  switch (type) {
+    case T_OPAREN:
+      return "OPAREN";
+    case T_CPAREN:
+      return "CPAREN";
+    case T_QUOTE:
+      return "QUOTE";
+    case T_SYMBOL:
+      return "SYMBOL";
+    case T_TRUE:
+      return "TRUE";
+    case T_FALSE:
+      return "FALSE";
+    case T_NIL:
+      return "NIL";
+    case T_NUMBER:
+      return "NUMBER";
+    case T_STRING:
+      return "STRING";
+    case T_KEYWORD:
+      return "KEYWORD";
+    default:
+      return "<UNKNOWN>";
+  }
+}
+
 /*
  * Token Model and Lexer
  */
 
 void tokenInitStatic(TokenType type, wchar_t *text, unsigned long position, unsigned long length, Token *t) {
   t->type = type;
+  t->typeName = tokenName(type);
   t->text = text;
   t->position = position;
   t->length = length;
@@ -124,6 +152,7 @@ void tokenInitStatic(TokenType type, wchar_t *text, unsigned long position, unsi
 
 void tokenInit(TokenType type, wchar_t *text, unsigned long position, unsigned long length, Token *t) {
   t->type = type;
+  t->typeName = tokenName(type);
   t->text = text;
   t->position = position;
   t->length = length;
@@ -170,7 +199,7 @@ bool tryLexerStateMake(LexerState **ptr) {
     return ERROR;
 }
 
-void lexerStateFree(LexerState_t s) {
+void lexerStateFree(LexerState *s) {
   if (s != NULL) {
     bufferFree(s->b);
   }
@@ -195,7 +224,7 @@ bool isFalse(wchar_t *text) {
   return wcscmp(text, L"false") == 0;
 }
 
-int tryReadChar(FILE *stream, LexerState_t s, wchar_t* ch) {
+int tryReadChar(FILE *stream, LexerState *s, wchar_t* ch) {
   *ch = fgetwc(stream);
   if (*ch == WEOF) {
     if (feof(stream)) {
@@ -210,7 +239,7 @@ int tryReadChar(FILE *stream, LexerState_t s, wchar_t* ch) {
   return LEX_SUCCESS;
 }
 
-int tryUnreadChar(FILE *stream, LexerState_t s, wchar_t ch) {
+int tryUnreadChar(FILE *stream, LexerState *s, wchar_t ch) {
   wint_t result = ungetwc(ch, stream);
   if (result == WEOF && s->b->usedChars == 0) {
     reportError(SYSTEM, E_EOF, L"token file descriptor ungetwc error");
@@ -220,7 +249,7 @@ int tryUnreadChar(FILE *stream, LexerState_t s, wchar_t ch) {
   return LEX_SUCCESS;
 }
 
-int tryReadNumber(FILE *stream, LexerState_t s, wchar_t first, Token *token) {
+int tryReadNumber(FILE *stream, LexerState *s, wchar_t first, Token *token) {
   tryBufferAppend(s->b, first);
   // keep reading until char is not numeric, then push back
   while (true) {
@@ -255,7 +284,7 @@ int tryReadNumber(FILE *stream, LexerState_t s, wchar_t first, Token *token) {
 
 // TODO: apply all the bug fixes in here to the other tryRead* functions
 
-bool tryReadSymbol(FILE *stream, LexerState_t s, wchar_t first, Token *token) {
+bool tryReadSymbol(FILE *stream, LexerState *s, wchar_t first, Token *token) {
   tryBufferAppend(s->b, first);
   // keep reading until char is not alphanumeric, then push back
 
@@ -322,7 +351,7 @@ bool tryReadSymbol(FILE *stream, LexerState_t s, wchar_t first, Token *token) {
   }
 }
 
-bool tryReadKeyword(FILE *stream, LexerState_t s, Token *token) {
+bool tryReadKeyword(FILE *stream, LexerState *s, Token *token) {
   // keep reading until char is not alphanumeric, then push back
 
   while (true) {
@@ -360,7 +389,7 @@ bool tryReadKeyword(FILE *stream, LexerState_t s, Token *token) {
   }
 }
 
-bool tryReadString(FILE *stream, LexerState_t s, Token *token) {
+bool tryReadString(FILE *stream, LexerState *s, Token *token) {
   // keep reading until char is a non-escaped quote
 
   bool escape = false;
@@ -396,7 +425,7 @@ bool tryReadString(FILE *stream, LexerState_t s, Token *token) {
   }
 }
 
-int tryTokenRead(FILE *stream, LexerState_t s, Token *token) {
+int tryTokenRead(FILE *stream, LexerState *s, Token *token) {
 
   bufferClear(s->b);
 
@@ -460,6 +489,12 @@ int tryTokenRead(FILE *stream, LexerState_t s, Token *token) {
     return ERROR;
   }
 }
+
+typedef struct Tokens {
+  Token *data;
+  unsigned long used;
+  unsigned long size;
+} Tokens;
 
 bool tryTokensMake(Tokens **ptr) {
 
@@ -576,7 +611,7 @@ typedef struct TokenStream {
   Token* next;
 } TokenStream;
 
-int tryStreamMake(char *filename, TokenStream **ptr) {
+int tryStreamMakeFile(char *filename, TokenStream **ptr) {
 
   FILE *file;
   LexerState *l;
@@ -615,6 +650,34 @@ int tryStreamMake(char *filename, TokenStream **ptr) {
     lexerStateFree(l);
     free(s);
     return ERROR;
+}
+
+int tryStreamMake(FILE *file, TokenStream **ptr) {
+
+  LexerState *l;
+  TokenStream *s;
+
+  if (tryLexerStateMake(&l)) {
+    if (DEBUG) { printf("error: malloc-ing LexerState\n"); }
+    goto error;
+  }
+
+  s = malloc(sizeof(TokenStream));
+  if (s == NULL) {
+    if (DEBUG) { printf("error: malloc-ing TokenStream\n"); }
+    goto error;
+  }
+  s->file = file;
+  s->lexer = l;
+  s->next = NULL;
+
+  *ptr = s;
+  return OK;
+
+  error:
+  lexerStateFree(l);
+  free(s);
+  return ERROR;
 }
 
 int tryStreamNext(TokenStream *s, Token **ptr) {
@@ -691,29 +754,3 @@ int streamFree(TokenStream *s) {
   return closeError;
 }
 
-const char* tokenName(TokenType type) {
-  switch (type) {
-  case T_OPAREN:
-    return "OPAREN";
-  case T_CPAREN:
-    return "CPAREN";
-  case T_QUOTE:
-    return "QUOTE";
-  case T_SYMBOL:
-    return "SYMBOL";
-  case T_TRUE:
-    return "TRUE";
-  case T_FALSE:
-    return "FALSE";
-  case T_NIL:
-    return "NIL";
-  case T_NUMBER:
-    return "NUMBER";
-  case T_STRING:
-    return "STRING";
-  case T_KEYWORD:
-    return "KEYWORD";
-  default:
-    return "<UNKNOWN>";
-  }
-}
