@@ -9,9 +9,6 @@
 
 #include "lexer.h"
 
-// TODO: move this to a config.h
-#define DEBUG true
-
 /*
  * Simple auto-expanding string buffer implementation.
  * Built on wide chars, so UTF8 friendly.
