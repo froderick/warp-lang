@@ -34,6 +34,16 @@ typedef struct Token {
   wchar_t text[];
 } Token;
 
+typedef struct LexerError {
+  unsigned long position; // where the un-tokenizable content begins in the stream
+  char *message;
+} LexerError;
+
+typedef union LexerResult {
+  Token *token;
+  LexerError *error;
+} LexerResult;
+
 typedef struct TokenStream *TokenStream_t;
 
 int tryStreamMakeFile(char *filename, TokenStream_t *s);

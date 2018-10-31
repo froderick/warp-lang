@@ -24,7 +24,13 @@ Note that the max stack size is fixed. After its limit of unhandled errors has
 been reached (16) it will begin to drop old errors to make room for new ones.
 
 ## Lexer TODO
-* support vectors, etc
+* lexer errors are reported via printf and return status codes, but the caller 
+  of the lexer has no way to inspect the structure of the lexical errors. at 
+  minimum there should be a way to get a handle on specifically which line/col
+  cannot be tokenized.
+  
+* it pains me to say it, but nowhere am I checking for numeric overflows in 
+  my counters. is this a thing I have to do? probably
 
 ## Parser TODO
 * see what is salvageable from the past
