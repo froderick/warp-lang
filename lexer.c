@@ -509,6 +509,12 @@ int tryTokenRead(FILE *stream, LexerState *s, Token **token) {
   return ret;
 }
 
+/*
+ * A stream-based public API for the lexer. Makes it easy to iterate over
+ * tokens. Lets you peek one token ahead. Allocates memory for each token,
+ * which must be freed after use by calling #tokenFree().
+ */
+
 typedef struct TokenStream {
   FILE *file;
   LexerState *lexer;
