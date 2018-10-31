@@ -214,7 +214,6 @@ int tryReadChar(FILE *stream, LexerState *s, wchar_t* ch) {
       return LEX_ERROR;
     }
   }
-  s->position = s->position + 1;
   return LEX_SUCCESS;
 }
 
@@ -224,7 +223,6 @@ int tryUnreadChar(FILE *stream, LexerState *s, wchar_t ch) {
     if (DEBUG) { printf("error: failed to push character back onto stream"); }
     return LEX_ERROR;
   }
-  s->position = s->position - 1;
   return LEX_SUCCESS;
 }
 
@@ -347,7 +345,11 @@ bool tryReadSymbol(FILE *stream, LexerState *s, wchar_t first, Token **token) {
   }
 }
 
-bool tryReadKeyword(FILE *stream, LexerState *s, Token **token) {
+bool tryReadKeyword(FILE *stream, LexerState *s, wchar_t first, Token **token) {
+
+  if (tryBufferAppend(s->b, first) != LEX_SUCCESS) {
+    return LEX_ERROR;
+  }
 
   // keep reading until char is not alphanumeric, then push back
 
@@ -397,7 +399,12 @@ bool tryReadKeyword(FILE *stream, LexerState *s, Token **token) {
   }
 }
 
-int tryReadString(FILE *stream, LexerState *s, Token **token) {
+int tryReadString(FILE *stream, LexerState *s, wchar_t first, Token **token) {
+
+  if (tryBufferAppend(s->b, first) != LEX_SUCCESS) {
+    return LEX_ERROR;
+  }
+
   // keep reading until char is a non-escaped quote
 
   bool foundEnd = false;
@@ -410,13 +417,14 @@ int tryReadString(FILE *stream, LexerState *s, Token **token) {
       return read;
     }
 
+    if (tryBufferAppend(s->b, ch) != LEX_SUCCESS) {
+      return LEX_ERROR;
+    }
+
     if (!escape && ch == L'"') {
       foundEnd = true;
     }
     else {
-      if (tryBufferAppend(s->b, ch) != LEX_SUCCESS) {
-        return LEX_ERROR;
-      }
       escape = !escape && ch == L'\\';
     }
   }
@@ -434,60 +442,71 @@ int tryTokenRead(FILE *stream, LexerState *s, Token **token) {
   bufferClear(s->b);
 
   wint_t ch;
-  int read = tryReadChar(stream, s, &ch);
-  if (read != LEX_SUCCESS) {
-    return read;
-  }
 
-  while (isWhitespace(ch)) {
-    read = tryReadChar(stream, s, &ch);
+  while (true) {
+    int read = tryReadChar(stream, s, &ch);
     if (read != LEX_SUCCESS) {
       return read;
     }
+    if (isWhitespace(ch)) {
+      s->position = s->position + 1;
+    }
+    else {
+      break;
+    }
   }
+
+  int ret;
 
   // single-character tokens, do not require buffering
   if (ch == L'(') {
-    return tryTokenInit(T_OPAREN, L"(", s->position, 1, token);
+    ret = tryTokenInit(T_OPAREN, L"(", s->position, 1, token);
   }
   else if (ch == L')') {
-    return tryTokenInit(T_CPAREN, L")", s->position, 1, token);
+    ret = tryTokenInit(T_CPAREN, L")", s->position, 1, token);
   }
   else if (ch == L'[') {
-    return tryTokenInit(T_OVEC, L"[", s->position, 1, token);
+    ret = tryTokenInit(T_OVEC, L"[", s->position, 1, token);
   }
   else if (ch == L']') {
-    return tryTokenInit(T_CVEC, L"]", s->position, 1, token);
+    ret = tryTokenInit(T_CVEC, L"]", s->position, 1, token);
   }
   else if (ch == L'{') {
-    return tryTokenInit(T_OBRACKET, L"{", s->position, 1, token);
+    ret = tryTokenInit(T_OBRACKET, L"{", s->position, 1, token);
   }
   else if (ch == L'}') {
-    return tryTokenInit(T_CBRACKET, L"}", s->position, 1, token);
+    ret = tryTokenInit(T_CBRACKET, L"}", s->position, 1, token);
   }
   else if (ch == L'\'') {
-    return tryTokenInit(T_QUOTE, L"'", s->position, 1, token);
+    ret = tryTokenInit(T_QUOTE, L"'", s->position, 1, token);
   }
 
   // multi-character tokens
-  if (iswdigit(ch)) {
-    return tryReadNumber(stream, s, ch, token);
+  else if (iswdigit(ch)) {
+    ret = tryReadNumber(stream, s, ch, token);
   }
   else if (iswalpha(ch)) {
-    return tryReadSymbol(stream, s, ch, token);
+    ret = tryReadSymbol(stream, s, ch, token);
   }
   else if (ch == L':') {
-    return tryReadKeyword(stream, s, token);
+    ret = tryReadKeyword(stream, s, ch, token);
   }
   else if (ch == L'"') {
-    return tryReadString(stream, s, token);
+    ret = tryReadString(stream, s, ch, token);
   }
 
   // invalid token
   else {
     if (DEBUG) { printf("error: unrecognized token '%lc'\n", ch); };
-    return LEX_ERROR;
+    ret = LEX_ERROR;
   }
+
+  // if we created a token, increment the lexer position
+  if (ret != LEX_ERROR && *token != NULL) {
+    s->position = s->position + (*token)->length;
+  }
+
+  return ret;
 }
 
 typedef struct TokenStream {
@@ -564,15 +583,10 @@ int tryStreamPeek(TokenStream *s, Token **ptr) {
     return LEX_SUCCESS;
   }
 
-  Token *t;
-  int read = tryTokenRead(s->file, s->lexer, &t);
+  int read = tryTokenRead(s->file, s->lexer, ptr);
 
   if (read != LEX_ERROR) {
-    s->next = t;
-    *ptr = t;
-  }
-  else {
-    *ptr = NULL;
+    s->next = *ptr;
   }
 
   return read;

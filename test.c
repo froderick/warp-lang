@@ -26,6 +26,7 @@ void spit(const char* file, const wchar_t* text) {
 
 void assertToken(Token *t,
                  TokenType type, wchar_t *text, unsigned long position, unsigned long length) {
+
   ck_assert_int_eq(t->type, type);
   ck_assert_msg(wcscmp(t->text, text) == 0, "text must match");
   ck_assert_int_eq(t->position, position);
@@ -43,59 +44,59 @@ START_TEST(basic) {
   Token *t;
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_OPAREN, L"(", 1, 1);
+  assertToken(t, T_OPAREN,  L"(",      0, 1);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_SYMBOL,  L"one",    4, 3);
+  assertToken(t, T_SYMBOL,  L"one",    1, 3);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_KEYWORD, L"two",    9, 3);
+  assertToken(t, T_KEYWORD, L":two",    5, 4);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_NUMBER,  L"345",   13, 3);
+  assertToken(t, T_NUMBER,  L"345",   10, 3);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_QUOTE,   L"'",     15, 1);
+  assertToken(t, T_QUOTE,   L"'",     14, 1);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_STRING,  L"six",   20, 3);
+  assertToken(t, T_STRING,  L"\"six\"",   15, 5);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_CPAREN,  L")",     21, 1);
+  assertToken(t, T_CPAREN,  L")",     20, 1);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_TRUE,    L"true",  26, 4);
+  assertToken(t, T_TRUE,    L"true",  22, 4);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_FALSE,   L"false", 32, 5);
+  assertToken(t, T_FALSE,   L"false", 27, 5);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_NIL,     L"nil",   36, 3);
+  assertToken(t, T_NIL,     L"nil",   33, 3);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_OVEC,     L"[",   38, 1);
+  assertToken(t, T_OVEC,     L"[",   37, 1);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_CVEC,     L"]",   39, 1);
+  assertToken(t, T_CVEC,     L"]",   38, 1);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_OBRACKET, L"{",   41, 1);
+  assertToken(t, T_OBRACKET, L"{",   40, 1);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
-  assertToken(t, T_CBRACKET, L"}",   42, 1);
+  assertToken(t, T_CBRACKET, L"}",   41, 1);
   free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t), LEX_EOF);
@@ -117,7 +118,7 @@ START_TEST(eof_mid_number_token) {
 
     ck_assert_int_eq(tryStreamNext(stream, &t), LEX_EOF);
     ck_assert_msg(t != NULL, "when a valid number token is allocated, this pointer should be valid even if an EOF was encountered");
-    assertToken(t, T_NUMBER, L"12345", 5, 5);
+    assertToken(t, T_NUMBER, L"12345", 0, 5);
     free(t);
 
     ck_assert_int_eq(tryStreamFree(stream), LEX_SUCCESS);
@@ -127,7 +128,7 @@ END_TEST
 Suite * suite(void) {
 
   TCase *tc_core = tcase_create("Core");
-//  tcase_add_test(tc_core, basic);
+  tcase_add_test(tc_core, basic);
   tcase_add_test(tc_core, eof_mid_number_token);
 
   Suite *s = suite_create("lexer");
