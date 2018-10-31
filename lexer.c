@@ -237,7 +237,7 @@ int tryReadNumber(FILE *stream, LexerState *s, wchar_t first, Token **token) {
   // keep reading until char is not numeric, then push back
 
   bool matched;
-  bool eof;
+  bool eof = false;
   wint_t ch;
   do {
 
@@ -286,7 +286,7 @@ bool tryReadSymbol(FILE *stream, LexerState *s, wchar_t first, Token **token) {
   // keep reading until char is not alphanumeric, then push back
 
   bool matched;
-  bool eof;
+  bool eof = false;
   wint_t ch;
   do {
 
@@ -352,7 +352,7 @@ bool tryReadKeyword(FILE *stream, LexerState *s, Token **token) {
   // keep reading until char is not alphanumeric, then push back
 
   bool matched;
-  bool eof;
+  bool eof = false;
   wint_t ch;
   do {
 
@@ -397,11 +397,11 @@ bool tryReadKeyword(FILE *stream, LexerState *s, Token **token) {
   }
 }
 
-bool tryReadString(FILE *stream, LexerState *s, Token **token) {
+int tryReadString(FILE *stream, LexerState *s, Token **token) {
   // keep reading until char is a non-escaped quote
 
-  bool foundEnd;
-  bool escape;
+  bool foundEnd = false;
+  bool escape = false;
   wint_t ch;
   do {
 
