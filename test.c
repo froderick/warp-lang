@@ -7,30 +7,20 @@
 #include <errno.h>
 #include "lexer.h"
 
-#define handle_error(msg) \
-  do { \
-    perror(msg); \
-    \
-    void* callstack[128]; \
-    int i, frames = backtrace(callstack, 128); \
-    char** strs = backtrace_symbols(callstack, frames); \
-    for (i = 0; i < frames; ++i) { \
-      printf("%s\n", strs[i]); \
-    } \
-    free(strs); \
-    \
-    exit(EXIT_FAILURE); \
-  } while (0)
-
 void spit(const char* file, const wchar_t* text) {
   FILE *f = fopen(file, "w");
+
   if (f == NULL) {
-    handle_error("fopen");
+    if (DEBUG) { printf("error: failed to open file for writing -> '%s'\n", file); }
+    return;
   }
-  fprintf(f, "%ls", text);
-  int err = fclose(f);
-  if (err) {
-      handle_error("fclose");
+
+  if (fprintf(f, "%ls", text) < 0) {
+    if (DEBUG) { printf("error: failed write to file -> '%s'\n", file); }
+  }
+
+  if (fclose(f)) {
+    if (DEBUG) { printf("error: failed write to file -> '%s'\n", file); }
   }
 }
 
@@ -42,45 +32,10 @@ void assertToken(Token *t,
   ck_assert_int_eq(t->length, length);
 }
 
-#define SYSTEM "lexer-test"
-
-void printStacktrace() {
-  void* callstack[128];
-  int i, frames = backtrace(callstack, 128);
-  char** strs = backtrace_symbols(callstack, frames);
-  for (i = 0; i < frames; ++i) {
-    printf("%s\n", strs[i]);
-  }
-  free(strs);
-}
-
 START_TEST(basic) {
 
   char * tmpFile = "/tmp/tmp.txt";
   spit(tmpFile, L"(one :two 345 '\"six\") true false nil");
-
-//  FILE *stream = fopen(tmpFile, "r");
-//  if (stream == NULL) {
-//    handle_error("fopen");
-//  }
-//
-//  Tokens *tokens;
-//
-//  bool error = tryTokensRead(stream, &tokens);
-//  if (error) {
-//    printErrors();
-//    ck_assert_msg(!error, "lexer encountered errors");
-//  }
-//
-//  if (fclose(stream) != 0) {
-//    reportErrnoError(SYSTEM, "errno-error");
-//    printErrors();
-//    printStacktrace();
-//    exit(-1);
-//  }
-  //printTokens(tokens);
-  // TODO: have I screwed up the pointer to the token array, or is the below syntax really needed?
-
 
   TokenStream_t stream;
   ck_assert_int_eq(tryStreamMakeFile(tmpFile, &stream), LEX_SUCCESS);

@@ -575,7 +575,7 @@ int tryStreamFree(TokenStream *s) {
   }
 
   int closeError = LEX_SUCCESS;
-  if (s->file != NULL && !fclose(s->file)) {
+  if (s->file != NULL && fclose(s->file)) {
     if (DEBUG) { printf("error: closing stream on free -> '%s'\n", strerror(errno)); }
     closeError = LEX_ERROR;
   }
