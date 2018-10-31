@@ -453,6 +453,18 @@ int tryTokenRead(FILE *stream, LexerState *s, Token **token) {
   else if (ch == L')') {
     return tryTokenInit(T_CPAREN, L")", s->position, 1, token);
   }
+  else if (ch == L'[') {
+    return tryTokenInit(T_OVEC, L"[", s->position, 1, token);
+  }
+  else if (ch == L']') {
+    return tryTokenInit(T_CVEC, L"]", s->position, 1, token);
+  }
+  else if (ch == L'{') {
+    return tryTokenInit(T_OBRACKET, L"{", s->position, 1, token);
+  }
+  else if (ch == L'}') {
+    return tryTokenInit(T_CBRACKET, L"}", s->position, 1, token);
+  }
   else if (ch == L'\'') {
     return tryTokenInit(T_QUOTE, L"'", s->position, 1, token);
   }
@@ -533,20 +545,15 @@ int tryStreamMakeFile(char *filename, TokenStream **ptr) {
 
 int tryStreamNext(TokenStream *s, Token **ptr) {
 
+  *ptr = NULL; // clear this so folks can free it after this call without risk of a double-free
+
   if (s->next != NULL) {
     *ptr = s->next;
     s->next = NULL;
     return LEX_SUCCESS;
   }
 
-  Token *t;
-  int read = tryTokenRead(s->file, s->lexer, &t);
-
-  if (read != LEX_ERROR) {
-    *ptr = t;
-  }
-
-  return read;
+  return tryTokenRead(s->file, s->lexer, ptr);
 }
 
 int tryStreamPeek(TokenStream *s, Token **ptr) {
@@ -563,6 +570,9 @@ int tryStreamPeek(TokenStream *s, Token **ptr) {
   if (read != LEX_ERROR) {
     s->next = t;
     *ptr = t;
+  }
+  else {
+    *ptr = NULL;
   }
 
   return read;

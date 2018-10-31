@@ -35,7 +35,7 @@ void assertToken(Token *t,
 START_TEST(basic) {
 
   char * tmpFile = "/tmp/tmp.txt";
-  spit(tmpFile, L"(one :two 345 '\"six\") true false nil");
+  spit(tmpFile, L"(one :two 345 '\"six\") true false nil [] {}");
 
   TokenStream_t stream;
   ck_assert_int_eq(tryStreamMakeFile(tmpFile, &stream), LEX_SUCCESS);
@@ -78,23 +78,62 @@ START_TEST(basic) {
   assertToken(t, T_FALSE,   L"false", 32, 5);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_EOF);
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
   assertToken(t, T_NIL,     L"nil",   36, 3);
   free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  assertToken(t, T_OVEC,     L"[",   38, 1);
+  free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  assertToken(t, T_CVEC,     L"]",   39, 1);
+  free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  assertToken(t, T_OBRACKET, L"{",   41, 1);
+  free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  assertToken(t, T_CBRACKET, L"}",   42, 1);
+  free(t);
+
+  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_EOF);
+  ck_assert_msg(t == NULL, "when no token is allocated, this pointer should be set to null");
 
   ck_assert_int_eq(tryStreamFree(stream), LEX_SUCCESS);
 }
 END_TEST
 
+START_TEST(eof_mid_number_token) {
+
+    char * tmpFile = "/tmp/tmp.txt";
+    spit(tmpFile, L"12345");
+
+    TokenStream_t stream;
+    ck_assert_int_eq(tryStreamMakeFile(tmpFile, &stream), LEX_SUCCESS);
+
+    Token *t;
+
+    ck_assert_int_eq(tryStreamNext(stream, &t), LEX_EOF);
+    ck_assert_msg(t != NULL, "when a valid number token is allocated, this pointer should be valid even if an EOF was encountered");
+    assertToken(t, T_NUMBER, L"12345", 5, 5);
+    free(t);
+
+    ck_assert_int_eq(tryStreamFree(stream), LEX_SUCCESS);
+  }
+END_TEST
+
 Suite * suite(void) {
 
-    TCase *tc_core = tcase_create("Core");
-    tcase_add_test(tc_core, basic);
+  TCase *tc_core = tcase_create("Core");
+//  tcase_add_test(tc_core, basic);
+  tcase_add_test(tc_core, eof_mid_number_token);
 
-    Suite *s = suite_create("lexer");
-    suite_add_tcase(s, tc_core);
+  Suite *s = suite_create("lexer");
+  suite_add_tcase(s, tc_core);
 
-    return s;
+  return s;
 }
 
 int main(int argc, char** argv)

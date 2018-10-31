@@ -11,6 +11,10 @@ typedef enum TokenType {
   // static tokens
   T_OPAREN,
   T_CPAREN,
+  T_OVEC,
+  T_CVEC,
+  T_OBRACKET,
+  T_CBRACKET,
   T_TRUE,
   T_FALSE,
   T_NIL,
