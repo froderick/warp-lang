@@ -10,7 +10,7 @@
 #include "lexer.h"
 
 /*
- * Simple auto-expanding string buffer implementation.
+ * Auto-expanding string buffer implementation.
  * Built on wide chars, so UTF8 friendly.
  */
 
@@ -35,7 +35,7 @@ bool tryBufferMake(StringBuffer **ptr) {
 
   if (NULL == (b = malloc(sizeof(StringBuffer)))) {
     if (DEBUG) { printf("error: malloc-ing StringBuffer\n"); }
-    goto error;
+    return LEX_ERROR;
   }
 
   b->usedChars = 0;
@@ -43,7 +43,8 @@ bool tryBufferMake(StringBuffer **ptr) {
 
   if (NULL == (data = malloc(bufferAllocatedBytes(b)))) {
     if (DEBUG) { printf("error: malloc-ing StringBuffer array\n"); }
-    goto error;
+    free(b);
+    return LEX_ERROR;
   }
 
   bzero(data, bufferAllocatedBytes(b));
@@ -51,11 +52,6 @@ bool tryBufferMake(StringBuffer **ptr) {
   b->data = data;
   *ptr = b;
   return LEX_SUCCESS;
-
-  error:
-    free(b);
-    free(data);
-    return LEX_ERROR;
 }
 
 void bufferFree(StringBuffer *b) {
@@ -65,7 +61,6 @@ void bufferFree(StringBuffer *b) {
   free(b);
 }
 
-// TODO: fix this malloc
 int tryBufferAppend(StringBuffer *b, wchar_t ch) {
 
   if (b->usedChars + 1 == (b->allocatedChars - 1)) {
@@ -73,7 +68,12 @@ int tryBufferAppend(StringBuffer *b, wchar_t ch) {
     unsigned long oldSizeInBytes = bufferAllocatedBytes(b);
     unsigned long newSizeInBytes = oldSizeInBytes * 2;
 
-    b->data= realloc(b->data, newSizeInBytes);
+    b->data = realloc(b->data, newSizeInBytes);
+    if (b->data == NULL) {
+      if (DEBUG) { printf("error: realloc-ing StringBuffer array\n"); }
+      return LEX_ERROR;
+    }
+
     b->allocatedChars = b->allocatedChars * 2;
   }
 
@@ -81,13 +81,22 @@ int tryBufferAppend(StringBuffer *b, wchar_t ch) {
   b->usedChars = b->usedChars + 1;
   b->data[b->usedChars] = L'\0';
 
-  return 0;
+  return LEX_SUCCESS;
 }
 
 void bufferClear(StringBuffer *b) {
   bzero(b->data, bufferUnusedBytes(b));
   b->usedChars = 0;
 }
+
+/*
+ * Token Model and Lexer
+ */
+
+typedef struct LexerState {
+  unsigned long position;
+  StringBuffer *b;
+} LexerState;
 
 const char* tokenName(TokenType type) {
   switch (type) {
@@ -116,10 +125,6 @@ const char* tokenName(TokenType type) {
   }
 }
 
-/*
- * Token Model and Lexer
- */
-
 int tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsigned long length, Token **ptr) {
 
   Token *t;
@@ -142,11 +147,6 @@ int tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsigned
   return LEX_SUCCESS;
 }
 
-typedef struct LexerState {
-  unsigned long position;
-  StringBuffer *b;
-} LexerState;
-
 int tryTokenInitFromLexer(LexerState *s, TokenType type, Token **ptr) {
   return tryTokenInit(type, s->b->data, s->position, s->b->usedChars, ptr);
 }
@@ -155,30 +155,27 @@ void tokenFree(Token *t) {
   free(t);
 }
 
-bool tryLexerStateMake(LexerState **ptr) {
+int tryLexerStateMake(LexerState **ptr) {
 
   StringBuffer *b = NULL;
   LexerState *s = NULL;
 
-  if (tryBufferMake(&b)) {
-    goto error;
+  if (tryBufferMake(&b) != LEX_SUCCESS) {
+    return LEX_ERROR;
   }
 
   s = malloc(sizeof(LexerState));
   if (s == NULL) {
     if (DEBUG) { printf("error: malloc-ing LexerState\n"); }
-    goto error;
+    bufferFree(b);
+    return LEX_ERROR;
   }
 
   s->position = 0;
   s->b = b;
+
   *ptr = s;
   return LEX_SUCCESS;
-
-  error:
-    bufferFree(b);
-    free(s);
-    return LEX_ERROR;
 }
 
 void lexerStateFree(LexerState *s) {
@@ -232,69 +229,90 @@ int tryUnreadChar(FILE *stream, LexerState *s, wchar_t ch) {
 }
 
 int tryReadNumber(FILE *stream, LexerState *s, wchar_t first, Token **token) {
-  tryBufferAppend(s->b, first);
-  // keep reading until char is not numeric, then push back
-  while (true) {
-      
-    wint_t ch;
-    int read = tryReadChar(stream, s, &ch);
-    if (read != LEX_SUCCESS) {
-      return read;
-    }
 
-    if (iswdigit(ch)) {
-      tryBufferAppend(s->b, ch);
-    }
-    else {
-
-      int unread = tryUnreadChar(stream, s, ch);
-      if (unread != LEX_SUCCESS) {
-        return unread;
-      }
-
-      int error = tryTokenInitFromLexer(s, T_NUMBER, token);
-      if (error != LEX_SUCCESS) {
-        return LEX_ERROR;
-      }
-
-      return LEX_SUCCESS;
-    }
+  if (tryBufferAppend(s->b, first) != LEX_SUCCESS) {
+    return LEX_ERROR;
   }
-}
 
-// TODO: apply all the bug fixes in here to the other tryRead* functions
+  // keep reading until char is not numeric, then push back
 
-bool tryReadSymbol(FILE *stream, LexerState *s, wchar_t first, Token **token) {
-  tryBufferAppend(s->b, first);
-  // keep reading until char is not alphanumeric, then push back
-
+  bool matched;
   bool eof;
-  while (true) {
+  wint_t ch;
+  do {
 
-    wint_t ch;
     int read = tryReadChar(stream, s, &ch);
-
     if (read == LEX_ERROR) {
       return LEX_ERROR;
     }
 
     if (read == LEX_EOF) {
       eof = true;
-      break;
+      matched = false;
     }
-
-    if (iswalnum(ch)) {
-      tryBufferAppend(s->b, ch);
-      continue;
-    }
-
-    if (tryUnreadChar(stream, s, ch) != LEX_SUCCESS) {
-      return LEX_ERROR;
+    else if (!iswdigit(ch)) {
+      if (tryUnreadChar(stream, s, ch) != LEX_SUCCESS) {
+        return LEX_ERROR;
+      }
+      matched = false;
     }
     else {
-      break;
+      if (tryBufferAppend(s->b, ch) != LEX_SUCCESS) {
+        return LEX_ERROR;
+      }
+      matched = true;
     }
+
+  } while (matched);
+
+  if (tryTokenInitFromLexer(s, T_NUMBER, token) != LEX_SUCCESS) {
+    return LEX_ERROR;
   }
+
+  if (eof) {
+    return LEX_EOF;
+  }
+  else {
+    return LEX_SUCCESS;
+  }
+}
+
+bool tryReadSymbol(FILE *stream, LexerState *s, wchar_t first, Token **token) {
+
+  if (tryBufferAppend(s->b, first) != LEX_SUCCESS) {
+    return LEX_ERROR;
+  }
+
+  // keep reading until char is not alphanumeric, then push back
+
+  bool matched;
+  bool eof;
+  wint_t ch;
+  do {
+
+    int read = tryReadChar(stream, s, &ch);
+    if (read == LEX_ERROR) {
+      return LEX_ERROR;
+    }
+
+    if (read == LEX_EOF) {
+      eof = true;
+      matched = false;
+    }
+    else if (!iswalnum(ch)) {
+      if (tryUnreadChar(stream, s, ch) != LEX_SUCCESS) {
+        return LEX_ERROR;
+      }
+      matched = false;
+    }
+    else {
+      if (tryBufferAppend(s->b, ch) != LEX_SUCCESS) {
+        return LEX_ERROR;
+      }
+      matched = true;
+    }
+
+  } while (matched);
 
   if (s->b->usedChars == 0) {
     if (DEBUG) { printf("error: symbol token type cannot be empty"); }
@@ -317,8 +335,7 @@ bool tryReadSymbol(FILE *stream, LexerState *s, wchar_t first, Token **token) {
     type = T_SYMBOL;
   }
 
-  int error = tryTokenInitFromLexer(s, type, token);
-  if (error != LEX_SUCCESS) {
+  if (tryTokenInitFromLexer(s, type, token) != LEX_SUCCESS) {
     return LEX_ERROR;
   }
 
@@ -331,126 +348,113 @@ bool tryReadSymbol(FILE *stream, LexerState *s, wchar_t first, Token **token) {
 }
 
 bool tryReadKeyword(FILE *stream, LexerState *s, Token **token) {
+
   // keep reading until char is not alphanumeric, then push back
 
-  while (true) {
+  bool matched;
+  bool eof;
+  wint_t ch;
+  do {
 
-    wint_t ch;
     int read = tryReadChar(stream, s, &ch);
-    if (read != LEX_SUCCESS) {
-      return read;
+    if (read == LEX_ERROR) {
+      return LEX_ERROR;
     }
 
-    if (iswalnum(ch)) {
-      tryBufferAppend(s->b, ch);
+    if (read == LEX_EOF) {
+      eof = true;
+      matched = false;
+    }
+    else if (!iswalnum(ch)) {
+      if (tryUnreadChar(stream, s, ch) != LEX_SUCCESS) {
+        return LEX_ERROR;
+      }
+      matched = false;
     }
     else {
-
-      int unread = tryUnreadChar(stream, s, ch);
-      if (unread != LEX_SUCCESS) {
-        return unread;
-      }
-
-      if (s->b->usedChars == 0) {
-        if (DEBUG) { printf("error: keyword token type cannot be empty"); }
+      if (tryBufferAppend(s->b, ch) != LEX_SUCCESS) {
         return LEX_ERROR;
       }
-
-      int error = tryTokenInitFromLexer(s, T_KEYWORD, token);
-      if (error != LEX_SUCCESS) {
-        return LEX_ERROR;
-      }
-
-      return LEX_SUCCESS;
+      matched = true;
     }
+
+  } while (matched);
+
+  if (s->b->usedChars == 0) {
+    if (DEBUG) { printf("error: keyword token type cannot be empty"); }
+    return LEX_ERROR;
+  }
+
+  if (tryTokenInitFromLexer(s, T_KEYWORD, token) != LEX_SUCCESS) {
+    return LEX_ERROR;
+  }
+
+  if (eof) {
+    return LEX_EOF;
+  }
+  else {
+    return LEX_SUCCESS;
   }
 }
 
 bool tryReadString(FILE *stream, LexerState *s, Token **token) {
   // keep reading until char is a non-escaped quote
 
-  bool escape = false;
+  bool foundEnd;
+  bool escape;
+  wint_t ch;
+  do {
 
-  while (true) {
-
-    wint_t ch;
     int read = tryReadChar(stream, s, &ch);
     if (read != LEX_SUCCESS) {
       return read;
     }
 
     if (!escape && ch == L'"') {
-
-      int error = tryTokenInitFromLexer(s, T_STRING, token);
-      if (error != LEX_SUCCESS) {
-        return LEX_ERROR;
-      }
-
-      return LEX_SUCCESS;
+      foundEnd = true;
     }
     else {
-      tryBufferAppend(s->b, ch);
-      if (!escape && ch == L'\\') {
-        escape = true;
+      if (tryBufferAppend(s->b, ch) != LEX_SUCCESS) {
+        return LEX_ERROR;
       }
-      else {
-        escape = false;
-      }
+      escape = !escape && ch == L'\\';
     }
   }
+  while (!foundEnd);
+
+  if (tryTokenInitFromLexer(s, T_STRING, token) != LEX_SUCCESS) {
+    return LEX_ERROR;
+  }
+
+  return LEX_SUCCESS;
 }
 
 int tryTokenRead(FILE *stream, LexerState *s, Token **token) {
 
   bufferClear(s->b);
 
-  wint_t ch = fgetwc(stream);
-  if (ch == WEOF) {
-    if (feof(stream)) {
-      return LEX_EOF; // end of stream, no tokens left to parse
-    }
-    else {
-      if (DEBUG) { printf("error: error reading tokenf from stream -> '%s'\n", strerror(errno)); }
-      return LEX_ERROR;
-    }
+  wint_t ch;
+  int read = tryReadChar(stream, s, &ch);
+  if (read != LEX_SUCCESS) {
+    return read;
   }
-  s->position = s->position + 1;
 
   while (isWhitespace(ch)) {
-    ch = fgetwc(stream);
-    if (ch == WEOF) {
-      if (feof(stream)) {
-        return LEX_EOF;
-      }
-      else {
-        if (DEBUG) { printf("error: error reading tokenf from stream -> '%s'\n", strerror(errno)); }
-        return LEX_ERROR;
-      }
+    read = tryReadChar(stream, s, &ch);
+    if (read != LEX_SUCCESS) {
+      return read;
     }
-    s->position = s->position + 1;
   }
 
   // single-character tokens, do not require buffering
   if (ch == L'(') {
-    int error = tryTokenInit(T_OPAREN, L"(", s->position, 1, token);
-    if (error != LEX_SUCCESS) {
-      return LEX_ERROR;
-    }
-    return LEX_SUCCESS;
+    return tryTokenInit(T_OPAREN, L"(", s->position, 1, token);
   }
   else if (ch == L')') {
-    int error = tryTokenInit(T_CPAREN, L")", s->position, 1, token);
-    if (error != LEX_SUCCESS) {
-      return LEX_ERROR;
-    }
-    return LEX_SUCCESS;
+    return tryTokenInit(T_CPAREN, L")", s->position, 1, token);
   }
   else if (ch == L'\'') {
-    int error = tryTokenInit(T_QUOTE, L"'", s->position, 1, token);
-    if (error != LEX_SUCCESS) {
-      return LEX_ERROR;
-    }
-    return LEX_SUCCESS;
+    return tryTokenInit(T_QUOTE, L"'", s->position, 1, token);
   }
 
   // multi-character tokens
@@ -480,6 +484,31 @@ typedef struct TokenStream {
   Token* next;
 } TokenStream;
 
+int tryStreamMake(FILE *file, TokenStream **ptr) {
+
+  LexerState *l;
+  TokenStream *s;
+
+  if (tryLexerStateMake(&l)) {
+    if (DEBUG) { printf("error: malloc-ing LexerState\n"); }
+    return LEX_ERROR;
+  }
+
+  s = malloc(sizeof(TokenStream));
+  if (s == NULL) {
+    if (DEBUG) { printf("error: malloc-ing TokenStream\n"); }
+    lexerStateFree(l);
+    return LEX_ERROR;
+  }
+
+  s->file = file;
+  s->lexer = l;
+  s->next = NULL;
+
+  *ptr = s;
+  return LEX_SUCCESS;
+}
+
 int tryStreamMakeFile(char *filename, TokenStream **ptr) {
 
   FILE *file;
@@ -488,55 +517,18 @@ int tryStreamMakeFile(char *filename, TokenStream **ptr) {
   file = fopen(filename, "r");
   if (file == NULL) {
     if (DEBUG) { printf("error: making stream %s\n", strerror(errno)); }
-    goto error;
-  }
-
-  int error = tryStreamMake(file, &s);
-  if (error != LEX_SUCCESS) {
-    goto error;
-  }
-
-  *ptr = s;
-  return LEX_SUCCESS;
-
-  error:
-    if (file != NULL && fclose(file) != 0) {
-      if (DEBUG) {
-        char *errorString = strerror(errno);
-        printf("error: closing stream %s\n", errorString);
-      }
-    }
-    tryStreamFree(s);
     return LEX_ERROR;
-}
-
-// TODO: update all docs on errors returned
-int tryStreamMake(FILE *file, TokenStream **ptr) {
-
-  LexerState *l;
-  TokenStream *s;
-
-  if (tryLexerStateMake(&l)) {
-    if (DEBUG) { printf("error: malloc-ing LexerState\n"); }
-    goto error;
   }
 
-  s = malloc(sizeof(TokenStream));
-  if (s == NULL) {
-    if (DEBUG) { printf("error: malloc-ing TokenStream\n"); }
-    goto error;
+  if (tryStreamMake(file, &s) != LEX_SUCCESS) {
+    if (!fclose(file)) {
+      if (DEBUG) { printf("error: closing stream %s\n", strerror(errno)); }
+    }
+    return LEX_ERROR;
   }
-  s->file = file;
-  s->lexer = l;
-  s->next = NULL;
 
   *ptr = s;
   return LEX_SUCCESS;
-
-  error:
-  lexerStateFree(l);
-  free(s);
-  return LEX_ERROR;
 }
 
 int tryStreamNext(TokenStream *s, Token **ptr) {
@@ -550,10 +542,7 @@ int tryStreamNext(TokenStream *s, Token **ptr) {
   Token *t;
   int read = tryTokenRead(s->file, s->lexer, &t);
 
-  if (read == LEX_ERROR) {
-    free(t);
-  }
-  else {
+  if (read != LEX_ERROR) {
     *ptr = t;
   }
 
@@ -568,18 +557,10 @@ int tryStreamPeek(TokenStream *s, Token **ptr) {
     return LEX_SUCCESS;
   }
 
-  Token *t = malloc(sizeof(Token));
-  if (t) {
-    if (DEBUG) { printf("error: malloc-ing Token\n"); }
-    return LEX_ERROR;
-  }
-
+  Token *t;
   int read = tryTokenRead(s->file, s->lexer, &t);
 
-  if (read == LEX_ERROR) {
-    free(t);
-  }
-  else {
+  if (read != LEX_ERROR) {
     s->next = t;
     *ptr = t;
   }
@@ -588,17 +569,15 @@ int tryStreamPeek(TokenStream *s, Token **ptr) {
 }
 
 int tryStreamFree(TokenStream *s) {
+
   if (s == NULL) {
     return LEX_SUCCESS;
   }
 
-  int closeError = 0;
-  if (s->file != NULL && fclose(s->file) != 0) {
-    if (DEBUG) {
-      char *errorString = strerror(errno);
-      printf("error closing stream: %s\n", errorString);
-    }
-    closeError = 1;
+  int closeError = LEX_SUCCESS;
+  if (s->file != NULL && !fclose(s->file)) {
+    if (DEBUG) { printf("error: closing stream on free -> '%s'\n", strerror(errno)); }
+    closeError = LEX_ERROR;
   }
 
   lexerStateFree(s->lexer);
