@@ -40,6 +40,8 @@ typedef enum LexerErrorType {
   LE_TOKENIZATION
 } LexerErrorType;
 
+#define LEX_ERROR_MSG_LENGTH 1023
+
 typedef struct LexerError {
   LexerErrorType type;
   /*
@@ -47,7 +49,7 @@ typedef struct LexerError {
    * This is only non-zero if #type == #LE_TOKENIZATION.
    */
   unsigned long position;
-  wchar_t message[1024];
+  wchar_t message[LEX_ERROR_MSG_LENGTH + 1];
 } LexerError;
 
 typedef struct TokenStream *TokenStream_t;

@@ -28,14 +28,12 @@ unsigned long bufferUnusedBytes(StringBuffer *buf) {
   return sizeof(wchar_t) * buf->usedChars;
 }
 
-#define ERROR_MSG_LENGTH 1023
-
 int memoryError(LexerError *error, char *desc) {
 
   error->type = LE_MEMORY;
   error->position = 0;
 
-  swprintf(error->message, ERROR_MSG_LENGTH, L"failed to %s\n", desc);
+  swprintf(error->message, LEX_ERROR_MSG_LENGTH, L"failed to %s\n", desc);
 
   if (DEBUG) { printf("error: %ls\n", error->message); }
   return LEX_ERROR;
@@ -45,7 +43,7 @@ int ioError(LexerError *error, char *desc) {
 
   error->type = LE_IO;
   error->position = 0;
-  swprintf(error->message, ERROR_MSG_LENGTH, L"failed to %s ->  '%s'\n", desc, strerror(errno));
+  swprintf(error->message, LEX_ERROR_MSG_LENGTH, L"failed to %s ->  '%s'\n", desc, strerror(errno));
 
   if (DEBUG) { printf("error: %ls\n", error->message); }
   return LEX_ERROR;
@@ -55,7 +53,7 @@ int tokenizationError(LexerError *error, unsigned long position, char *desc) {
 
   error->type = LE_TOKENIZATION;
   error->position = position;
-  swprintf(error->message, ERROR_MSG_LENGTH, L"failed to tokenize stream -> %s\n", desc);
+  swprintf(error->message, LEX_ERROR_MSG_LENGTH, L"failed to tokenize stream -> %s\n", desc);
 
   if (DEBUG) { printf("error: %ls\n", error->message); }
   return LEX_ERROR;
