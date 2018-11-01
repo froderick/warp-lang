@@ -1,10 +1,6 @@
 #include <stdio.h>
 #include <wchar.h>
 
-#define LEX_SUCCESS  0
-#define LEX_EOF      1
-#define LEX_ERROR    2
-
 typedef enum TokenType {
   // invalid token
   T_NONE,
@@ -39,6 +35,10 @@ typedef enum LexerErrorType {
   LE_IO,
   LE_TOKENIZATION
 } LexerErrorType;
+
+#define LEX_SUCCESS  0
+#define LEX_EOF      1
+#define LEX_ERROR    2
 
 #define LEX_ERROR_MSG_LENGTH 1023
 
