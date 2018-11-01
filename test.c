@@ -38,71 +38,73 @@ START_TEST(basic) {
   char * tmpFile = "/tmp/tmp.txt";
   spit(tmpFile, L"(one :two 345 '\"six\") true false nil [] {}");
 
+  LexerError e;
+
   TokenStream_t stream;
-  ck_assert_int_eq(tryStreamMakeFile(tmpFile, &stream), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamMakeFile(tmpFile, &stream, &e), LEX_SUCCESS);
 
   Token *t;
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_OPAREN,  L"(",      0, 1);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_SYMBOL,  L"one",    1, 3);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_KEYWORD, L":two",    5, 4);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_NUMBER,  L"345",   10, 3);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_QUOTE,   L"'",     14, 1);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_STRING,  L"\"six\"",   15, 5);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_CPAREN,  L")",     20, 1);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_TRUE,    L"true",  22, 4);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_FALSE,   L"false", 27, 5);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_NIL,     L"nil",   33, 3);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_OVEC,     L"[",   37, 1);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_CVEC,     L"]",   38, 1);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_OBRACKET, L"{",   40, 1);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_SUCCESS);
   assertToken(t, T_CBRACKET, L"}",   41, 1);
   free(t);
 
-  ck_assert_int_eq(tryStreamNext(stream, &t), LEX_EOF);
+  ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_EOF);
   ck_assert_msg(t == NULL, "when no token is allocated, this pointer should be set to null");
 
-  ck_assert_int_eq(tryStreamFree(stream), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamFree(stream, &e), LEX_SUCCESS);
 }
 END_TEST
 
@@ -111,25 +113,52 @@ START_TEST(eof_mid_number_token) {
     char * tmpFile = "/tmp/tmp.txt";
     spit(tmpFile, L"12345");
 
+    LexerError e;
+
     TokenStream_t stream;
-    ck_assert_int_eq(tryStreamMakeFile(tmpFile, &stream), LEX_SUCCESS);
+    ck_assert_int_eq(tryStreamMakeFile(tmpFile, &stream, &e), LEX_SUCCESS);
 
     Token *t;
 
-    ck_assert_int_eq(tryStreamNext(stream, &t), LEX_EOF);
+    ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_EOF);
     ck_assert_msg(t != NULL, "when a valid number token is allocated, this pointer should be valid even if an EOF was encountered");
     assertToken(t, T_NUMBER, L"12345", 0, 5);
     free(t);
 
-    ck_assert_int_eq(tryStreamFree(stream), LEX_SUCCESS);
+    ck_assert_int_eq(tryStreamFree(stream, &e), LEX_SUCCESS);
+  }
+END_TEST
+
+START_TEST(errors) {
+
+    char * tmpFile = "/tmp/tmp.txt";
+    spit(tmpFile, L":");
+
+    LexerError e;
+
+    TokenStream_t stream;
+    ck_assert_int_eq(tryStreamMakeFile(tmpFile, &stream, &e), LEX_SUCCESS);
+
+    Token *t;
+
+    ck_assert_int_eq(tryStreamNext(stream, &t, &e), LEX_ERROR);
+    ck_assert_msg(e.type == LE_TOKENIZATION);
+    ck_assert_msg(e.position == 0);
+    printf("%ls", e.message);
+
+    wchar_t *text = L"failed to tokenize stream -> keyword token type cannot be empty\n";
+    ck_assert_msg(wcscmp(e.message, text) == 0, "text must match");
+
+    ck_assert_int_eq(tryStreamFree(stream, &e), LEX_SUCCESS);
   }
 END_TEST
 
 Suite * suite(void) {
 
   TCase *tc_core = tcase_create("Core");
-  tcase_add_test(tc_core, basic);
-  tcase_add_test(tc_core, eof_mid_number_token);
+//  tcase_add_test(tc_core, basic);
+//  tcase_add_test(tc_core, eof_mid_number_token);
+  tcase_add_test(tc_core, errors);
 
   Suite *s = suite_create("lexer");
   suite_add_tcase(s, tc_core);

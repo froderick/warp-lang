@@ -34,24 +34,30 @@ typedef struct Token {
   wchar_t text[];
 } Token;
 
-typedef struct LexerError {
-  unsigned long position; // where the un-tokenizable content begins in the stream
-  char *message;
-} LexerError;
+typedef enum LexerErrorType {
+  LE_MEMORY,
+  LE_IO,
+  LE_TOKENIZATION
+} LexerErrorType;
 
-typedef union LexerResult {
-  Token *token;
-  LexerError *error;
-} LexerResult;
+typedef struct LexerError {
+  LexerErrorType type;
+  /*
+   * The lexer's position in the stream at the time the error occurred.
+   * This is only non-zero if #type == #LE_TOKENIZATION.
+   */
+  unsigned long position;
+  wchar_t message[1024];
+} LexerError;
 
 typedef struct TokenStream *TokenStream_t;
 
-int tryStreamMakeFile(char *filename, TokenStream_t *s);
-int tryStreamMake(FILE *file, TokenStream_t *s);
+int tryStreamMakeFile(char *filename, TokenStream_t *s, LexerError *error);
+int tryStreamMake(FILE *file, TokenStream_t *s, LexerError *error);
 
-int tryStreamNext(TokenStream_t s, Token **ptr);
-int tryStreamPeek(TokenStream_t s, Token **ptr);
+int tryStreamNext(TokenStream_t s, Token **token, LexerError *error);
+int tryStreamPeek(TokenStream_t s, Token **token, LexerError *error);
 void tokenFree(Token *t);
-int tryStreamFree(TokenStream_t s);
+int tryStreamFree(TokenStream_t s, LexerError *error);
 
 

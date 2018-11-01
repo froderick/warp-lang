@@ -3,15 +3,17 @@
 
 int main(void) {
 
+  LexerError e;
+
   TokenStream_t stream;
-  int error = tryStreamMake(stdin, &stream);
+  int error = tryStreamMake(stdin, &stream, &e);
   if (error) {
     printf("whoops 1");
   }
 
   Token *t;
   while (1) {
-    int read = tryStreamNext(stream, &t);
+    int read = tryStreamNext(stream, &t, &e);
     if (read == LEX_EOF) {
       continue;
     }
