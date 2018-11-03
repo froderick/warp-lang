@@ -32,7 +32,7 @@
       :push (let [[ref-type ref-arg] next-args
                   val (case ref-type
                         :args  ;; relative function argument index
-                        (if-let [{:keys [saved-stack] :as frame} (last frames)]
+                        (if-let [{:keys [saved-stack] :as frame} (peek frames)]
                           (nth saved-stack ref-arg)
                           (throw (Exception. (format "no current stack frame for %s" next-args))))
 
@@ -55,9 +55,36 @@
 
               (recur (assoc next-vm :stack stack)))
 
-      :pop (do
-             (log vm "pop")
-             (recur (assoc next-vm :stack (pop stack))))
+      :pop (let [head (peek stack)
+                 [ref-type ref-arg] next-args]
+
+             (when-not head
+                 (throw (Exception. (format "cannot pop stack, it is empty" next-args))))
+
+             (case ref-type
+
+               ;; pop to a local
+               :local (let [{:keys [locals] :as frame} (peek frames)
+                            local-index ref-arg]
+
+                        (when-not (integer? local-index)
+                          (throw (Exception. (format "no current stack frame for %s" next-args))))
+
+                        (when-not frame
+                          (throw (Exception. (format "no current stack frame for %s" next-args))))
+
+                        (log vm (format "pop %s to local[%s]" (peek stack) local-index))
+
+                        (recur
+                         (-> next-vm
+                             (update-in [:frames (.indexOf frames frame) :locals] #(assoc % 1 "there"))
+                             (update-in [:stack] pop))))
+
+               ;; just pop the value
+               nil (do
+                     (log vm "pop")
+                     (recur (assoc next-vm :stack (pop stack))))))
+      
 
       :call (let [[ref-type new-ip] next-args]
               (log vm (format "call %s %s" ref-type new-ip))
@@ -68,19 +95,19 @@
                  (assoc next-vm
                         :frames (conj frames {:saved-stack stack
                                               :saved-ip (inc ip)
-                                              :locals []})
+                                              :locals {}})
                         :stack []
                         :ip new-ip))))
 
       :ret (do
              (log vm (format "ret"))
 
-             (if-let [{:keys [saved-stack saved-ip] :as frame} (last frames)]
+             (if-let [{:keys [saved-stack saved-ip] :as frame} (peek frames)]
                (recur
                 (assoc vm
                        :frames (pop frames) 
                        :stack (if (seq stack)                       ;; if the stack is not empty, push the top item
-                                (conj saved-stack (last stack))     ;; into the parent stack as a 'return' value
+                                (conj saved-stack (peek stack))     ;; into the parent stack as a 'return' value
                                 saved-stack)
                        :ip saved-ip))
                (throw (Exception. "no current stack frame"))))
@@ -101,6 +128,8 @@
 (comment
 
   (-> [;; procedure 'f'
+       [:push [:const 99]]
+       [:pop  [:local 0]]
        [:push [:args 0]]
        [:push [:args 1]]
        [:plus]
@@ -115,7 +144,7 @@
        [:halt]
        ]
       make-vm
-      (assoc :ip 6)
+      (assoc :ip 8)
       run-vm)
 
 
