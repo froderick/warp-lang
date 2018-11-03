@@ -16,18 +16,19 @@
    :instructions instructions
    :ip 0})
 
-(defn log [ip stack msg]
+(defn log [{:keys [ip stack] :as vm} msg]
   (printf "[vm; ip=%s; stack=%s] %s\n" ip stack msg)
   nil)
 
 (defn run-vm
   [{:keys [vars stack heap instructions ip frames] :as vm}]
 
-  (let [[next-inst next-args] (nth instructions ip) 
-        vm (update-in vm [:ip] inc)]
+  (let [[next-inst next-args] (nth instructions ip)
+        next-vm (update-in vm [:ip] inc)]
 
     (case next-inst
-      :halt (log ip stack "halting")
+      :halt (log vm "halting")
+
       :push (let [[ref-type ref-arg] next-args
                   val (case ref-type
                         :args  ;; relative function argument index
@@ -37,8 +38,9 @@
 
                         :const ;; constant value
                         ref-arg)]
-              (log ip stack (format "push %s %s" ref-type val))
-              (recur (assoc vm :stack (conj stack val))))
+
+              (log vm (format "push %s %s" ref-type val))
+              (recur (assoc next-vm :stack (conj stack val))))
 
       :plus (let [[ref-type ref-arg] next-args
                   b (first stack)
@@ -49,28 +51,29 @@
                             pop
                             (conj result))]
 
-              (log ip stack (format "plus %s %s = %s" a b result))
+              (log vm (format "plus %s %s = %s" a b result))
 
-              (recur (assoc vm :stack stack)))
+              (recur (assoc next-vm :stack stack)))
 
-      :pop (let [[arg] next-args]
-             (log ip stack "pop")
-             (recur (assoc vm :stack (pop stack))))
+      :pop (do
+             (log vm "pop")
+             (recur (assoc next-vm :stack (pop stack))))
 
       :call (let [[ref-type new-ip] next-args]
-              (log ip stack (format "call %s %s" ref-type new-ip))
+              (log vm (format "call %s %s" ref-type new-ip))
               
               (case ref-type
                 :address 
                 (recur
-                 (assoc vm
+                 (assoc next-vm
                         :frames (conj frames {:saved-stack stack
-                                              :saved-ip (inc ip)})
+                                              :saved-ip (inc ip)
+                                              :locals []})
                         :stack []
                         :ip new-ip))))
 
-      :ret (let [[ref-type new-ip] next-args]
-             (log ip stack (format "ret"))
+      :ret (do
+             (log vm (format "ret"))
 
              (if-let [{:keys [saved-stack saved-ip] :as frame} (last frames)]
                (recur
@@ -82,7 +85,18 @@
                        :ip saved-ip))
                (throw (Exception. "no current stack frame"))))
 
-      (println (format "[vm] invalid instruction %s, halting", next-inst)))))
+      (log vm (format "invalid instruction %s, halting" next-inst)))))
+
+
+;; what is missing
+;; - [:test [[:addr 'if'] [:addr 'else']]
+;; - [:jump [[:addr 0]]
+
+;; when a frame is created, we need allocate space to contain its locals in the frame. right
+;; now we can do this dynamically, though ideally we'd know in advance how many locals we need
+;; we also need a way to assign values to the locals, and push the locals into the stack for use
+;; - [:push [:local 0]]
+;; - [:pop  [:local 0]]
 
 (comment
 
