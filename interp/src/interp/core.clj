@@ -7,14 +7,36 @@
   {:color :white} ;; white gray black
   )
 
+(defn process-raw-instructions
+  [vm raw-instructions]
+  (let [[vm _] (reduce
+                (fn [[vm addr] x]
+                  (if (symbol? x)
+                    [(assoc-in vm [:aliases x] addr) addr]
+                    [(update-in vm [:instructions] conj x) (inc addr)]))
+                [vm 0]
+                raw-instructions)]
+    vm))
+
 (defn make-vm
-  [instructions]
-  {:vars {}
-   :frames []
-   :heap []
-   :stack []
-   :instructions instructions
-   :ip 0})
+  [raw-instructions]
+
+  (let [vm {:vars {}
+            :frames []
+            :heap []
+            :stack []
+            :instructions []
+            :aliases {}
+            :ip 0}
+        vm (process-raw-instructions vm raw-instructions)
+        main (-> vm
+                 :aliases
+                 (get 'main))]
+
+    (when-not main
+      (throw (Exception. (format "no main symbol to use for an entry point"))))
+
+    (assoc vm :ip main)))
 
 (defn log [{:keys [ip stack] :as vm} msg]
   (printf "[vm; ip=%s; stack=%s] %s\n" ip stack msg)
@@ -24,6 +46,11 @@
   (if-let [frame (peek frames)]
     frame
     (throw (Exception. (format "no current stack frame")))))
+
+(defn current-stack-value [{:keys [stack] :as vm}]
+  (if-let [val (peek stack)]
+    val
+    (throw (Exception. (format "no current stack value, stack is empty")))))
 
 (defn inc-ip
   [vm]
@@ -72,10 +99,7 @@
 
 (defn vm-pop
   [{:keys [stack frames] :as vm} [ref-type ref-arg :as args]]
-  (let [head (peek stack)]
-
-    (when-not head
-      (throw (Exception. (format "cannot pop stack, it is empty" args))))
+  (let [head (current-stack-value vm)]
 
     (case ref-type
 
@@ -126,6 +150,24 @@
                        (conj saved-stack (peek stack))     ;; into the parent stack as a 'return' value
                        saved-stack)))))
 
+(defn get-addr
+  [vm [ref-type ref-arg]]
+  (case ref-type
+    :address (if (integer? ref-arg)
+               ref-arg
+               (throw (Exception. "address arg must be an integer")))))
+
+;(defn vm-test
+;  [{:keys [stack frames] :as vm} [if-ref else-ref :as args]]
+;
+;  (let [head (current-stack-value vm)
+;        match ()
+;        ]
+;        if-addr (get-addr if-ref)
+;        else-addr (get-addr else-ref)]
+;
+;    ))
+
 (defn run-vm
   [{:keys [instructions ip] :as vm}]
 
@@ -148,6 +190,7 @@
 (comment
 
   (-> [;; procedure 'f'
+       'f
        [:push [:const 99]]
        [:pop  [:local 0]]
        [:push [:local 0]]
@@ -159,6 +202,7 @@
        [:plus]
        [:ret]
        ;; entry point
+       'main
        [:push [:const 100]]
        [:push [:const 200]]
        [:call [:address 0]]
@@ -166,7 +210,6 @@
        [:halt]
        ]
       make-vm
-      (assoc :ip 10)
       run-vm)
 
 
