@@ -125,11 +125,15 @@
                 (assoc :stack (pop stack)))))))
 
 (defn vm-call
-  [{:keys [stack frames ip] :as vm} [ref-type new-ip]]
-  (log vm (format "call %s %s" ref-type new-ip))
-  
-  (case ref-type
-    :address 
+  [{:keys [stack frames ip aliases] :as vm} [ref-type ref-val]]
+  (log vm (format "call %s %s" ref-type ref-val))
+
+  (let [new-ip (case ref-type
+                 :address ref-val
+                 :alias (let [addr (get aliases ref-val)]
+                          (when-not addr
+                            (throw (Exception. (format "no such alias found: %s" ref-val))))
+                          addr))]
     (assoc vm
            :ip new-ip
            :frames (conj frames {:saved-stack stack
@@ -205,7 +209,7 @@
        'main
        [:push [:const 100]]
        [:push [:const 200]]
-       [:call [:address 0]]
+       [:call [:alias 'f]]
        [:pop]
        [:halt]
        ]
