@@ -129,17 +129,17 @@
 (defn run-vm
   [{:keys [instructions ip] :as vm}]
 
-  (let [[inst args] (nth instructions ip)]
-
-    (case inst
-      :halt (log vm "halting")
-      :push (recur (vm-push vm args))
-      :plus (recur (vm-plus vm args))
-      :pop  (recur (vm-pop  vm args))
-      :call (recur (vm-call vm args))
-      :ret  (recur (vm-ret  vm))
-      (log vm (format "invalid instruction %s %s, halting" inst args)))))
-
+  (let [[inst args] (nth instructions ip)
+        vm (case inst
+             :halt (log vm "halting")
+             :push (vm-push vm args)
+             :plus (vm-plus vm args)
+             :pop  (vm-pop  vm args)
+             :call (vm-call vm args)
+             :ret  (vm-ret  vm)
+             (log vm (format "invalid instruction %s %s, halting" inst args)))]
+    (when vm
+      (recur vm))))
 
 ;; what is missing
 ;; - [:test [[:addr 'if'] [:addr 'else']]
