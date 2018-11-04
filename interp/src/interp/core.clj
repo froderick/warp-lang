@@ -52,6 +52,17 @@
     val
     (throw (Exception. (format "no current stack value, stack is empty")))))
 
+(defn get-addr
+  [{:keys [aliases] :as vm} [ref-type ref-arg]]
+  (case ref-type
+    :address (if (integer? ref-arg)
+               ref-arg
+               (throw (Exception. "address arg must be an integer")))
+    :alias (let [addr (get aliases ref-arg)]
+             (when-not addr
+               (throw (Exception. (format "no such alias found: %s" ref-arg))))
+             addr)))
+
 (defn inc-ip
   [vm]
   (update-in vm [:ip] inc))
@@ -82,7 +93,11 @@
         (assoc :stack (conj stack val)))))
 
 (defn vm-plus
-  [{:keys [stack frames] :as vm} [ref-type ref-arg]]
+  [{:keys [stack frames] :as vm}]
+
+  (when-not (>= (count stack) 2)
+    (throw (Exception. (format "plus requires two operands on the stack, found %s" (count stack)))))
+
   (let [b (first stack)
         a (second stack)
         result (+ a b)
@@ -154,42 +169,44 @@
                        (conj saved-stack (peek stack))     ;; into the parent stack as a 'return' value
                        saved-stack)))))
 
-(defn get-addr
-  [vm [ref-type ref-arg]]
-  (case ref-type
-    :address (if (integer? ref-arg)
-               ref-arg
-               (throw (Exception. "address arg must be an integer")))))
+(defn vm-jump
+  [{:keys [stack frames] :as vm} jump-ref]
 
-;(defn vm-test
-;  [{:keys [stack frames] :as vm} [if-ref else-ref :as args]]
-;
-;  (let [head (current-stack-value vm)
-;        match ()
-;        ]
-;        if-addr (get-addr if-ref)
-;        else-addr (get-addr else-ref)]
-;
-;    ))
+  (let [head (current-stack-value vm)
+        new-ip (get-addr vm jump-ref)]
+    (log vm (format "jump-ing to %s" new-ip))
+    (assoc vm :ip new-ip)))
+
+(defn vm-jump-if
+  [{:keys [stack frames] :as vm} jump-ref]
+
+  (let [head (current-stack-value vm)
+        match (and (not (nil? head)) (not (zero? head)))
+        new-ip (get-addr vm jump-ref)]
+    (if match
+      (do
+        (log vm (format "jump-if matched, jumping to %s" new-ip))
+        (assoc vm :ip new-ip))
+      (do
+        (log vm (format "jump-if not matched, not jumping to %s" new-ip))
+        (inc-ip vm)))))
 
 (defn run-vm
   [{:keys [instructions ip] :as vm}]
 
   (let [[inst args] (nth instructions ip)
         vm (case inst
-             :halt (log vm "halting")
-             :push (vm-push vm args)
-             :plus (vm-plus vm args)
-             :pop  (vm-pop  vm args)
-             :call (vm-call vm args)
-             :ret  (vm-ret  vm)
+             :halt    (log vm "halting")
+             :push    (vm-push vm args)
+             :plus    (vm-plus vm)
+             :pop     (vm-pop  vm args)
+             :call    (vm-call vm args)
+             :ret     (vm-ret  vm)
+             :jump    (vm-jump vm args)
+             :jump-if (vm-jump-if vm args)
              (log vm (format "invalid instruction %s %s, halting" inst args)))]
     (when vm
       (recur vm))))
-
-;; what is missing
-;; - [:test [[:addr 'if'] [:addr 'else']]
-;; - [:jump [[:addr 0]]
 
 (comment
 
@@ -199,8 +216,11 @@
        [:pop  [:local 0]]
        [:push [:local 0]]
        [:push [:args 0]]
+       [:push [:const 0]]
+       [:jump-if [:alias 'skip]]
        [:push [:args 1]]
        [:plus]
+       'skip
        [:plus]
        [:push [:const 50]]
        [:plus]
