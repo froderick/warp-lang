@@ -20,6 +20,11 @@
   (printf "[vm; ip=%s; stack=%s] %s\n" ip stack msg)
   nil)
 
+(defn current-frame [{:keys [frames] :as vm}]
+  (if-let [frame (peek frames)]
+    frame
+    (throw (Exception. (format "no current stack frame")))))
+
 (defn run-vm
   [{:keys [vars stack heap instructions ip frames] :as vm}]
 
@@ -31,10 +36,18 @@
 
       :push (let [[ref-type ref-arg] next-args
                   val (case ref-type
+
                         :args  ;; relative function argument index
-                        (if-let [{:keys [saved-stack] :as frame} (peek frames)]
-                          (nth saved-stack ref-arg)
-                          (throw (Exception. (format "no current stack frame for %s" next-args))))
+                        (let [{:keys [saved-stack]} (current-frame vm)]
+                          (when-not (integer? ref-arg)
+                            (throw (Exception. (format "arg-index must be an integer" next-args))))
+                          (nth saved-stack ref-arg))
+
+                        :local ;; relative local index
+                        (let [{:keys [locals] :as frame} (current-frame vm)]
+                          (when-not (integer? ref-arg)
+                            (throw (Exception. (format "local-index must be an integer" next-args))))
+                          (get locals ref-arg))
 
                         :const ;; constant value
                         ref-arg)]
@@ -59,25 +72,22 @@
                  [ref-type ref-arg] next-args]
 
              (when-not head
-                 (throw (Exception. (format "cannot pop stack, it is empty" next-args))))
+               (throw (Exception. (format "cannot pop stack, it is empty" next-args))))
 
              (case ref-type
 
                ;; pop to a local
-               :local (let [{:keys [locals] :as frame} (peek frames)
+               :local (let [{:keys [locals] :as frame} (current-frame vm)
                             local-index ref-arg]
 
                         (when-not (integer? local-index)
-                          (throw (Exception. (format "no current stack frame for %s" next-args))))
+                          (throw (Exception. (format "local-index must be an integer" next-args))))
 
-                        (when-not frame
-                          (throw (Exception. (format "no current stack frame for %s" next-args))))
-
-                        (log vm (format "pop %s to local[%s]" (peek stack) local-index))
+                        (log vm (format "pop %s to local[%s]" head local-index))
 
                         (recur
                          (-> next-vm
-                             (update-in [:frames (.indexOf frames frame) :locals] #(assoc % 1 "there"))
+                             (update-in [:frames (.indexOf frames frame) :locals] #(assoc % local-index head))
                              (update-in [:stack] pop))))
 
                ;; just pop the value
@@ -102,15 +112,14 @@
       :ret (do
              (log vm (format "ret"))
 
-             (if-let [{:keys [saved-stack saved-ip] :as frame} (peek frames)]
+             (let [{:keys [saved-stack saved-ip] :as frame} (current-frame vm)]
                (recur
                 (assoc vm
                        :frames (pop frames) 
                        :stack (if (seq stack)                       ;; if the stack is not empty, push the top item
                                 (conj saved-stack (peek stack))     ;; into the parent stack as a 'return' value
                                 saved-stack)
-                       :ip saved-ip))
-               (throw (Exception. "no current stack frame"))))
+                       :ip saved-ip))))
 
       (log vm (format "invalid instruction %s, halting" next-inst)))))
 
@@ -119,19 +128,15 @@
 ;; - [:test [[:addr 'if'] [:addr 'else']]
 ;; - [:jump [[:addr 0]]
 
-;; when a frame is created, we need allocate space to contain its locals in the frame. right
-;; now we can do this dynamically, though ideally we'd know in advance how many locals we need
-;; we also need a way to assign values to the locals, and push the locals into the stack for use
-;; - [:push [:local 0]]
-;; - [:pop  [:local 0]]
-
 (comment
 
   (-> [;; procedure 'f'
        [:push [:const 99]]
        [:pop  [:local 0]]
+       [:push [:local 0]]
        [:push [:args 0]]
        [:push [:args 1]]
+       [:plus]
        [:plus]
        [:push [:const 50]]
        [:plus]
@@ -144,7 +149,7 @@
        [:halt]
        ]
       make-vm
-      (assoc :ip 8)
+      (assoc :ip 10)
       run-vm)
 
 
