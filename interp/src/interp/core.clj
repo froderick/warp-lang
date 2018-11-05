@@ -2,6 +2,7 @@
   (:require
    [clojure.pprint :refer [pprint]]))
 
+
 (defn make-heap-object
   []
   {:color :white} ;; white gray black
@@ -98,8 +99,9 @@
   (when-not (>= (count stack) 2)
     (throw (Exception. (format "plus requires two operands on the stack, found %s" (count stack)))))
 
-  (let [b (first stack)
-        a (second stack)
+  (let [len (count stack)
+        b (nth stack (- len 1))
+        a (nth stack (- len 2))
         result (+ a b)
         stack (-> stack
                   pop
@@ -186,12 +188,176 @@
         (log vm (format "jump-if not matched, not jumping to %s" new-ip))
         (inc-ip vm)))))
 
+;; the leftmost 3 bits are used to encode the following types:
+;; -------------
+;; :unsigned-int
+;; :bool
+;; :nil
+;; :string
+;; :record
+
+(def max-unsigned-int (bit-not (bit-shift-left 7 61)))
+
+(defn pack-val
+  [{:keys [type data]}]
+
+  (let [[t v] (case type
+                :unsigned-int (let [cmp (Long/compareUnsigned data max-unsigned-int)]
+                                (when (> cmp 0)
+                                  (throw (Exception. (format "cannot represent unsigned integers greater than %s: %s"
+                                                             max-unsigned-int data))))
+                                [0 data])
+                :bool         [1 (if data 1 0)]
+                :nil          [2 0]
+                :object (let [cmp (Long/compareUnsigned data max-unsigned-int)]
+                                (when (> cmp 0)
+                                  (throw (Exception. (format "cannot represent objects with a location greater than %s: %s"
+                                                             max-unsigned-int data))))
+                                [3 data]))]
+        (bit-or (bit-shift-left t 61) v)))
+
+(defn unpack-val
+  [packed]
+  (let [t (bit-shift-right packed 61) 
+        v (bit-and max-unsigned-int packed)
+        [type data] (case t
+                      0 [:unsigned-int v]
+                      1 [:bool (if (zero? v) false true)]
+                      2 [:nil nil]
+                      3 [:object v])]
+    {:type type
+     :data data}))
+
+(defn value-is-object?
+  [v]
+  (= (-> v unpack-val :type) :object))
+
+(defn vm-gc-clear
+  [{:keys [heap] :as vm}]
+  (assoc vm :heap (->> (for [obj heap]
+                         (assoc :seen false))
+                       (into []))))
+
+(defn vm-gc-collect-roots
+  [{:keys [stack frames] :as vm}]
+  (->> frames
+       (map (fn [frame]
+              (concat (:saved-stack frame) (:locals frame))))
+       (concat stack)
+       (filter value-is-object?)
+       (into [])))
+
+(defn vm-gc-mark-root
+  [heap {:keys [type data seen] :as root}]
+
+  (if-not seen
+    (loop [i 0, heap heap]
+      (if-not (= i (count data))
+
+        (let [child-idx (-> (aget data i) unpack-val :data)
+              child-obj (get heap child-idx)
+              heap (if (= (:type child-obj) :object)
+                     (vm-gc-mark-root heap child-obj)
+                     heap)]
+          (recur (inc i) heap))
+
+        (assoc-in heap [data :seen] true)))
+    heap))
+
+(defn vm-gc-mark
+  [{:keys [stack frames heap] :as vm}]
+
+  (let [marked-heap (reduce
+                     (fn [heap val]
+                       (vm-gc-mark-root heap (unpack-val val)))
+                     heap
+                     (vm-gc-collect-roots vm))]
+    (assoc vm :heap heap)))
+
+(defn vm-gc-sweep
+  [{:keys [stack frames heap] :as vm}]
+
+  (let [[heap old->new]
+        (->> heap
+             (map-indexed (fn [idx obj]
+                            (when (:seen obj)
+                              (let [val (pack-val {:type :object
+                                                   :data idx})]
+                                [val obj]))))
+             (filter identity)
+             (reduce
+              (fn [[new-heap old->new] [old-val obj]]
+                (let [new-val (pack-val {:type :object
+                                         :data (count new-heap)})]
+                  [(conj new-heap obj) (assoc old->new old-val new-val)]))
+              [[] {}]
+              heap))
+
+        migrate-fn (fn [old-val]
+                     (let [{:keys [type data] :as old} (unpack-val old-val)]
+                       (if-not (= type :object)
+                         old-val
+                         (let [new-val (get old->new old-val)]
+                           (when-not new-val
+                             (throw (Exception. (format "no new for old: %s" old))))))))
+
+        migrate-vec-fn (fn [v]
+                         (->> v
+                              (map migrate-fn)
+                              (into [])))
+
+        stack (migrate-vec-fn stack)
+
+        frames (->> frames
+                    (map #(-> %
+                              (update-in [:saved-stack] migrate-vec-fn)
+                              (update-in [:locals] migrate-vec-fn)))
+                    (into []))]
+
+    (assoc vm
+           :heap heap
+           :stack stack
+           :frames frames)))
+
+;; mark all objects 'unseen'
+;; traverse roots, marking objects 'seen' and noting which locations reference them
+;; copy all seen objects to new vector
+;; update all references to new id's
+
+(defn vm-gc
+  [{:keys [stack frames heap] :as vm}]
+  (-> vm
+      vm-gc-clear
+      vm-gc-mark
+      vm-gc-sweep))
+
+(defn vm-alloc
+  [{:keys [stack heap] :as vm} [object-type length]]
+
+  (let [data (long-array length)
+        _ (let [null (pack-val {:type :nil})]
+            (doseq [i (range length)]
+              (aset data i null)))
+        obj {:type object-type
+             :data data}
+        heap (conj heap obj)
+        stack (conj stack (.indexOf heap obj))]
+
+    (log vm (format "alloc %s(%s)" object-type length))
+
+    (-> vm
+        inc-ip
+        (assoc :stack stack
+               :heap heap))))
+
 (defn run-vm
   [{:keys [instructions ip] :as vm}]
 
   (let [[inst args] (nth instructions ip)
         vm (case inst
-             :halt    (log vm "halting")
+             :halt    (do
+                        (log vm "halting")
+                        #_(pprint vm))
              :push    (vm-push vm args)
              :plus    (vm-plus vm)
              :pop     (vm-pop  vm args)
@@ -199,6 +365,7 @@
              :ret     (vm-ret  vm)
              :jump    (vm-jump vm args)
              :jump-if (vm-jump-if vm args)
+             :alloc   (vm-alloc vm args)
              (log vm (format "invalid instruction %s %s, halting" inst args)))]
     (when vm
       (recur vm))))
@@ -207,6 +374,7 @@
 
   (-> [;; procedure 'f'
        'f
+       [:alloc [:string 100]]
        [:push [:const 99]]
        [:pop  [:local 0]]
        [:push [:local 0]]
