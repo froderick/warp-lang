@@ -45,18 +45,36 @@
 ;;                     are instructions, which are represented as word singles
 ;;                     or triples: main instruction, arg hint, arg
 ;;
+;; Here is the function definition:
+;;
+;; [ns name num-args num-locals instructions]
+;;
 ;; Here is the instruction architecture:
-;;
-;; :push (:const | :local | :args) $from
-;; :pop  (:local $to)?
-;; :call :alias 'f
-;; :ret
-;; :jump (:address | :alias) $to
-;; :jump-if (:address | :alias) $to
-;; :alloc $object-type $object-length
-;; :halt
-;;
-;; :plus
+;; 
+;; |   8 bits    | 56 bits | 64 bits |
+;; +------------ +---------+---------+
+;; | :push-env   | $from   |         | ;; you can push values from the environment
+;; | :push-const |         | $const  | ;; you can push constant values
+;; | :push-heap  | $offset | $ref    | ;; you can push values from objects on the heap
+;; |             |         |         | ;;
+;; | :drop       |         |         | ;; drop the top item the stack
+;; | :pop-env    | $to     |         | ;; you can pop to the *local* environment
+;; | :pop-heap   | $offset | $ref    | ;; you can pop to objects on the heap
+
+;; | :call       |         |         | ;; you can invoke a value on the stack as a function, by first pushing
+;; |             |         |         | ;;   all the arguments, and then the function value reference itself
+;; | :call-env   | $target |         | ;; you can invoke symbols from the environment as functions
+;; |             |         |         | ;;
+;; | :ret        |         |         | ;; you can return from the currently executing function,
+;; |             |         |         | ;;   if there is anything on the top of the stack, it will be returned
+;; |             |         |         | ;;   by pushing it onto the stack of the caller
+;; | :jump       | $offset |         | ;; you can jump to any instuction *local* to the current function
+;; | :jump-if    | $offset |         | ;; you can jump to any instuction *local* to the current function, if
+;; |             |         |         | ;;   there is a value on the stack and it is truthy
+;; | :alloc      | $length | $type   | ;; you can create general objects on the heap
+;; | :halt       |         |         | ;; you can halt the VM, if there is anything on the top of the stack,
+;; |             |         |         | ;;   and it is a number, it will be returned as an exit code
+;; | :plus
 
 (def max-unsigned-int (bit-not (bit-shift-left 7 61)))
 
