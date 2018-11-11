@@ -1,6 +1,6 @@
 (ns interp.core-test
   (:require [clojure.test :refer :all]
-            [interp.core :refer :all]))
+            [interp.lowlevel :refer :all]))
 
 (deftest a-test
   (testing "FIXME, I fail."
