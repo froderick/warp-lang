@@ -16,28 +16,34 @@
 ;; :object       - interpreted as an unsigned integer, the value is a pointer
 ;;                 offset to dynamically-allocated memory on the heap.
 ;;
-;; Records on the heap are represented this way:
+;; Objects on the heap are represented this way:
 ;;
 ;; [56 bits - total object size in words][8 bits - specific type of object] [...]
 ;;
 ;; Here are the object types:
 ;;
-;; :char-array (0)   - The first word is an unsigned integer containing the number
-;;                     of characters in the string. Each subsequent word contains
-;;                     up to two UTF-16 characters, one in the higher 32 bits and
-;;                     one in the lower 32 bits. This is an optimization for
-;;                     representing Strings.
+;; :char-array (0)   - The first word is an unsigned integer containing the
+;;                     number of characters in the string. Each subsequent word
+;;                     contains up to two UTF-16 characters, one in the higher 32
+;;                     bits and one in the lower 32 bits. This is an optimization
+;;                     for representing Strings.
 ;;
-;; :object-array (1) - The first word is an unsigned integer containing the number
-;;                     of characters in the string. Each subsequent word contains
-;;                     a value.
+;; :object-array (1) - The first word is an unsigned integer containing the
+;;                     number of characters in the string. Each subsequent word
+;;                     contains a value.
 ;;
 ;; :record-type (2)  - Describes the names of the fields in a record, and their
 ;;                     indexes.
 ;;
 ;; :record (3)       - The first word is the Value that describes the record-type
-;;                     for a record. The rest of the words are values that describe
-;;                     the record's fields.
+;;                     for a record. The rest of the words are values that
+;;                     describe the record's fields.
+;;
+;; :function (5)     - The first word is the number of arguments the function
+;;                     accepts. The second word is a string value that is the
+;;                     source code for the function. The remainder of the words
+;;                     are instructions, which are represented as word singles
+;;                     or triples: main instruction, arg hint, arg
 
 (def max-unsigned-int (bit-not (bit-shift-left 7 61)))
 
@@ -405,7 +411,7 @@
        [:push [:local 0]]
        [:push [:args 0]]
        [:push [:const 0]]
-       [:jump-if [:alias 'skip]]
+       [:jump-if [:alias 'skip]] ; TODO: jump could be relative within the scope of a function...
        [:push [:args 1]]
        [:plus]
        'skip
@@ -427,6 +433,10 @@
 
   )
 
+;; TODO: consider removing all awareness of memory pointers from the instruction set.
+;;       Jumps can be relative to the stack frame, and non-local jumps can be achieved
+;;       later with continuations
+
 ;; Things that are missing in order for this VM to be useful as a compilation target:
 ;; - specced, so its not brittle
 ;; - a working GC
@@ -435,5 +445,3 @@
 ;; - the ability to dynamically load new instructions and redefine aliases
 ;; - a way to handle constants (strings, keywords, etc)
 ;;   - the gc needs to recognize constants as roots
-;; - a way to resize (increase) the memory allocated to an object, particularly in the case of dynamically-expanding
-;;   collections like vectors and hash-maps
