@@ -2,11 +2,75 @@
   (:require
    [clojure.pprint :refer [pprint]]))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; Value Spec ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn make-heap-object
-  []
-  {:color :white} ;; white gray black
-  )
+;; In this machine, all values are represented by a 64-bit word.
+;;
+;; The leftmost 3 bits are used to encode the following types. The remaining 61
+;; bits are interpreted on a per-type basis.
+;;
+;; :unsigned-int - an overflowable unsigned integer
+;; :bool         - 0 for false, 1 for true
+;; :nil          - constant, always 0
+;; :char         - the lowest 32 bits represent a UTF-16 character
+;; :object       - interpreted as an unsigned integer, the value is a pointer
+;;                 offset to dynamically-allocated memory on the heap.
+;;
+;; Records on the heap are represented this way:
+;;
+;; [56 bits - total object size in words][8 bits - specific type of object] [...]
+;;
+;; Here are the object types:
+;;
+;; :char-array (0)   - The first word is an unsigned integer containing the number
+;;                     of characters in the string. Each subsequent word contains
+;;                     up to two UTF-16 characters, one in the higher 32 bits and
+;;                     one in the lower 32 bits. This is an optimization for
+;;                     representing Strings.
+;;
+;; :object-array (1) - The first word is an unsigned integer containing the number
+;;                     of characters in the string. Each subsequent word contains
+;;                     a value.
+;;
+;; :record-type (2)  - Describes the names of the fields in a record, and their
+;;                     indexes.
+;;
+;; :record (3)       - The first word is the Value that describes the record-type
+;;                     for a record. The rest of the words are values that describe
+;;                     the record's fields.
+
+(def max-unsigned-int (bit-not (bit-shift-left 7 61)))
+
+(defn pack-val
+  [{:keys [type data]}]
+
+  (let [[t v]
+        (case type
+          :unsigned-int (let [cmp (Long/compareUnsigned data max-unsigned-int)]
+                          (when (> cmp 0)
+                            (throw (Exception. (format "cannot represent unsigned integers greater than %s: %s"
+                                                       max-unsigned-int data))))
+                          [0 data])
+          :bool         [1 (if data 1 0)]
+          :nil          [2 0]
+          :object (let [cmp (Long/compareUnsigned data max-unsigned-int)]
+                    (when (> cmp 0)
+                      (throw (Exception. (format "cannot represent objects with a location greater than %s: %s"
+                                                 max-unsigned-int data))))
+                    [3 data]))]
+    (bit-or (bit-shift-left t 61) v)))
+
+(defn unpack-val
+  [packed]
+  (let [t (bit-shift-right packed 61) 
+        v (bit-and max-unsigned-int packed)
+        [type data] (case t
+                      0 [:unsigned-int v]
+                      1 [:bool (if (zero? v) false true)]
+                      2 [:nil nil]
+                      3 [:object v])]
+    {:type type
+     :data data}))
 
 (defn process-raw-instructions
   [vm raw-instructions]
@@ -35,7 +99,7 @@
                  (get 'main))]
 
     (when-not main
-      (throw (Exception. (format "no main symbol to use for an entry point"))))
+      (throw (Exception. "no main symbol to use for an entry point")))
 
     (assoc vm :ip main)))
 
@@ -46,12 +110,12 @@
 (defn current-frame [{:keys [frames] :as vm}]
   (if-let [frame (peek frames)]
     frame
-    (throw (Exception. (format "no current stack frame")))))
+    (throw (Exception. "no current stack frame"))))
 
 (defn current-stack-value [{:keys [stack] :as vm}]
   (if-let [val (peek stack)]
     val
-    (throw (Exception. (format "no current stack value, stack is empty")))))
+    (throw (Exception. "no current stack value, stack is empty"))))
 
 (defn get-addr
   [{:keys [aliases] :as vm} [ref-type ref-arg]]
@@ -188,45 +252,6 @@
         (log vm (format "jump-if not matched, not jumping to %s" new-ip))
         (inc-ip vm)))))
 
-;; the leftmost 3 bits are used to encode the following types:
-;; -------------
-;; :unsigned-int
-;; :bool
-;; :nil
-;; :string
-;; :record
-
-(def max-unsigned-int (bit-not (bit-shift-left 7 61)))
-
-(defn pack-val
-  [{:keys [type data]}]
-
-  (let [[t v] (case type
-                :unsigned-int (let [cmp (Long/compareUnsigned data max-unsigned-int)]
-                                (when (> cmp 0)
-                                  (throw (Exception. (format "cannot represent unsigned integers greater than %s: %s"
-                                                             max-unsigned-int data))))
-                                [0 data])
-                :bool         [1 (if data 1 0)]
-                :nil          [2 0]
-                :object (let [cmp (Long/compareUnsigned data max-unsigned-int)]
-                                (when (> cmp 0)
-                                  (throw (Exception. (format "cannot represent objects with a location greater than %s: %s"
-                                                             max-unsigned-int data))))
-                                [3 data]))]
-        (bit-or (bit-shift-left t 61) v)))
-
-(defn unpack-val
-  [packed]
-  (let [t (bit-shift-right packed 61) 
-        v (bit-and max-unsigned-int packed)
-        [type data] (case t
-                      0 [:unsigned-int v]
-                      1 [:bool (if (zero? v) false true)]
-                      2 [:nil nil]
-                      3 [:object v])]
-    {:type type
-     :data data}))
 
 (defn value-is-object?
   [v]
@@ -401,3 +426,14 @@
 
 
   )
+
+;; Things that are missing in order for this VM to be useful as a compilation target:
+;; - specced, so its not brittle
+;; - a working GC
+;; - a UTF-16 character value type so strings can be represented
+;; - a printf impl
+;; - the ability to dynamically load new instructions and redefine aliases
+;; - a way to handle constants (strings, keywords, etc)
+;;   - the gc needs to recognize constants as roots
+;; - a way to resize (increase) the memory allocated to an object, particularly in the case of dynamically-expanding
+;;   collections like vectors and hash-maps
