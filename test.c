@@ -40,8 +40,11 @@ START_TEST(basic) {
 
   LexerError e;
 
+  StreamSource_t source;
+  ck_assert_int_eq(trySourceMakeFilename(tmpFile, &source, &e), LEX_SUCCESS);
+
   TokenStream_t stream;
-  ck_assert_int_eq(tryStreamMakeFile(tmpFile, &stream, &e), LEX_SUCCESS);
+  ck_assert_int_eq(tryStreamMake(source, &stream, &e), LEX_SUCCESS);
 
   Token *t;
 
@@ -115,8 +118,11 @@ START_TEST(eof_mid_number_token) {
 
     LexerError e;
 
+    StreamSource_t source;
+    ck_assert_int_eq(trySourceMakeFilename(tmpFile, &source, &e), LEX_SUCCESS);
+
     TokenStream_t stream;
-    ck_assert_int_eq(tryStreamMakeFile(tmpFile, &stream, &e), LEX_SUCCESS);
+    ck_assert_int_eq(tryStreamMake(source, &stream, &e), LEX_SUCCESS);
 
     Token *t;
 
@@ -136,8 +142,11 @@ START_TEST(errors) {
 
     LexerError e;
 
+    StreamSource_t source;
+    ck_assert_int_eq(trySourceMakeFilename(tmpFile, &source, &e), LEX_SUCCESS);
+
     TokenStream_t stream;
-    ck_assert_int_eq(tryStreamMakeFile(tmpFile, &stream, &e), LEX_SUCCESS);
+    ck_assert_int_eq(tryStreamMake(source, &stream, &e), LEX_SUCCESS);
 
     Token *t;
 
@@ -156,8 +165,8 @@ END_TEST
 Suite * suite(void) {
 
   TCase *tc_core = tcase_create("Core");
-//  tcase_add_test(tc_core, basic);
-//  tcase_add_test(tc_core, eof_mid_number_token);
+  tcase_add_test(tc_core, basic);
+  tcase_add_test(tc_core, eof_mid_number_token);
   tcase_add_test(tc_core, errors);
 
   Suite *s = suite_create("lexer");

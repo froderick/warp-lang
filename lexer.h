@@ -52,11 +52,23 @@ typedef struct LexerError {
   wchar_t message[LEX_ERROR_MSG_LENGTH + 1];
 } LexerError;
 
+typedef struct StreamSource *StreamSource_t;
+
+int trySourceMake(
+    void *state,
+    int (*readChar)(void *state, wchar_t *ch, LexerError *error),
+    int (*unreadChar)(void * state, wchar_t ch, LexerError *error),
+    int (*freeState)(void *state, LexerError *error),
+    StreamSource_t *s,
+    LexerError *error
+);
+int trySourceMakeFilename(char *filename, StreamSource_t *s, LexerError *error);
+int trySourceMakeFile(FILE *file, StreamSource_t *s, LexerError *error);
+int trySourceFree(StreamSource_t s, LexerError *error);
+
 typedef struct TokenStream *TokenStream_t;
 
-int tryStreamMakeFile(char *filename, TokenStream_t *s, LexerError *error);
-int tryStreamMake(FILE *file, TokenStream_t *s, LexerError *error);
-
+int tryStreamMake(StreamSource_t source, TokenStream_t *s, LexerError *error);
 int tryStreamNext(TokenStream_t s, Token **token, LexerError *error);
 int tryStreamPeek(TokenStream_t s, Token **token, LexerError *error);
 void tokenFree(Token *t);

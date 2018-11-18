@@ -5,10 +5,16 @@ int main(void) {
 
   LexerError e;
 
-  TokenStream_t stream;
-  int error = tryStreamMake(stdin, &stream, &e);
+  StreamSource_t source;
+  int error = trySourceMakeFile(stdin, &source, &e);
   if (error) {
     printf("whoops 1");
+  }
+
+  TokenStream_t stream;
+  error = tryStreamMake(source, &stream, &e);
+  if (error) {
+    printf("whoops 2");
   }
 
   Token *t;
