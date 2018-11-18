@@ -76,6 +76,9 @@
 ;; |             |         |         | ;;   and it is a number, it will be returned as an exit code
 ;; | :plus
 
+
+;; TODO: how to handle errors (call on something that isn't callable)?
+
 (def max-unsigned-int (bit-not (bit-shift-left 7 61)))
 
 (defn pack-val
