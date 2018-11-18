@@ -28,8 +28,8 @@ typedef struct Error {
 
 /*
  * These are the core return codes:
- * - #RET_SUCCESS means whatever was attempted succeeded.
- * - #RET_ERROR means that the error struct has been populated
+ * - #R_SUCCESS means whatever was attempted succeeded.
+ * - #R_ERROR means that the error struct has been populated
  *   with more information.
  *
  * The remainder of the codes in here are situation-specific. They are
@@ -40,15 +40,15 @@ typedef struct Error {
  */
 typedef enum RetVal {
 
-  RET_SUCCESS,
-  RET_ERROR,
+  R_SUCCESS,
+  R_ERROR,
 
   /*
    * This code is returned by the lexer to indicate that no next token is
    * available to be read. It isn't an error unless you can't continue
    * without another token.
    */
-  RET_TOKEN_STREAM_EOF
+  R_EOF
 } RetVal;
 
 /*

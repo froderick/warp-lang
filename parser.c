@@ -72,9 +72,9 @@ typedef struct AstNode {
 //  Token *t;
 //  int read = tryStreamNext(stream, &t, &error);
 //
-//  if (read != RET_SUCCESS) {
+//  if (read != R_SUCCESS) {
 //    // TODO, do this properly
-//    return RET_ERROR;
+//    return R_ERROR;
 //  }
 //
 //  switch (t->type) {
@@ -100,7 +100,7 @@ typedef struct AstNode {
 //      break;
 //  }
 //
-//  return RET_SUCCESS; // TODO: need general success error code
+//  return R_SUCCESS; // TODO: need general success error code
 //}
 
 int main(int argv, char** argc) {
@@ -123,12 +123,12 @@ int main(int argv, char** argc) {
 //
 //  Token *t;
 //  int read;
-//  while ((read = tryStreamNext(stream, &t, &e)) == RET_SUCCESS) {
+//  while ((read = tryStreamNext(stream, &t, &e)) == R_SUCCESS) {
 //    printf("token: %ls (%s) %lu %lu\n", t->text, t->typeName, t->position, t->length);
 //    free(t);
 //  }
 //
-//  if (read == RET_TOKEN_STREAM_EOF) {
+//  if (read == R_EOF) {
 //    printf("eof\n");
 //  }
 //  else {

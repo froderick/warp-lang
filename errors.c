@@ -14,7 +14,7 @@ RetVal memoryError(Error *error, char *desc) {
   swprintf(error->message, ERROR_MSG_LENGTH, L"failed to %s\n", desc);
 
   if (DEBUG) { printf("error: %ls\n", error->message); }
-  return RET_ERROR;
+  return R_ERROR;
 }
 
 RetVal ioError(Error *error, char *desc) {
@@ -24,7 +24,7 @@ RetVal ioError(Error *error, char *desc) {
   swprintf(error->message, ERROR_MSG_LENGTH, L"failed to %s ->  '%s'\n", desc, strerror(errno));
 
   if (DEBUG) { printf("error: %ls\n", error->message); }
-  return RET_ERROR;
+  return R_ERROR;
 }
 
 RetVal tokenizationError(Error *error, unsigned long position, char *desc) {
@@ -34,5 +34,5 @@ RetVal tokenizationError(Error *error, unsigned long position, char *desc) {
   swprintf(error->message, ERROR_MSG_LENGTH, L"failed to tokenize stream -> %s\n", desc);
 
   if (DEBUG) { printf("error: %ls\n", error->message); }
-  return RET_ERROR;
+  return R_ERROR;
 }

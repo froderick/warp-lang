@@ -20,13 +20,13 @@ int main(void) {
   Token *t;
   while (1) {
     int read = tryStreamNext(stream, &t, &e);
-    if (read == RET_TOKEN_STREAM_EOF) {
+    if (read == R_EOF) {
       continue;
     }
-    else if (read == RET_ERROR) {
+    else if (read == R_ERROR) {
       printf("> encountered lexer error\n\n");
     }
-    else if (read == RET_SUCCESS) {
+    else if (read == R_SUCCESS) {
       printf("token: %ls (%s) %lu %lu\n", t->text, t->typeName, t->position, t->length);
     }
     else {

@@ -43,7 +43,7 @@ RetVal trySourceMake(
   s->freeState = freeState;
 
   *ptr = s;
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 RetVal tryReadCharFromFILE(void *state, wchar_t* ch, Error *error) {
@@ -53,13 +53,13 @@ RetVal tryReadCharFromFILE(void *state, wchar_t* ch, Error *error) {
   *ch = fgetwc(stream);
   if (*ch == WEOF) {
     if (feof(stream)) {
-      return RET_TOKEN_STREAM_EOF;
+      return R_EOF;
     }
     else {
       return ioError(error, "read token from stream");
     }
   }
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 RetVal tryUnreadCharToFILE(void *state, wchar_t ch, Error *error) {
@@ -70,7 +70,7 @@ RetVal tryUnreadCharToFILE(void *state, wchar_t ch, Error *error) {
   if (result == WEOF) {
     return ioError(error, "push character back onto stream");
   }
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 RetVal tryFreeFILE(void *state, Error *error) {
@@ -80,7 +80,7 @@ RetVal tryFreeFILE(void *state, Error *error) {
   if (stream != NULL && fclose(stream)) {
     return ioError(error, "closing stream on free");
   }
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 RetVal trySourceMakeFile(FILE *file, StreamSource **s, Error *error) {
@@ -102,14 +102,14 @@ RetVal trySourceMakeFilename(char *filename, StreamSource **s, Error *error) {
     return ioError(error, "making stream from file");
   }
 
-  if (trySourceMakeFile(file, s, error) != RET_SUCCESS) {
+  if (trySourceMakeFile(file, s, error) != R_SUCCESS) {
     if (!fclose(file)) {
       return ioError(error, "closing file stream");
     }
-    return RET_ERROR;
+    return R_ERROR;
   }
 
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 typedef struct StringStream {
@@ -123,12 +123,12 @@ RetVal tryReadCharFromString(void *state, wchar_t* ch, Error *error) {
   StringStream *stream = (StringStream*)state;
 
   if (stream->next == stream->length) {
-    return RET_TOKEN_STREAM_EOF;
+    return R_EOF;
   }
 
   *ch = stream->text[stream->next];
   stream->next = stream->next + 1;
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 RetVal tryUnreadCharToString(void *state, wchar_t ch, Error *error) {
@@ -139,13 +139,13 @@ RetVal tryUnreadCharToString(void *state, wchar_t ch, Error *error) {
     stream->next = stream->next - 1;
   }
 
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 RetVal tryFreeString(void *state, Error *error) {
   StringStream *stream = (StringStream*)state;
   free(stream);
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 RetVal trySourceMakeString(wchar_t* text, uint64_t length, StreamSource_t *s, Error *error) {
@@ -179,17 +179,17 @@ RetVal trySourceUnreadChar(StreamSource *source, wchar_t ch, Error *error) {
 
 RetVal trySourceFree(StreamSource *s, Error *error) {
 
-  int freeSuccess = RET_SUCCESS;
+  int freeSuccess = R_SUCCESS;
   if (s->freeState != NULL) {
     freeSuccess = s->freeState(s->state, error);
   }
   free(s);
 
-  if (freeSuccess != RET_SUCCESS) {
-    return RET_ERROR;
+  if (freeSuccess != R_SUCCESS) {
+    return R_ERROR;
   }
 
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 /*
@@ -232,7 +232,7 @@ RetVal tryBufferMake(StringBuffer **ptr, Error *error) {
 
   b->data = data;
   *ptr = b;
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 void bufferFree(StringBuffer *b) {
@@ -261,7 +261,7 @@ RetVal tryBufferAppend(StringBuffer *b, wchar_t ch, Error *error) {
   b->usedChars = b->usedChars + 1;
   b->data[b->usedChars] = L'\0';
 
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 void bufferClear(StringBuffer *b) {
@@ -324,7 +324,7 @@ RetVal tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsig
 
   *ptr = t;
 
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 RetVal tryTokenInitFromLexer(LexerState *s, TokenType type, Token **ptr, Error *error) {
@@ -340,8 +340,8 @@ RetVal tryLexerStateMake(LexerState **ptr, Error *error) {
   StringBuffer *b = NULL;
   LexerState *s = NULL;
 
-  if (tryBufferMake(&b, error) != RET_SUCCESS) {
-    return RET_ERROR;
+  if (tryBufferMake(&b, error) != R_SUCCESS) {
+    return R_ERROR;
   }
 
   s = malloc(sizeof(LexerState));
@@ -354,7 +354,7 @@ RetVal tryLexerStateMake(LexerState **ptr, Error *error) {
   s->b = b;
 
   *ptr = s;
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 void lexerStateFree(LexerState *s) {
@@ -384,8 +384,8 @@ bool isFalse(wchar_t *text) {
 
 RetVal tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryBufferAppend(s->b, first, error) != RET_SUCCESS) {
-    return RET_ERROR;
+  if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
+    return R_ERROR;
   }
 
   // keep reading until char is not numeric, then push back
@@ -396,45 +396,45 @@ RetVal tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token *
   do {
 
     int read = trySourceReadChar(source, &ch, error);
-    if (read == RET_ERROR) {
-      return RET_ERROR;
+    if (read == R_ERROR) {
+      return R_ERROR;
     }
 
-    if (read == RET_TOKEN_STREAM_EOF) {
+    if (read == R_EOF) {
       eof = true;
       matched = false;
     }
     else if (!iswdigit(ch)) {
-      if (trySourceUnreadChar(source, ch, error) != RET_SUCCESS) {
-        return RET_ERROR;
+      if (trySourceUnreadChar(source, ch, error) != R_SUCCESS) {
+        return R_ERROR;
       }
       matched = false;
     }
     else {
-      if (tryBufferAppend(s->b, ch, error) != RET_SUCCESS) {
-        return RET_ERROR;
+      if (tryBufferAppend(s->b, ch, error) != R_SUCCESS) {
+        return R_ERROR;
       }
       matched = true;
     }
 
   } while (matched);
 
-  if (tryTokenInitFromLexer(s, T_NUMBER, token, error) != RET_SUCCESS) {
-    return RET_ERROR;
+  if (tryTokenInitFromLexer(s, T_NUMBER, token, error) != R_SUCCESS) {
+    return R_ERROR;
   }
 
   if (eof) {
-    return RET_TOKEN_STREAM_EOF;
+    return R_EOF;
   }
   else {
-    return RET_SUCCESS;
+    return R_SUCCESS;
   }
 }
 
 RetVal tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryBufferAppend(s->b, first, error) != RET_SUCCESS) {
-    return RET_ERROR;
+  if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
+    return R_ERROR;
   }
 
   // keep reading until char is not alphanumeric, then push back
@@ -445,23 +445,23 @@ RetVal tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token *
   do {
 
     int read = trySourceReadChar(source, &ch, error);
-    if (read == RET_ERROR) {
-      return RET_ERROR;
+    if (read == R_ERROR) {
+      return R_ERROR;
     }
 
-    if (read == RET_TOKEN_STREAM_EOF) {
+    if (read == R_EOF) {
       eof = true;
       matched = false;
     }
     else if (!iswalnum(ch)) {
-      if (trySourceUnreadChar(source, ch, error) != RET_SUCCESS) {
-        return RET_ERROR;
+      if (trySourceUnreadChar(source, ch, error) != R_SUCCESS) {
+        return R_ERROR;
       }
       matched = false;
     }
     else {
-      if (tryBufferAppend(s->b, ch, error) != RET_SUCCESS) {
-        return RET_ERROR;
+      if (tryBufferAppend(s->b, ch, error) != R_SUCCESS) {
+        return R_ERROR;
       }
       matched = true;
     }
@@ -484,22 +484,22 @@ RetVal tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token *
     type = T_SYMBOL;
   }
 
-  if (tryTokenInitFromLexer(s, type, token, error) != RET_SUCCESS) {
-    return RET_ERROR;
+  if (tryTokenInitFromLexer(s, type, token, error) != R_SUCCESS) {
+    return R_ERROR;
   }
 
   if (eof) {
-    return RET_TOKEN_STREAM_EOF;
+    return R_EOF;
   }
   else {
-    return RET_SUCCESS;
+    return R_SUCCESS;
   }
 }
 
 RetVal tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryBufferAppend(s->b, first, error) != RET_SUCCESS) {
-    return RET_ERROR;
+  if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
+    return R_ERROR;
   }
 
   // keep reading until char is not alphanumeric, then push back
@@ -510,23 +510,23 @@ RetVal tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token 
   do {
 
     int read = trySourceReadChar(source, &ch, error);
-    if (read == RET_ERROR) {
-      return RET_ERROR;
+    if (read == R_ERROR) {
+      return R_ERROR;
     }
 
-    if (read == RET_TOKEN_STREAM_EOF) {
+    if (read == R_EOF) {
       eof = true;
       matched = false;
     }
     else if (!iswalnum(ch)) {
-      if (trySourceUnreadChar(source, ch, error) != RET_SUCCESS) {
-        return RET_ERROR;
+      if (trySourceUnreadChar(source, ch, error) != R_SUCCESS) {
+        return R_ERROR;
       }
       matched = false;
     }
     else {
-      if (tryBufferAppend(s->b, ch, error) != RET_SUCCESS) {
-        return RET_ERROR;
+      if (tryBufferAppend(s->b, ch, error) != R_SUCCESS) {
+        return R_ERROR;
       }
       matched = true;
     }
@@ -537,22 +537,22 @@ RetVal tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token 
     return tokenizationError(error, s->position, "keyword token type cannot be empty");
   }
 
-  if (tryTokenInitFromLexer(s, T_KEYWORD, token, error) != RET_SUCCESS) {
-    return RET_ERROR;
+  if (tryTokenInitFromLexer(s, T_KEYWORD, token, error) != R_SUCCESS) {
+    return R_ERROR;
   }
 
   if (eof) {
-    return RET_TOKEN_STREAM_EOF;
+    return R_EOF;
   }
   else {
-    return RET_SUCCESS;
+    return R_SUCCESS;
   }
 }
 
 RetVal tryReadString(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryBufferAppend(s->b, first, error) != RET_SUCCESS) {
-    return RET_ERROR;
+  if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
+    return R_ERROR;
   }
 
   // keep reading until char is a non-escaped quote
@@ -563,12 +563,12 @@ RetVal tryReadString(StreamSource *source, LexerState *s, wchar_t first, Token *
   do {
 
     int read = trySourceReadChar(source, &ch, error);
-    if (read != RET_SUCCESS) {
+    if (read != R_SUCCESS) {
       return read;
     }
 
-    if (tryBufferAppend(s->b, ch, error) != RET_SUCCESS) {
-      return RET_ERROR;
+    if (tryBufferAppend(s->b, ch, error) != R_SUCCESS) {
+      return R_ERROR;
     }
 
     if (!escape && ch == L'"') {
@@ -580,11 +580,11 @@ RetVal tryReadString(StreamSource *source, LexerState *s, wchar_t first, Token *
   }
   while (!foundEnd);
 
-  if (tryTokenInitFromLexer(s, T_STRING, token, error) != RET_SUCCESS) {
-    return RET_ERROR;
+  if (tryTokenInitFromLexer(s, T_STRING, token, error) != R_SUCCESS) {
+    return R_ERROR;
   }
 
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 RetVal tryTokenRead(StreamSource *source, LexerState *s, Token **token, Error *error) {
@@ -595,7 +595,7 @@ RetVal tryTokenRead(StreamSource *source, LexerState *s, Token **token, Error *e
 
   while (true) {
     int read = trySourceReadChar(source, &ch, error);
-    if (read != RET_SUCCESS) {
+    if (read != R_SUCCESS) {
       return read;
     }
     if (isWhitespace(ch)) {
@@ -654,7 +654,7 @@ RetVal tryTokenRead(StreamSource *source, LexerState *s, Token **token, Error *e
   }
 
   // if we created a token, increment the lexer position
-  if (ret != RET_ERROR && *token != NULL) {
+  if (ret != R_ERROR && *token != NULL) {
     s->position = s->position + (*token)->length;
   }
 
@@ -693,7 +693,7 @@ RetVal tryStreamMake(StreamSource *source, TokenStream **ptr, Error *error) {
   s->next = NULL;
 
   *ptr = s;
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 RetVal tryStreamMakeFile(char *filename, TokenStream **ptr, Error *error) {
@@ -706,15 +706,15 @@ RetVal tryStreamMakeFile(char *filename, TokenStream **ptr, Error *error) {
     return ioError(error, "making stream from file");
   }
 
-  if (tryStreamMake((void*)file, &s, error) != RET_SUCCESS) {
+  if (tryStreamMake((void*)file, &s, error) != R_SUCCESS) {
     if (!fclose(file)) {
       return ioError(error, "closing file stream");
     }
-    return RET_ERROR;
+    return R_ERROR;
   }
 
   *ptr = s;
-  return RET_SUCCESS;
+  return R_SUCCESS;
 }
 
 RetVal tryStreamNext(TokenStream *s, Token **token, Error *error) {
@@ -725,7 +725,7 @@ RetVal tryStreamNext(TokenStream *s, Token **token, Error *error) {
   if (s->next != NULL) {
     *token = s->next;
     s->next = NULL;
-    return RET_SUCCESS;
+    return R_SUCCESS;
   }
 
   return tryTokenRead(s->source, s->lexer, token, error);
@@ -736,12 +736,12 @@ RetVal tryStreamPeek(TokenStream *s, Token **token, Error *error) {
   if (s->next != NULL) {
     *token = s->next;
     s->next = NULL;
-    return RET_SUCCESS;
+    return R_SUCCESS;
   }
 
   int read = tryTokenRead(s->source, s->lexer, token, error);
 
-  if (read != RET_ERROR) {
+  if (read != R_ERROR) {
     s->next = *token;
   }
 
@@ -751,7 +751,7 @@ RetVal tryStreamPeek(TokenStream *s, Token **token, Error *error) {
 RetVal tryStreamFree(TokenStream *s, Error *error) {
 
   if (s == NULL) {
-    return RET_SUCCESS;
+    return R_SUCCESS;
   }
 
   int closeError = trySourceFree(s->source, error);
