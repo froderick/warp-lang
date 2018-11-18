@@ -64,6 +64,7 @@ int trySourceMake(
 );
 int trySourceMakeFilename(char *filename, StreamSource_t *s, LexerError *error);
 int trySourceMakeFile(FILE *file, StreamSource_t *s, LexerError *error);
+int trySourceMakeString(wchar_t* text, uint64_t length, StreamSource_t *s, LexerError *error);
 int trySourceFree(StreamSource_t s, LexerError *error);
 
 typedef struct TokenStream *TokenStream_t;

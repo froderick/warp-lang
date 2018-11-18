@@ -147,6 +147,63 @@ int trySourceMakeFilename(char *filename, StreamSource **s, LexerError *error) {
   return LEX_SUCCESS;
 }
 
+typedef struct StringStream {
+  wchar_t* text;
+  uint64_t length;
+  uint64_t next;
+} StringStream;
+
+int tryReadCharFromString(void *state, wchar_t* ch, LexerError *error) {
+
+  StringStream *stream = (StringStream*)state;
+
+  if (stream->next == stream->length) {
+    return LEX_EOF;
+  }
+
+  *ch = stream->text[stream->next];
+  stream->next = stream->next + 1;
+  return LEX_SUCCESS;
+}
+
+int tryUnreadCharToString(void *state, wchar_t ch, LexerError *error) {
+
+  StringStream *stream = (StringStream*)state;
+
+  if (stream->next > 0) {
+    stream->next = stream->next - 1;
+  }
+
+  return LEX_SUCCESS;
+}
+
+int tryFreeString(void *state, LexerError *error) {
+  StringStream *stream = (StringStream*)state;
+  free(stream);
+  return LEX_SUCCESS;
+}
+
+int trySourceMakeString(wchar_t* text, uint64_t length, StreamSource_t *s, LexerError *error) {
+
+  StringStream *state;
+
+  if (NULL == (state = malloc(sizeof(StringStream)))) {
+    return memoryError(error, "malloc StringStream");
+  }
+
+  state->text = text;
+  state->length = length;
+  state->next = 0;
+
+  return trySourceMake(
+      (void*)state,
+      tryReadCharFromString,
+      tryUnreadCharToString,
+      tryFreeString,
+      s,
+      error);
+}
+
 int trySourceReadChar(StreamSource *source, wchar_t* ch, LexerError *error) {
   return source->readChar(source->state, ch, error);
 }

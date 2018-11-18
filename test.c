@@ -35,13 +35,12 @@ void assertToken(Token *t,
 
 START_TEST(basic) {
 
-  char * tmpFile = "/tmp/tmp.txt";
-  spit(tmpFile, L"(one :two 345 '\"six\") true false nil [] {}");
+  wchar_t* text = L"(one :two 345 '\"six\") true false nil [] {}";
 
   LexerError e;
 
   StreamSource_t source;
-  ck_assert_int_eq(trySourceMakeFilename(tmpFile, &source, &e), LEX_SUCCESS);
+  ck_assert_int_eq(trySourceMakeString(text, wcslen(text), &source, &e), LEX_SUCCESS);
 
   TokenStream_t stream;
   ck_assert_int_eq(tryStreamMake(source, &stream, &e), LEX_SUCCESS);
@@ -113,13 +112,12 @@ END_TEST
 
 START_TEST(eof_mid_number_token) {
 
-    char * tmpFile = "/tmp/tmp.txt";
-    spit(tmpFile, L"12345");
+    wchar_t* text = L"12345";
 
     LexerError e;
 
     StreamSource_t source;
-    ck_assert_int_eq(trySourceMakeFilename(tmpFile, &source, &e), LEX_SUCCESS);
+    ck_assert_int_eq(trySourceMakeString(text, wcslen(text), &source, &e), LEX_SUCCESS);
 
     TokenStream_t stream;
     ck_assert_int_eq(tryStreamMake(source, &stream, &e), LEX_SUCCESS);
@@ -137,13 +135,12 @@ END_TEST
 
 START_TEST(errors) {
 
-    char * tmpFile = "/tmp/tmp.txt";
-    spit(tmpFile, L":");
+    wchar_t* text = L":";
 
     LexerError e;
 
     StreamSource_t source;
-    ck_assert_int_eq(trySourceMakeFilename(tmpFile, &source, &e), LEX_SUCCESS);
+    ck_assert_int_eq(trySourceMakeString(text, wcslen(text), &source, &e), LEX_SUCCESS);
 
     TokenStream_t stream;
     ck_assert_int_eq(tryStreamMake(source, &stream, &e), LEX_SUCCESS);
@@ -155,8 +152,8 @@ START_TEST(errors) {
     ck_assert_msg(e.position == 0);
     printf("%ls", e.message);
 
-    wchar_t *text = L"failed to tokenize stream -> keyword token type cannot be empty\n";
-    ck_assert_msg(wcscmp(e.message, text) == 0, "text must match");
+    wchar_t *msg = L"failed to tokenize stream -> keyword token type cannot be empty\n";
+    ck_assert_msg(wcscmp(e.message, msg) == 0, "text must match");
 
     ck_assert_int_eq(tryStreamFree(stream, &e), LEX_SUCCESS);
   }
