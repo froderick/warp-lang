@@ -13,16 +13,18 @@ add_compile_definitions(DEBUG=1)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(check REQUIRED check)
 
+add_library(errors errors.c)
 add_library(lexer lexer.c)
 
 add_executable(tests test.c runtime.h)
-target_link_libraries(tests check lexer)
+target_link_libraries(tests check errors lexer)
 target_compile_options(tests PRIVATE -g)
 
 add_executable(lexer-repl lexer-repl.c)
-target_link_libraries(lexer-repl lexer)
+target_link_libraries(lexer-repl errors lexer)
 
-add_library(parser parser.c)
+add_executable(parser parser.c)
+target_link_libraries(parser errors lexer)
 
 enable_testing()
 add_test(tests tests)

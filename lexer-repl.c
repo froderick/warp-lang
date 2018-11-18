@@ -3,7 +3,7 @@
 
 int main(void) {
 
-  LexerError e;
+  Error e;
 
   StreamSource_t source;
   int error = trySourceMakeFile(stdin, &source, &e);
@@ -20,13 +20,13 @@ int main(void) {
   Token *t;
   while (1) {
     int read = tryStreamNext(stream, &t, &e);
-    if (read == LEX_EOF) {
+    if (read == RET_TOKEN_STREAM_EOF) {
       continue;
     }
-    else if (read == LEX_ERROR) {
+    else if (read == RET_ERROR) {
       printf("> encountered lexer error\n\n");
     }
-    else if (read == LEX_SUCCESS) {
+    else if (read == RET_SUCCESS) {
       printf("token: %ls (%s) %lu %lu\n", t->text, t->typeName, t->position, t->length);
     }
     else {

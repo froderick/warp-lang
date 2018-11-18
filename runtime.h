@@ -1,8 +1,14 @@
-//
-// Created by Henry, Michael (CAI - Burlington) on 11/1/18.
-//
+#include <stdint.h>
 
-#ifndef WARP_LANG_RUNTIME_H
-#define WARP_LANG_RUNTIME_H
+typedef enum ValueTypes {
+  T_NIL,
+  T_BOOL,
+  T_STR,
+  T_INT,
+  T_RECORD,
+  T_LIST,
+  T_MAP,
+  T_FN
+} ValueTypes;
 
-#endif //WARP_LANG_RUNTIME_H
+typedef uint64_t ValueRef;

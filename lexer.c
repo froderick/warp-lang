@@ -10,41 +10,6 @@
 #include "lexer.h"
 
 /*
- * Error factories
- */
-
-int memoryError(LexerError *error, char *desc) {
-
-  error->type = LE_MEMORY;
-  error->position = 0;
-
-  swprintf(error->message, LEX_ERROR_MSG_LENGTH, L"failed to %s\n", desc);
-
-  if (DEBUG) { printf("error: %ls\n", error->message); }
-  return LEX_ERROR;
-}
-
-int ioError(LexerError *error, char *desc) {
-
-  error->type = LE_IO;
-  error->position = 0;
-  swprintf(error->message, LEX_ERROR_MSG_LENGTH, L"failed to %s ->  '%s'\n", desc, strerror(errno));
-
-  if (DEBUG) { printf("error: %ls\n", error->message); }
-  return LEX_ERROR;
-}
-
-int tokenizationError(LexerError *error, unsigned long position, char *desc) {
-
-  error->type = LE_TOKENIZATION;
-  error->position = position;
-  swprintf(error->message, LEX_ERROR_MSG_LENGTH, L"failed to tokenize stream -> %s\n", desc);
-
-  if (DEBUG) { printf("error: %ls\n", error->message); }
-  return LEX_ERROR;
-}
-
-/*
  * Lexer input source abstraction.
  *
  * Mainly did this because not all operating systems have the builtin concept
@@ -53,18 +18,18 @@ int tokenizationError(LexerError *error, unsigned long position, char *desc) {
 
 typedef struct StreamSource {
   void *state;
-  int (*readChar)(void *state, wchar_t *ch, LexerError *error);
-  int (*unreadChar)(void * state, wchar_t ch, LexerError *error);
-  int (*freeState)(void *state, LexerError *error);
+  RetVal (*readChar)(void *state, wchar_t *ch, Error *error);
+  RetVal (*unreadChar)(void * state, wchar_t ch, Error *error);
+  RetVal (*freeState)(void *state, Error *error);
 } StreamSource;
 
-int trySourceMake(
+RetVal trySourceMake(
     void *state,
-    int (*readChar)(void *state, wchar_t *ch, LexerError *error),
-    int (*unreadChar)(void * state, wchar_t ch, LexerError *error),
-    int (*freeState)(void *state, LexerError *error),
+    RetVal (*readChar)(void *state, wchar_t *ch, Error *error),
+    RetVal (*unreadChar)(void * state, wchar_t ch, Error *error),
+    RetVal (*freeState)(void *state, Error *error),
     StreamSource **ptr,
-    LexerError *error) {
+    Error *error) {
 
   StreamSource *s;
 
@@ -78,26 +43,26 @@ int trySourceMake(
   s->freeState = freeState;
 
   *ptr = s;
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
-int tryReadCharFromFILE(void *state, wchar_t* ch, LexerError *error) {
+RetVal tryReadCharFromFILE(void *state, wchar_t* ch, Error *error) {
 
   FILE *stream = (FILE*)state;
 
   *ch = fgetwc(stream);
   if (*ch == WEOF) {
     if (feof(stream)) {
-      return LEX_EOF;
+      return RET_TOKEN_STREAM_EOF;
     }
     else {
       return ioError(error, "read token from stream");
     }
   }
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
-int tryUnreadCharToFILE(void *state, wchar_t ch, LexerError *error) {
+RetVal tryUnreadCharToFILE(void *state, wchar_t ch, Error *error) {
 
   FILE *stream = (FILE*)state;
 
@@ -105,20 +70,20 @@ int tryUnreadCharToFILE(void *state, wchar_t ch, LexerError *error) {
   if (result == WEOF) {
     return ioError(error, "push character back onto stream");
   }
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
-int tryFreeFILE(void *state, LexerError *error) {
+RetVal tryFreeFILE(void *state, Error *error) {
 
   FILE *stream = (FILE*)state;
 
   if (stream != NULL && fclose(stream)) {
     return ioError(error, "closing stream on free");
   }
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
-int trySourceMakeFile(FILE *file, StreamSource **s, LexerError *error) {
+RetVal trySourceMakeFile(FILE *file, StreamSource **s, Error *error) {
   return trySourceMake(
       file,
       tryReadCharFromFILE,
@@ -128,7 +93,7 @@ int trySourceMakeFile(FILE *file, StreamSource **s, LexerError *error) {
       error);
 }
 
-int trySourceMakeFilename(char *filename, StreamSource **s, LexerError *error) {
+RetVal trySourceMakeFilename(char *filename, StreamSource **s, Error *error) {
 
   FILE *file;
 
@@ -137,14 +102,14 @@ int trySourceMakeFilename(char *filename, StreamSource **s, LexerError *error) {
     return ioError(error, "making stream from file");
   }
 
-  if (trySourceMakeFile(file, s, error) != LEX_SUCCESS) {
+  if (trySourceMakeFile(file, s, error) != RET_SUCCESS) {
     if (!fclose(file)) {
       return ioError(error, "closing file stream");
     }
-    return LEX_ERROR;
+    return RET_ERROR;
   }
 
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
 typedef struct StringStream {
@@ -153,20 +118,20 @@ typedef struct StringStream {
   uint64_t next;
 } StringStream;
 
-int tryReadCharFromString(void *state, wchar_t* ch, LexerError *error) {
+RetVal tryReadCharFromString(void *state, wchar_t* ch, Error *error) {
 
   StringStream *stream = (StringStream*)state;
 
   if (stream->next == stream->length) {
-    return LEX_EOF;
+    return RET_TOKEN_STREAM_EOF;
   }
 
   *ch = stream->text[stream->next];
   stream->next = stream->next + 1;
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
-int tryUnreadCharToString(void *state, wchar_t ch, LexerError *error) {
+RetVal tryUnreadCharToString(void *state, wchar_t ch, Error *error) {
 
   StringStream *stream = (StringStream*)state;
 
@@ -174,16 +139,16 @@ int tryUnreadCharToString(void *state, wchar_t ch, LexerError *error) {
     stream->next = stream->next - 1;
   }
 
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
-int tryFreeString(void *state, LexerError *error) {
+RetVal tryFreeString(void *state, Error *error) {
   StringStream *stream = (StringStream*)state;
   free(stream);
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
-int trySourceMakeString(wchar_t* text, uint64_t length, StreamSource_t *s, LexerError *error) {
+RetVal trySourceMakeString(wchar_t* text, uint64_t length, StreamSource_t *s, Error *error) {
 
   StringStream *state;
 
@@ -204,27 +169,27 @@ int trySourceMakeString(wchar_t* text, uint64_t length, StreamSource_t *s, Lexer
       error);
 }
 
-int trySourceReadChar(StreamSource *source, wchar_t* ch, LexerError *error) {
+RetVal trySourceReadChar(StreamSource *source, wchar_t* ch, Error *error) {
   return source->readChar(source->state, ch, error);
 }
 
-int trySourceUnreadChar(StreamSource *source, wchar_t ch, LexerError *error) {
+RetVal trySourceUnreadChar(StreamSource *source, wchar_t ch, Error *error) {
   return source->unreadChar(source->state, ch, error);
 }
 
-int trySourceFree(StreamSource *s, LexerError *error) {
+RetVal trySourceFree(StreamSource *s, Error *error) {
 
-  int freeSuccess = LEX_SUCCESS;
+  int freeSuccess = RET_SUCCESS;
   if (s->freeState != NULL) {
     freeSuccess = s->freeState(s->state, error);
   }
   free(s);
 
-  if (freeSuccess != LEX_SUCCESS) {
-    return LEX_ERROR;
+  if (freeSuccess != RET_SUCCESS) {
+    return RET_ERROR;
   }
 
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
 /*
@@ -246,7 +211,7 @@ unsigned long bufferUnusedBytes(StringBuffer *buf) {
   return sizeof(wchar_t) * buf->usedChars;
 }
 
-int tryBufferMake(StringBuffer **ptr, LexerError *error) {
+RetVal tryBufferMake(StringBuffer **ptr, Error *error) {
 
   StringBuffer *b;
   wchar_t *data;
@@ -267,7 +232,7 @@ int tryBufferMake(StringBuffer **ptr, LexerError *error) {
 
   b->data = data;
   *ptr = b;
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
 void bufferFree(StringBuffer *b) {
@@ -277,7 +242,7 @@ void bufferFree(StringBuffer *b) {
   free(b);
 }
 
-int tryBufferAppend(StringBuffer *b, wchar_t ch, LexerError *error) {
+RetVal tryBufferAppend(StringBuffer *b, wchar_t ch, Error *error) {
 
   if (b->usedChars + 1 == (b->allocatedChars - 1)) {
 
@@ -296,7 +261,7 @@ int tryBufferAppend(StringBuffer *b, wchar_t ch, LexerError *error) {
   b->usedChars = b->usedChars + 1;
   b->data[b->usedChars] = L'\0';
 
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
 void bufferClear(StringBuffer *b) {
@@ -340,8 +305,8 @@ const char* tokenName(TokenType type) {
   }
 }
 
-int tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsigned long length,
-                 Token **ptr, LexerError *error) {
+RetVal tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsigned long length,
+                 Token **ptr, Error *error) {
 
   Token *t;
 
@@ -359,10 +324,10 @@ int tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsigned
 
   *ptr = t;
 
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
-int tryTokenInitFromLexer(LexerState *s, TokenType type, Token **ptr, LexerError *error) {
+RetVal tryTokenInitFromLexer(LexerState *s, TokenType type, Token **ptr, Error *error) {
   return tryTokenInit(type, s->b->data, s->position, s->b->usedChars, ptr, error);
 }
 
@@ -370,13 +335,13 @@ void tokenFree(Token *t) {
   free(t);
 }
 
-int tryLexerStateMake(LexerState **ptr, LexerError *error) {
+RetVal tryLexerStateMake(LexerState **ptr, Error *error) {
 
   StringBuffer *b = NULL;
   LexerState *s = NULL;
 
-  if (tryBufferMake(&b, error) != LEX_SUCCESS) {
-    return LEX_ERROR;
+  if (tryBufferMake(&b, error) != RET_SUCCESS) {
+    return RET_ERROR;
   }
 
   s = malloc(sizeof(LexerState));
@@ -389,7 +354,7 @@ int tryLexerStateMake(LexerState **ptr, LexerError *error) {
   s->b = b;
 
   *ptr = s;
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
 void lexerStateFree(LexerState *s) {
@@ -417,10 +382,10 @@ bool isFalse(wchar_t *text) {
   return wcscmp(text, L"false") == 0;
 }
 
-int tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token **token, LexerError *error) {
+RetVal tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryBufferAppend(s->b, first, error) != LEX_SUCCESS) {
-    return LEX_ERROR;
+  if (tryBufferAppend(s->b, first, error) != RET_SUCCESS) {
+    return RET_ERROR;
   }
 
   // keep reading until char is not numeric, then push back
@@ -431,45 +396,45 @@ int tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token **to
   do {
 
     int read = trySourceReadChar(source, &ch, error);
-    if (read == LEX_ERROR) {
-      return LEX_ERROR;
+    if (read == RET_ERROR) {
+      return RET_ERROR;
     }
 
-    if (read == LEX_EOF) {
+    if (read == RET_TOKEN_STREAM_EOF) {
       eof = true;
       matched = false;
     }
     else if (!iswdigit(ch)) {
-      if (trySourceUnreadChar(source, ch, error) != LEX_SUCCESS) {
-        return LEX_ERROR;
+      if (trySourceUnreadChar(source, ch, error) != RET_SUCCESS) {
+        return RET_ERROR;
       }
       matched = false;
     }
     else {
-      if (tryBufferAppend(s->b, ch, error) != LEX_SUCCESS) {
-        return LEX_ERROR;
+      if (tryBufferAppend(s->b, ch, error) != RET_SUCCESS) {
+        return RET_ERROR;
       }
       matched = true;
     }
 
   } while (matched);
 
-  if (tryTokenInitFromLexer(s, T_NUMBER, token, error) != LEX_SUCCESS) {
-    return LEX_ERROR;
+  if (tryTokenInitFromLexer(s, T_NUMBER, token, error) != RET_SUCCESS) {
+    return RET_ERROR;
   }
 
   if (eof) {
-    return LEX_EOF;
+    return RET_TOKEN_STREAM_EOF;
   }
   else {
-    return LEX_SUCCESS;
+    return RET_SUCCESS;
   }
 }
 
-int tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token **token, LexerError *error) {
+RetVal tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryBufferAppend(s->b, first, error) != LEX_SUCCESS) {
-    return LEX_ERROR;
+  if (tryBufferAppend(s->b, first, error) != RET_SUCCESS) {
+    return RET_ERROR;
   }
 
   // keep reading until char is not alphanumeric, then push back
@@ -480,23 +445,23 @@ int tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token **to
   do {
 
     int read = trySourceReadChar(source, &ch, error);
-    if (read == LEX_ERROR) {
-      return LEX_ERROR;
+    if (read == RET_ERROR) {
+      return RET_ERROR;
     }
 
-    if (read == LEX_EOF) {
+    if (read == RET_TOKEN_STREAM_EOF) {
       eof = true;
       matched = false;
     }
     else if (!iswalnum(ch)) {
-      if (trySourceUnreadChar(source, ch, error) != LEX_SUCCESS) {
-        return LEX_ERROR;
+      if (trySourceUnreadChar(source, ch, error) != RET_SUCCESS) {
+        return RET_ERROR;
       }
       matched = false;
     }
     else {
-      if (tryBufferAppend(s->b, ch, error) != LEX_SUCCESS) {
-        return LEX_ERROR;
+      if (tryBufferAppend(s->b, ch, error) != RET_SUCCESS) {
+        return RET_ERROR;
       }
       matched = true;
     }
@@ -519,22 +484,22 @@ int tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token **to
     type = T_SYMBOL;
   }
 
-  if (tryTokenInitFromLexer(s, type, token, error) != LEX_SUCCESS) {
-    return LEX_ERROR;
+  if (tryTokenInitFromLexer(s, type, token, error) != RET_SUCCESS) {
+    return RET_ERROR;
   }
 
   if (eof) {
-    return LEX_EOF;
+    return RET_TOKEN_STREAM_EOF;
   }
   else {
-    return LEX_SUCCESS;
+    return RET_SUCCESS;
   }
 }
 
-int tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token **token, LexerError *error) {
+RetVal tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryBufferAppend(s->b, first, error) != LEX_SUCCESS) {
-    return LEX_ERROR;
+  if (tryBufferAppend(s->b, first, error) != RET_SUCCESS) {
+    return RET_ERROR;
   }
 
   // keep reading until char is not alphanumeric, then push back
@@ -545,23 +510,23 @@ int tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token **t
   do {
 
     int read = trySourceReadChar(source, &ch, error);
-    if (read == LEX_ERROR) {
-      return LEX_ERROR;
+    if (read == RET_ERROR) {
+      return RET_ERROR;
     }
 
-    if (read == LEX_EOF) {
+    if (read == RET_TOKEN_STREAM_EOF) {
       eof = true;
       matched = false;
     }
     else if (!iswalnum(ch)) {
-      if (trySourceUnreadChar(source, ch, error) != LEX_SUCCESS) {
-        return LEX_ERROR;
+      if (trySourceUnreadChar(source, ch, error) != RET_SUCCESS) {
+        return RET_ERROR;
       }
       matched = false;
     }
     else {
-      if (tryBufferAppend(s->b, ch, error) != LEX_SUCCESS) {
-        return LEX_ERROR;
+      if (tryBufferAppend(s->b, ch, error) != RET_SUCCESS) {
+        return RET_ERROR;
       }
       matched = true;
     }
@@ -572,22 +537,22 @@ int tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token **t
     return tokenizationError(error, s->position, "keyword token type cannot be empty");
   }
 
-  if (tryTokenInitFromLexer(s, T_KEYWORD, token, error) != LEX_SUCCESS) {
-    return LEX_ERROR;
+  if (tryTokenInitFromLexer(s, T_KEYWORD, token, error) != RET_SUCCESS) {
+    return RET_ERROR;
   }
 
   if (eof) {
-    return LEX_EOF;
+    return RET_TOKEN_STREAM_EOF;
   }
   else {
-    return LEX_SUCCESS;
+    return RET_SUCCESS;
   }
 }
 
-int tryReadString(StreamSource *source, LexerState *s, wchar_t first, Token **token, LexerError *error) {
+RetVal tryReadString(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryBufferAppend(s->b, first, error) != LEX_SUCCESS) {
-    return LEX_ERROR;
+  if (tryBufferAppend(s->b, first, error) != RET_SUCCESS) {
+    return RET_ERROR;
   }
 
   // keep reading until char is a non-escaped quote
@@ -598,12 +563,12 @@ int tryReadString(StreamSource *source, LexerState *s, wchar_t first, Token **to
   do {
 
     int read = trySourceReadChar(source, &ch, error);
-    if (read != LEX_SUCCESS) {
+    if (read != RET_SUCCESS) {
       return read;
     }
 
-    if (tryBufferAppend(s->b, ch, error) != LEX_SUCCESS) {
-      return LEX_ERROR;
+    if (tryBufferAppend(s->b, ch, error) != RET_SUCCESS) {
+      return RET_ERROR;
     }
 
     if (!escape && ch == L'"') {
@@ -615,14 +580,14 @@ int tryReadString(StreamSource *source, LexerState *s, wchar_t first, Token **to
   }
   while (!foundEnd);
 
-  if (tryTokenInitFromLexer(s, T_STRING, token, error) != LEX_SUCCESS) {
-    return LEX_ERROR;
+  if (tryTokenInitFromLexer(s, T_STRING, token, error) != RET_SUCCESS) {
+    return RET_ERROR;
   }
 
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
-int tryTokenRead(StreamSource *source, LexerState *s, Token **token, LexerError *error) {
+RetVal tryTokenRead(StreamSource *source, LexerState *s, Token **token, Error *error) {
 
   bufferClear(s->b);
 
@@ -630,7 +595,7 @@ int tryTokenRead(StreamSource *source, LexerState *s, Token **token, LexerError 
 
   while (true) {
     int read = trySourceReadChar(source, &ch, error);
-    if (read != LEX_SUCCESS) {
+    if (read != RET_SUCCESS) {
       return read;
     }
     if (isWhitespace(ch)) {
@@ -689,7 +654,7 @@ int tryTokenRead(StreamSource *source, LexerState *s, Token **token, LexerError 
   }
 
   // if we created a token, increment the lexer position
-  if (ret != LEX_ERROR && *token != NULL) {
+  if (ret != RET_ERROR && *token != NULL) {
     s->position = s->position + (*token)->length;
   }
 
@@ -708,7 +673,7 @@ typedef struct TokenStream {
   Token* next;
 } TokenStream;
 
-int tryStreamMake(StreamSource *source, TokenStream **ptr, LexerError *error) {
+RetVal tryStreamMake(StreamSource *source, TokenStream **ptr, Error *error) {
 
   LexerState *l;
   TokenStream *s;
@@ -728,10 +693,10 @@ int tryStreamMake(StreamSource *source, TokenStream **ptr, LexerError *error) {
   s->next = NULL;
 
   *ptr = s;
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
-int tryStreamMakeFile(char *filename, TokenStream **ptr, LexerError *error) {
+RetVal tryStreamMakeFile(char *filename, TokenStream **ptr, Error *error) {
 
   FILE *file;
   TokenStream *s;
@@ -741,18 +706,18 @@ int tryStreamMakeFile(char *filename, TokenStream **ptr, LexerError *error) {
     return ioError(error, "making stream from file");
   }
 
-  if (tryStreamMake((void*)file, &s, error) != LEX_SUCCESS) {
+  if (tryStreamMake((void*)file, &s, error) != RET_SUCCESS) {
     if (!fclose(file)) {
       return ioError(error, "closing file stream");
     }
-    return LEX_ERROR;
+    return RET_ERROR;
   }
 
   *ptr = s;
-  return LEX_SUCCESS;
+  return RET_SUCCESS;
 }
 
-int tryStreamNext(TokenStream *s, Token **token, LexerError *error) {
+RetVal tryStreamNext(TokenStream *s, Token **token, Error *error) {
 
   // clear this so folks can free it after this call without risk of a double-free
   *token = NULL;
@@ -760,33 +725,33 @@ int tryStreamNext(TokenStream *s, Token **token, LexerError *error) {
   if (s->next != NULL) {
     *token = s->next;
     s->next = NULL;
-    return LEX_SUCCESS;
+    return RET_SUCCESS;
   }
 
   return tryTokenRead(s->source, s->lexer, token, error);
 }
 
-int tryStreamPeek(TokenStream *s, Token **token, LexerError *error) {
+RetVal tryStreamPeek(TokenStream *s, Token **token, Error *error) {
 
   if (s->next != NULL) {
     *token = s->next;
     s->next = NULL;
-    return LEX_SUCCESS;
+    return RET_SUCCESS;
   }
 
   int read = tryTokenRead(s->source, s->lexer, token, error);
 
-  if (read != LEX_ERROR) {
+  if (read != RET_ERROR) {
     s->next = *token;
   }
 
   return read;
 }
 
-int tryStreamFree(TokenStream *s, LexerError *error) {
+RetVal tryStreamFree(TokenStream *s, Error *error) {
 
   if (s == NULL) {
-    return LEX_SUCCESS;
+    return RET_SUCCESS;
   }
 
   int closeError = trySourceFree(s->source, error);
