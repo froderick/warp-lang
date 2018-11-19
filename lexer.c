@@ -722,7 +722,7 @@ RetVal tryStreamNext(TokenStream *s, Token **token, Error *error) {
   // clear this so folks can free it after this call without risk of a double-free
   *token = NULL;
 
-  if (s->next != NULL) {
+  if (s->next != NULL) { // eat the cached next token if we have one
     *token = s->next;
     s->next = NULL;
     return R_SUCCESS;
@@ -733,9 +733,8 @@ RetVal tryStreamNext(TokenStream *s, Token **token, Error *error) {
 
 RetVal tryStreamPeek(TokenStream *s, Token **token, Error *error) {
 
-  if (s->next != NULL) {
+  if (s->next != NULL) { // return the cached next token if we have one
     *token = s->next;
-    s->next = NULL;
     return R_SUCCESS;
   }
 
@@ -746,6 +745,10 @@ RetVal tryStreamPeek(TokenStream *s, Token **token, Error *error) {
   }
 
   return read;
+}
+
+void streamDropPeeked(TokenStream *s) {
+  s->next = NULL;
 }
 
 RetVal tryStreamFree(TokenStream *s, Error *error) {
@@ -761,5 +764,227 @@ RetVal tryStreamFree(TokenStream *s, Error *error) {
   free(s);
 
   return closeError;
+}
+
+/*
+ * Here is the basic AST implementation.
+ */
+
+// TODO: all the symbol token types need to become expression types, move
+// all the dedicated symbol parsing behavior into the AST parsing code/model
+
+RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error);
+void exprFree(Expr *expr);
+
+// Atoms
+
+RetVal tryAtomMake(TokenStream *stream, Expr **ptr, Error *error) {
+
+  RetVal ret;
+  Token *token;
+
+  ret = tryStreamNext(stream, &token, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  if (token->type != T_OPAREN) {
+    ret = syntaxError(error, stream->lexer->position, "List must begin with ')'");
+    goto failure;
+  }
+
+  Expr *expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    ret = memoryError(error, "malloc Expr");
+    goto failure;
+  }
+
+  expr->type = N_ATOM;
+  expr->atom = token;
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+    if (token != NULL) {
+      tokenFree(token);
+    }
+    return ret;
+}
+
+// Lists
+
+RetVal tryListAppend(ExprList *list, Expr *expr, Error *error);
+void listFreeContents(ExprList *list);
+
+// Assume the opening paren has aready been read.
+// Allocate a list, continue to read expressions and add them to it until a
+// closed-paren is found.
+
+RetVal tryListMake(TokenStream *stream, Expr **ptr, Error *error) {
+
+  RetVal ret;
+
+  ExprList list;
+  Expr *subexpr;
+
+  ret = tryStreamNext(stream, &list.oParen, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  if (list.oParen->type != T_OPAREN) {
+    ret = syntaxError(error, stream->lexer->position, "List must begin with ')'");
+    goto failure;
+  }
+
+  while (true) {
+
+    Token *cParen;
+    ret = tryStreamPeek(stream, &cParen, error);
+    if (ret != R_SUCCESS) {
+      if (ret == R_EOF) { // eof too soon
+        ret = syntaxError(error, stream->lexer->position, "Encountered EOF, was expecting ')'");
+      }
+      goto failure;
+    }
+
+    if (cParen->type == T_CPAREN) { // found our closed paren
+
+      Expr *expr = malloc(sizeof(Expr));
+      if (expr == NULL) {
+        ret = memoryError(error, "malloc Expr");
+        goto failure;
+      }
+
+      streamDropPeeked(stream); // consume cParen now that nothing else can fail
+      list.cParen = cParen;
+
+      expr->type = N_LIST;
+      expr->list = list;
+
+      *ptr = expr;
+      return R_SUCCESS;
+    }
+    else { // read a new expression and add it to the list
+
+      ret = tryExprMake(stream, &subexpr, error);
+      if (ret != R_SUCCESS) {
+        goto failure;
+      }
+
+      ret = tryListAppend(&list, subexpr, error);
+      if (ret != R_SUCCESS) {
+        goto failure;
+      }
+      subexpr = NULL; // subexpr is part of list now
+    }
+  }
+
+  failure:
+  listFreeContents(&list);
+  if (subexpr != NULL) {
+    exprFree(subexpr);
+  }
+  return ret;
+}
+
+RetVal tryListAppend(ExprList *list, Expr *expr, Error *error) {
+
+  ListElement *elem =  malloc(sizeof(ListElement));
+  if (elem == NULL) {
+    return memoryError(error, "malloc ExprList");
+  }
+
+  if (list->head == NULL) { // no elements
+    list->head = elem;
+    list->tail = elem;
+  }
+  else if (list->head == list->tail) { // one element
+    list->head->next = elem;
+    list->tail = elem;
+  }
+  else { // more than one element
+    list->tail->next = elem;
+    list->tail = elem;
+  }
+
+  elem->expr = expr;
+  list->length = list->length + 1;
+
+  return R_SUCCESS;
+}
+
+void listFreeContents(ExprList *list) {
+
+  if (list->oParen != NULL) {
+    tokenFree(list->oParen);
+  }
+  if (list->cParen != NULL) {
+    tokenFree(list->cParen);
+  }
+
+  while (list->head != NULL) {
+    ListElement *elem = list->head;
+    list->head = list->head->next;
+    exprFree(elem->expr);
+    free(elem);
+  }
+}
+
+// read the first token off the stream
+// if it is an open paren, parse a list
+// if it is a symbol, create a symbol
+// else, explode
+
+RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error) {
+
+  RetVal ret;
+  Token *peek;
+
+  ret = tryStreamPeek(stream, &peek, error);
+  if (ret != R_SUCCESS) {
+    return ret;
+  }
+
+  switch (peek->type) {
+
+    case T_NUMBER:
+    case T_STRING:
+    // TODO: the lexer probably doesn't have to do all this work, these are all just symbols
+    case T_SYMBOL:
+    case T_KEYWORD:
+    case T_NIL:
+    case T_QUOTE:
+    case T_FALSE:
+    case T_TRUE: {
+      ret = tryAtomMake(stream, ptr, error);
+      if (ret != R_SUCCESS) {
+        return ret;
+      }
+      return R_SUCCESS;
+    }
+
+    case T_OPAREN: {
+      ret = tryListMake(stream, ptr, error);
+      if (ret != R_SUCCESS) {
+        return ret;
+      }
+      return R_SUCCESS;
+    }
+
+    default:
+      return syntaxError(error, stream->lexer->position, "Unknown token type");
+  }
+}
+
+void exprFree(Expr *expr) {
+  if (expr->type == N_ATOM) {
+    free(expr->atom);
+  }
+  else if (expr->type == N_LIST) {
+    listFreeContents(&(expr->list));
+  }
+  free(expr);
 }
 

@@ -36,3 +36,13 @@ RetVal tokenizationError(Error *error, unsigned long position, char *desc) {
   if (DEBUG) { printf("error: %ls\n", error->message); }
   return R_ERROR;
 }
+
+RetVal syntaxError(Error *error, unsigned long position, char *desc) {
+
+  error->type = E_SYNTAX;
+  error->lexer.position = position;
+  swprintf(error->message, ERROR_MSG_LENGTH, L"failed to parse token stream -> %s\n", desc);
+
+  if (DEBUG) { printf("error: %ls\n", error->message); }
+  return R_ERROR;
+}

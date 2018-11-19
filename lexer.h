@@ -54,4 +54,37 @@ RetVal tryStreamPeek(TokenStream_t s, Token **token, Error *error);
 void tokenFree(Token *t);
 RetVal tryStreamFree(TokenStream_t s, Error *error);
 
+struct Expr;
+
+typedef struct ListElement {
+  struct Expr *expr;
+  struct ListElement *next;
+} ListElement;
+
+typedef struct ExprList {
+  Token* oParen;
+  Token* cParen;
+  uint64_t length;
+  ListElement *head;
+  ListElement *tail;
+} ExprList;
+
+typedef enum ExprType {
+  N_NONE,
+  N_ATOM,
+  N_LIST,
+  N_VECTOR,
+  N_MAP,
+  N_SET
+} ExprType;
+
+typedef struct Expr {
+  ExprType type;
+  union {
+    Token *atom;
+    ExprList list;
+  };
+} Expr;
+
+RetVal tryReadExpr(TokenStream_t stream, Expr **expr, Error *error);
 

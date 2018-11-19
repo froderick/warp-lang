@@ -3,7 +3,8 @@
 typedef enum ErrorType {
   E_MEMORY,
   E_IO,
-  E_LEXER
+  E_LEXER,
+  E_SYNTAX,
 } ErrorType;
 
 typedef struct LexerError {
@@ -58,3 +59,4 @@ typedef enum RetVal {
 RetVal memoryError(Error *error, char *desc);
 RetVal ioError(Error *error, char *desc);
 RetVal tokenizationError(Error *error, unsigned long position, char *desc);
+RetVal syntaxError(Error *error, unsigned long position, char *desc);

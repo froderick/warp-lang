@@ -35,35 +35,6 @@
 //  T_SYMBOL,
 //  T_KEYWORD
 
-struct AstNode;
-
-typedef struct AstAtom {
-  Token* atom;
-} AstAtom;
-
-typedef struct AstList {
-  Token* oParen;
-  Token* cParen;
-  uint64_t length;
-  struct AstNode** elements;
-} AstList;
-
-typedef enum AstNodeType {
-  N_NONE,
-  N_ATOM,
-  N_LIST,
-  N_VECTOR,
-  N_MAP,
-  N_SET
-} AstNodeType;
-
-typedef struct AstNode {
-  AstNodeType type;
-  union {
-    AstAtom atom;
-    AstList list;
-  };
-} AstNode;
 
 // TODO: need to stretch the error struct to be more general, usable by the entire compiler
 // TODO: perhaps it is not too soon to smash the lexer and parser together into the reader, and make the analyzer separate
