@@ -370,18 +370,6 @@ bool isWhitespace(wchar_t ch) {
       || ch == L'\t';
 }
 
-bool isNil(wchar_t *text) {
-  return wcscmp(text, L"nil") == 0;
-}
-
-bool isTrue(wchar_t *text) {
-  return wcscmp(text, L"true") == 0;
-}
-
-bool isFalse(wchar_t *text) {
-  return wcscmp(text, L"false") == 0;
-}
-
 RetVal tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
   if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
@@ -429,6 +417,18 @@ RetVal tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token *
   else {
     return R_SUCCESS;
   }
+}
+
+bool isNil(wchar_t *text) {
+  return wcscmp(text, L"nil") == 0;
+}
+
+bool isTrue(wchar_t *text) {
+  return wcscmp(text, L"true") == 0;
+}
+
+bool isFalse(wchar_t *text) {
+  return wcscmp(text, L"false") == 0;
 }
 
 RetVal tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
@@ -615,18 +615,18 @@ RetVal tryTokenRead(StreamSource *source, LexerState *s, Token **token, Error *e
   else if (ch == L')') {
     ret = tryTokenInit(T_CPAREN, L")", s->position, 1, token, error);
   }
-  else if (ch == L'[') {
-    ret = tryTokenInit(T_OVEC, L"[", s->position, 1, token, error);
-  }
-  else if (ch == L']') {
-    ret = tryTokenInit(T_CVEC, L"]", s->position, 1, token, error);
-  }
-  else if (ch == L'{') {
-    ret = tryTokenInit(T_OBRACKET, L"{", s->position, 1, token, error);
-  }
-  else if (ch == L'}') {
-    ret = tryTokenInit(T_CBRACKET, L"}", s->position, 1, token, error);
-  }
+//  else if (ch == L'[') {
+//    ret = tryTokenInit(T_OVEC, L"[", s->position, 1, token, error);
+//  }
+//  else if (ch == L']') {
+//    ret = tryTokenInit(T_CVEC, L"]", s->position, 1, token, error);
+//  }
+//  else if (ch == L'{') {
+//    ret = tryTokenInit(T_OBRACKET, L"{", s->position, 1, token, error);
+//  }
+//  else if (ch == L'}') {
+//    ret = tryTokenInit(T_CBRACKET, L"}", s->position, 1, token, error);
+//  }
   else if (ch == L'\'') {
     ret = tryTokenInit(T_QUOTE, L"'", s->position, 1, token, error);
   }
@@ -775,10 +775,11 @@ RetVal tryStreamFree(TokenStream *s, Error *error) {
 
 RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error);
 void exprFree(Expr *expr);
+RetVal tryListAppend(ExprList *list, Expr *expr, Error *error);
+void listFreeContents(ExprList *list);
+RetVal trySpecialMake(ExprType type, const wchar_t *name, TokenStream *stream, Expr **ptr, Error *error);
 
-// Atoms
-
-RetVal tryAtomMake(TokenStream *stream, Expr **ptr, Error *error) {
+RetVal tryNumberMake(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -788,8 +789,18 @@ RetVal tryAtomMake(TokenStream *stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
-  if (token->type != T_OPAREN) {
-    ret = syntaxError(error, stream->lexer->position, "List must begin with ')'");
+  if (token->type != T_NUMBER) {
+    ret = syntaxError(error, token->position, "Token is not a type of T_NUMBER");
+    goto failure;
+  }
+
+  uint64_t value = wcstoull(token->text, NULL, 0);
+  if (errno == EINVAL) {
+    ret = syntaxError(error, token->position, "Token text does not represent a valid number");
+    goto failure;
+  }
+  if (errno == ERANGE) {
+    ret = syntaxError(error, token->position, "Cannot represent a number literal larger than 64 bits unsigned");
     goto failure;
   }
 
@@ -799,8 +810,63 @@ RetVal tryAtomMake(TokenStream *stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
-  expr->type = N_ATOM;
-  expr->atom = token;
+  expr->type = N_NUMBER;
+  expr->number.token = token;
+  expr->number.value = value;
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+  if (token != NULL) {
+    tokenFree(token);
+  }
+  return ret;
+}
+
+void numberFreeContents(ExprNumber *number) {
+  if (number != NULL) {
+    if (number->token != NULL) {
+      tokenFree(number->token);
+    }
+  }
+}
+
+RetVal tryStringMake(TokenStream *stream, Expr **ptr, Error *error) {
+
+  RetVal ret;
+  Token *token;
+  wchar_t *text;
+
+  ret = tryStreamNext(stream, &token, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  if (token->type != T_STRING) {
+    ret = syntaxError(error, token->position, "Token is not a type of T_STRING");
+    goto failure;
+  }
+
+  if (token->length - 2 < 0) {
+    ret = syntaxError(error, token->position, "Token should start and end with '\"'");
+    goto failure;
+  }
+
+  // trim quotes
+  text = malloc( sizeof(wchar_t) * (token->length - 1)); // -1 rather than -2 to leave room for null at end
+  wcsncpy(text, token->text + 1, token->length - 2);
+
+  Expr *expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    ret = memoryError(error, "malloc Expr");
+    goto failure;
+  }
+
+  expr->type = N_STRING;
+  expr->string.token = token;
+  expr->string.length = token->length - 2;
+  expr->string.value = text;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -809,13 +875,222 @@ RetVal tryAtomMake(TokenStream *stream, Expr **ptr, Error *error) {
     if (token != NULL) {
       tokenFree(token);
     }
+    if (text != NULL) {
+      free(text);
+    }
     return ret;
 }
 
-// Lists
+void stringFreeContents(ExprString *string) {
+  if (string != NULL) {
+    if (string->token != NULL) {
+      tokenFree(string->token);
+    }
+    if (string->value != NULL) {
+      free(string->value);
+    }
+  }
+}
 
-RetVal tryListAppend(ExprList *list, Expr *expr, Error *error);
-void listFreeContents(ExprList *list);
+RetVal trySymbolMake(TokenStream *stream, Expr **ptr, Error *error) {
+
+  RetVal ret;
+  Token *token;
+  wchar_t *text;
+
+  ret = tryStreamNext(stream, &token, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  if (token->type != T_SYMBOL) {
+    ret = syntaxError(error, token->position, "Token is not a type of T_SYMBOL");
+    goto failure;
+  }
+
+  text = malloc( sizeof(wchar_t) * token->length);
+  wcscpy(token->text, text);
+
+  Expr *expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    ret = memoryError(error, "malloc Expr");
+    goto failure;
+  }
+
+  expr->type = N_SYMBOL;
+  expr->symbol.token = token;
+  expr->symbol.length = token->length;
+  expr->symbol.value = text;
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+  if (token != NULL) {
+    tokenFree(token);
+  }
+  if (text != NULL) {
+    free(text);
+  }
+  return ret;
+}
+
+void symbolFreeContents(ExprSymbol *symbol) {
+  if (symbol != NULL) {
+    if (symbol->token != NULL) {
+      tokenFree(symbol->token);
+    }
+    if (symbol->value != NULL) {
+      free(symbol->value);
+    }
+  }
+}
+
+RetVal tryKeywordMake(TokenStream *stream, Expr **ptr, Error *error) {
+
+  RetVal ret;
+  Token *token;
+  wchar_t *text;
+
+  ret = tryStreamNext(stream, &token, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  if (token->type != T_KEYWORD) {
+    ret = syntaxError(error, token->position, "Token is not a type of T_KEYWORD");
+    goto failure;
+  }
+
+  text = malloc( sizeof(wchar_t) * token->length);
+  wcscpy(token->text, text);
+
+  Expr *expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    ret = memoryError(error, "malloc Expr");
+    goto failure;
+  }
+
+  expr->type = N_KEYWORD;
+  expr->keyword.token = token;
+  expr->keyword.length = token->length;
+  expr->keyword.value = text;
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+  if (token != NULL) {
+    tokenFree(token);
+  }
+  if (text != NULL) {
+    free(text);
+  }
+  return ret;
+}
+
+void keywordFreeContents(ExprKeyword *keyword) {
+  if (keyword!= NULL) {
+    if (keyword->token != NULL) {
+      tokenFree(keyword->token);
+    }
+    if (keyword->value != NULL) {
+      free(keyword->value);
+    }
+  }
+}
+
+RetVal trySpecialMake(ExprType type, const wchar_t *name, TokenStream *stream, Expr **ptr, Error *error) {
+
+  RetVal ret;
+  Token *token;
+
+  ret = tryStreamNext(stream, &token, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+  // skip validating this token
+
+  Expr *expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    ret = memoryError(error, "malloc Expr");
+    goto failure;
+  }
+
+  expr->type = type;
+  expr->special.token = token;
+  expr->special.value = name;
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+  if (token != NULL) {
+    tokenFree(token);
+  }
+  return ret;
+}
+
+void specialFreeContents(ExprSpecial *special) {
+  if (special!= NULL) {
+    if (special->token != NULL) {
+      tokenFree(special->token);
+    }
+  }
+}
+
+RetVal tryBooleanMake(TokenStream *stream, Expr **ptr, Error *error) {
+
+  RetVal ret;
+  Token *token;
+
+  ret = tryStreamNext(stream, &token, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  if (token->type != T_TRUE && token->type != T_FALSE) {
+    ret = syntaxError(error, token->position, "Token is not a type of T_TRUE or T_FALSE");
+    goto failure;
+  }
+
+  Expr *expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    ret = memoryError(error, "malloc Expr");
+    goto failure;
+  }
+
+  bool value;
+  if (token->type == T_TRUE) {
+    value = true;
+  }
+  else {
+    value = false;
+  }
+
+  expr->type = N_BOOLEAN;
+  expr->boolean.token = token;
+  expr->boolean.value = value;
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+  if (token != NULL) {
+    tokenFree(token);
+  }
+  return ret;
+}
+
+void booleanFreeContents(ExprBoolean *boolean) {
+  if (boolean != NULL) {
+    if (boolean->token != NULL) {
+      tokenFree(boolean->token);
+    }
+  }
+}
+
+// Lists
 
 // Assume the opening paren has aready been read.
 // Allocate a list, continue to read expressions and add them to it until a
@@ -932,6 +1207,62 @@ void listFreeContents(ExprList *list) {
   }
 }
 
+RetVal tryQuoteMake(TokenStream *stream, Expr **ptr, Error *error) {
+
+  RetVal ret;
+
+  Expr *quote;
+  Expr *subexpr;
+  Expr *expr;
+
+  ret = trySpecialMake(N_QUOTE, L"quote", stream, &quote, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  ret = tryExprMake(stream, subexpr, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    ret = memoryError(error, "malloc Expr");
+    goto failure;
+  }
+
+  expr->type = N_LIST;
+  expr->list.oParen = NULL; // none exists
+  expr->list.cParen = NULL; // none exists
+
+  ret = tryListAppend(&expr->list, quote, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+  quote = NULL; // quote is now part of expr
+
+  ret = tryListAppend(&expr->list, subexpr, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+  // subexpr is now part of expr
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+  if (quote != NULL) {
+    exprFree(quote);
+  }
+  if (subexpr != NULL) {
+    exprFree(subexpr);
+  }
+  if (expr != NULL) {
+    exprFree(expr);
+  }
+  return ret;
+}
+
 // read the first token off the stream
 // if it is an open paren, parse a list
 // if it is a symbol, create a symbol
@@ -946,36 +1277,43 @@ RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error) {
   if (ret != R_SUCCESS) {
     return ret;
   }
+  // TODO: probably need to handle EOF here as well, you could call #tryExprMake on an empty stream and it should return EOF, not ERROR
 
   switch (peek->type) {
-
     case T_NUMBER:
+      ret = tryNumberMake(stream, ptr, error);
+      break;
     case T_STRING:
-    // TODO: the lexer probably doesn't have to do all this work, these are all just symbols
+      ret = tryStringMake(stream, ptr, error);
+      break;
     case T_SYMBOL:
+      ret = trySymbolMake(stream, ptr, error);
+      break;
     case T_KEYWORD:
-    case T_NIL:
-    case T_QUOTE:
+      ret = tryKeywordMake(stream, ptr, error);
+      break;
+    case T_TRUE:
     case T_FALSE:
-    case T_TRUE: {
-      ret = tryAtomMake(stream, ptr, error);
-      if (ret != R_SUCCESS) {
-        return ret;
-      }
-      return R_SUCCESS;
-    }
-
+      ret = tryBooleanMake(stream, ptr, error);
+      break;
+    case T_NIL:
+      ret = trySpecialMake(N_NIL, L"nil", stream, ptr, error);
+      break;
     case T_OPAREN: {
       ret = tryListMake(stream, ptr, error);
-      if (ret != R_SUCCESS) {
-        return ret;
-      }
-      return R_SUCCESS;
+      break;
+    case T_QUOTE:
+        ret = tryQuoteMake(stream, ptr, error);
+      break;
     }
-
     default:
-      return syntaxError(error, stream->lexer->position, "Unknown token type");
+      ret = syntaxError(error, stream->lexer->position, "Unknown token type");
   }
+
+  if (ret != R_SUCCESS) {
+    return ret;
+  }
+  return R_SUCCESS;
 }
 
 void exprFree(Expr *expr) {
