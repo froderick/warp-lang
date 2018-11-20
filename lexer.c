@@ -1109,7 +1109,7 @@ RetVal tryListMake(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   if (list.oParen->type != T_OPAREN) {
-    ret = syntaxError(error, stream->lexer->position, "List must begin with ')'");
+    ret = syntaxError(error, list.oParen->position, "List must begin with ')'");
     goto failure;
   }
 
@@ -1119,7 +1119,7 @@ RetVal tryListMake(TokenStream *stream, Expr **ptr, Error *error) {
     ret = tryStreamPeek(stream, &cParen, error);
     if (ret != R_SUCCESS) {
       if (ret == R_EOF) { // eof too soon
-        ret = syntaxError(error, stream->lexer->position, "Encountered EOF, was expecting ')'");
+        ret = syntaxError(error, list.oParen->position, "Encountered EOF, was expecting ')'");
       }
       goto failure;
     }
@@ -1299,15 +1299,14 @@ RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error) {
     case T_NIL:
       ret = trySpecialMake(N_NIL, L"nil", stream, ptr, error);
       break;
-    case T_OPAREN: {
+    case T_OPAREN:
       ret = tryListMake(stream, ptr, error);
       break;
     case T_QUOTE:
         ret = tryQuoteMake(stream, ptr, error);
       break;
-    }
     default:
-      ret = syntaxError(error, stream->lexer->position, "Unknown token type");
+      ret = syntaxError(error, peek->position, "Unknown token type");
   }
 
   if (ret != R_SUCCESS) {

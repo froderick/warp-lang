@@ -81,7 +81,7 @@ typedef struct ExprKeyword {
 
 typedef struct ExprSpecial {
   Token *token;
-  wchar_t *value;
+  wchar_t *value; // must be a constant
 } ExprSpecial;
 
 typedef struct ExprBoolean {
