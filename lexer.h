@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <wchar.h>
+#include <stdbool.h>
 #include "errors.h"
 
 typedef enum TokenType {
@@ -16,7 +17,7 @@ typedef enum TokenType {
   T_NUMBER,
   T_STRING,
   T_SYMBOL,
-  T_KEYWORD
+  T_KEYWORD,
   T_QUOTE,
   T_TRUE,
   T_FALSE,
@@ -79,15 +80,14 @@ typedef struct ExprKeyword {
   wchar_t *value;
 } ExprKeyword;
 
-typedef struct ExprSpecial {
-  Token *token;
-  wchar_t *value; // must be a constant
-} ExprSpecial;
-
 typedef struct ExprBoolean {
   Token *token;
   bool value;
 } ExprBoolean;
+
+typedef struct ExprNil {
+  Token *token;
+} ExprNil;
 
 typedef struct ListElement {
   struct Expr *expr;
@@ -104,18 +104,13 @@ typedef struct ExprList {
 
 typedef enum ExprType {
   N_NONE,
-  N_NUMBER,
   N_STRING,
+  N_NUMBER,
   N_SYMBOL,
   N_KEYWORD,
-  N_QUOTE,
   N_BOOLEAN,
   N_NIL,
   N_LIST
-//  N_ATOM,
-//  N_VECTOR,
-//  N_MAP,
-//  N_SET,
 } ExprType;
 
 typedef struct Expr {
@@ -125,8 +120,8 @@ typedef struct Expr {
     ExprNumber number;
     ExprSymbol symbol;
     ExprKeyword keyword;
-    ExprSpecial special;
     ExprBoolean boolean;
+    ExprNil nil;
     ExprList list;
   };
 } Expr;

@@ -46,3 +46,5 @@ RetVal syntaxError(Error *error, unsigned long position, char *desc) {
   if (DEBUG) { printf("error: %ls\n", error->message); }
   return R_ERROR;
 }
+
+

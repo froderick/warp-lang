@@ -777,7 +777,6 @@ RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error);
 void exprFree(Expr *expr);
 RetVal tryListAppend(ExprList *list, Expr *expr, Error *error);
 void listFreeContents(ExprList *list);
-RetVal trySpecialMake(ExprType type, const wchar_t *name, TokenStream *stream, Expr **ptr, Error *error);
 
 RetVal tryNumberMake(TokenStream *stream, Expr **ptr, Error *error) {
 
@@ -848,7 +847,7 @@ RetVal tryStringMake(TokenStream *stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
-  if (token->length - 2 < 0) {
+  if (token->length < 2) {
     ret = syntaxError(error, token->position, "Token should start and end with '\"'");
     goto failure;
   }
@@ -935,6 +934,44 @@ RetVal trySymbolMake(TokenStream *stream, Expr **ptr, Error *error) {
   return ret;
 }
 
+RetVal trySymbolMakeStatic(wchar_t *name, Expr **ptr, Error *error) {
+
+  RetVal ret;
+  uint64_t len;
+  wchar_t *value;
+
+  Expr *expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    ret = memoryError(error, "malloc Expr");
+    goto failure;
+  }
+
+  len = wcslen(name);
+  value = malloc((sizeof(wchar_t) * len) + 1);
+  if (value == NULL) {
+    ret = memoryError(error, "malloc static Symbol value");
+    goto failure;
+  }
+  wcscpy(name, value);
+
+  expr->type = N_SYMBOL;
+  expr->symbol.token = NULL; // no token
+  expr->symbol.value = name;
+  expr->symbol.length = len;
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+  if (expr != NULL) {
+    exprFree(expr);
+  }
+  if (value != NULL) {
+    free(value);
+  }
+  return ret;
+}
+
 void symbolFreeContents(ExprSymbol *symbol) {
   if (symbol != NULL) {
     if (symbol->token != NULL) {
@@ -1000,45 +1037,6 @@ void keywordFreeContents(ExprKeyword *keyword) {
   }
 }
 
-RetVal trySpecialMake(ExprType type, const wchar_t *name, TokenStream *stream, Expr **ptr, Error *error) {
-
-  RetVal ret;
-  Token *token;
-
-  ret = tryStreamNext(stream, &token, error);
-  if (ret != R_SUCCESS) {
-    goto failure;
-  }
-  // skip validating this token
-
-  Expr *expr = malloc(sizeof(Expr));
-  if (expr == NULL) {
-    ret = memoryError(error, "malloc Expr");
-    goto failure;
-  }
-
-  expr->type = type;
-  expr->special.token = token;
-  expr->special.value = name;
-
-  *ptr = expr;
-  return R_SUCCESS;
-
-  failure:
-  if (token != NULL) {
-    tokenFree(token);
-  }
-  return ret;
-}
-
-void specialFreeContents(ExprSpecial *special) {
-  if (special!= NULL) {
-    if (special->token != NULL) {
-      tokenFree(special->token);
-    }
-  }
-}
-
 RetVal tryBooleanMake(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
@@ -1086,6 +1084,48 @@ void booleanFreeContents(ExprBoolean *boolean) {
   if (boolean != NULL) {
     if (boolean->token != NULL) {
       tokenFree(boolean->token);
+    }
+  }
+}
+
+RetVal tryNilMake(TokenStream *stream, Expr **ptr, Error *error) {
+
+  RetVal ret;
+  Token *token;
+
+  ret = tryStreamNext(stream, &token, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  if (token->type != T_NIL) {
+    ret = syntaxError(error, token->position, "Token is not a type of T_NIL");
+    goto failure;
+  }
+
+  Expr *expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    ret = memoryError(error, "malloc Expr");
+    goto failure;
+  }
+
+  expr->type = N_NIL;
+  expr->nil.token = token;
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+  if (token != NULL) {
+    tokenFree(token);
+  }
+  return ret;
+}
+
+void nilFreeContents(ExprNil *nil) {
+  if (nil != NULL) {
+    if (nil->token != NULL) {
+      tokenFree(nil->token);
     }
   }
 }
@@ -1215,12 +1255,12 @@ RetVal tryQuoteMake(TokenStream *stream, Expr **ptr, Error *error) {
   Expr *subexpr;
   Expr *expr;
 
-  ret = trySpecialMake(N_QUOTE, L"quote", stream, &quote, error);
+  ret = trySymbolMakeStatic(L"quote", &quote, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
 
-  ret = tryExprMake(stream, subexpr, error);
+  ret = tryExprMake(stream, &subexpr, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
@@ -1280,11 +1320,13 @@ RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error) {
   // TODO: probably need to handle EOF here as well, you could call #tryExprMake on an empty stream and it should return EOF, not ERROR
 
   switch (peek->type) {
-    case T_NUMBER:
-      ret = tryNumberMake(stream, ptr, error);
-      break;
+
+    // atoms
     case T_STRING:
       ret = tryStringMake(stream, ptr, error);
+      break;
+    case T_NUMBER:
+      ret = tryNumberMake(stream, ptr, error);
       break;
     case T_SYMBOL:
       ret = trySymbolMake(stream, ptr, error);
@@ -1297,14 +1339,19 @@ RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error) {
       ret = tryBooleanMake(stream, ptr, error);
       break;
     case T_NIL:
-      ret = trySpecialMake(N_NIL, L"nil", stream, ptr, error);
+      ret = tryNilMake(stream, ptr, error);
       break;
+
+    // lists
     case T_OPAREN:
       ret = tryListMake(stream, ptr, error);
       break;
+
+    // reader macros
     case T_QUOTE:
         ret = tryQuoteMake(stream, ptr, error);
       break;
+
     default:
       ret = syntaxError(error, peek->position, "Unknown token type");
   }
@@ -1316,11 +1363,26 @@ RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error) {
 }
 
 void exprFree(Expr *expr) {
-  if (expr->type == N_ATOM) {
-    free(expr->atom);
+  if (expr->type == N_STRING) {
+    stringFreeContents(&expr->string);
+  }
+  else if (expr->type == N_NUMBER) {
+    numberFreeContents(&expr->number);
+  }
+  else if (expr->type == N_SYMBOL) {
+    symbolFreeContents(&expr->symbol);
+  }
+  else if (expr->type == N_KEYWORD) {
+    keywordFreeContents(&expr->keyword);
+  }
+  else if (expr->type == N_BOOLEAN) {
+    booleanFreeContents(&expr->boolean);
+  }
+  else if (expr->type == N_NIL) {
+    nilFreeContents(&expr->nil);
   }
   else if (expr->type == N_LIST) {
-    listFreeContents(&(expr->list));
+    listFreeContents(&expr->list);
   }
   free(expr);
 }
