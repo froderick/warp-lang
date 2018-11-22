@@ -35,7 +35,7 @@ void assertToken(Token *t,
 
 START_TEST(basic) {
 
-  wchar_t* text = L"(one :two 345 '\"six\") true false nil [] {}";
+  wchar_t* text = L"(one :two 345 '\"six\") true false nil";
 
   Error e;
 
@@ -101,7 +101,7 @@ START_TEST(basic) {
 //
 //  ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_SUCCESS);
 //  assertToken(t, T_CBRACKET, L"}",   41, 1);
-  free(t);
+//  free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_EOF);
   ck_assert_msg(t == NULL, "when no token is allocated, this pointer should be set to null");
@@ -123,10 +123,12 @@ START_TEST(eof_mid_number_token) {
     ck_assert_int_eq(tryStreamMake(source, &stream, &e), R_SUCCESS);
 
     Token *t;
+    ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_SUCCESS);
+    assertToken(t, T_NUMBER, L"12345", 0, 5);
+    tokenFree(t);
 
     ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_EOF);
-    ck_assert_msg(t != NULL, "when a valid number token is allocated, this pointer should be valid even if an EOF was encountered");
-    assertToken(t, T_NUMBER, L"12345", 0, 5);
+    ck_assert_msg(t == NULL, "no tokens remain on the stream");
     free(t);
 
     ck_assert_int_eq(tryStreamFree(stream, &e), R_SUCCESS);

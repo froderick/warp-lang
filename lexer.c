@@ -370,16 +370,16 @@ bool isWhitespace(wchar_t ch) {
       || ch == L'\t';
 }
 
-RetVal tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
+RetVal tryReadString(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
   if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
     return R_ERROR;
   }
 
-  // keep reading until char is not numeric, then push back
+  // keep reading until char is a non-escaped quote
 
-  bool matched;
-  bool eof = false;
+  bool foundEnd = false;
+  bool escape = false;
   wint_t ch;
   do {
 
@@ -389,7 +389,47 @@ RetVal tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token *
     }
 
     if (read == R_EOF) {
-      eof = true;
+      return tokenizationError(error, s->position, "unexpected EOF, string must end in a '\"''");
+    }
+
+    if (tryBufferAppend(s->b, ch, error) != R_SUCCESS) {
+      return R_ERROR;
+    }
+
+    if (!escape && ch == L'"') {
+      foundEnd = true;
+    }
+    else {
+      escape = !escape && ch == L'\\';
+    }
+  }
+  while (!foundEnd);
+
+  if (tryTokenInitFromLexer(s, T_STRING, token, error) != R_SUCCESS) {
+    return R_ERROR;
+  }
+
+  return R_SUCCESS;
+}
+
+RetVal tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
+
+  if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
+    return R_ERROR;
+  }
+
+  // keep reading until char is not numeric, then push back
+
+  bool matched;
+  wint_t ch;
+  do {
+
+    int read = trySourceReadChar(source, &ch, error);
+    if (read == R_ERROR) {
+      return R_ERROR;
+    }
+
+    if (read == R_EOF) {
       matched = false;
     }
     else if (!iswdigit(ch)) {
@@ -411,12 +451,7 @@ RetVal tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token *
     return R_ERROR;
   }
 
-  if (eof) {
-    return R_EOF;
-  }
-  else {
-    return R_SUCCESS;
-  }
+  return R_SUCCESS;
 }
 
 bool isNil(wchar_t *text) {
@@ -438,9 +473,9 @@ RetVal tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token *
   }
 
   // keep reading until char is not alphanumeric, then push back
+  // on EOF, stop reading and return R_SUCCESS
 
   bool matched;
-  bool eof = false;
   wint_t ch;
   do {
 
@@ -450,7 +485,6 @@ RetVal tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token *
     }
 
     if (read == R_EOF) {
-      eof = true;
       matched = false;
     }
     else if (!iswalnum(ch)) {
@@ -488,12 +522,7 @@ RetVal tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token *
     return R_ERROR;
   }
 
-  if (eof) {
-    return R_EOF;
-  }
-  else {
-    return R_SUCCESS;
-  }
+  return R_SUCCESS;
 }
 
 RetVal tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
@@ -505,7 +534,6 @@ RetVal tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token 
   // keep reading until char is not alphanumeric, then push back
 
   bool matched;
-  bool eof = false;
   wint_t ch;
   do {
 
@@ -515,7 +543,6 @@ RetVal tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token 
     }
 
     if (read == R_EOF) {
-      eof = true;
       matched = false;
     }
     else if (!iswalnum(ch)) {
@@ -538,49 +565,6 @@ RetVal tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token 
   }
 
   if (tryTokenInitFromLexer(s, T_KEYWORD, token, error) != R_SUCCESS) {
-    return R_ERROR;
-  }
-
-  if (eof) {
-    return R_EOF;
-  }
-  else {
-    return R_SUCCESS;
-  }
-}
-
-RetVal tryReadString(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
-
-  if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
-    return R_ERROR;
-  }
-
-  // keep reading until char is a non-escaped quote
-
-  bool foundEnd = false;
-  bool escape = false;
-  wint_t ch;
-  do {
-
-    int read = trySourceReadChar(source, &ch, error);
-    if (read != R_SUCCESS) {
-      return read;
-    }
-
-    if (tryBufferAppend(s->b, ch, error) != R_SUCCESS) {
-      return R_ERROR;
-    }
-
-    if (!escape && ch == L'"') {
-      foundEnd = true;
-    }
-    else {
-      escape = !escape && ch == L'\\';
-    }
-  }
-  while (!foundEnd);
-
-  if (tryTokenInitFromLexer(s, T_STRING, token, error) != R_SUCCESS) {
     return R_ERROR;
   }
 
@@ -770,9 +754,6 @@ RetVal tryStreamFree(TokenStream *s, Error *error) {
  * Here is the basic AST implementation.
  */
 
-// TODO: all the symbol token types need to become expression types, move
-// all the dedicated symbol parsing behavior into the AST parsing code/model
-
 RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error);
 void exprFree(Expr *expr);
 RetVal tryListAppend(ExprList *list, Expr *expr, Error *error);
@@ -794,7 +775,6 @@ RetVal tryCopyText(wchar_t* from, wchar_t **ptr, uint64_t len, Error *error) {
   return R_SUCCESS;
 }
 
-// TODO: the caller doesn't have to malloc any more
 RetVal tryStringMakeStatic(wchar_t *input, uint64_t length, Expr **ptr, Error *error) {
 
   RetVal ret;
@@ -1028,9 +1008,6 @@ void symbolFreeContents(ExprSymbol *symbol) {
     }
   }
 }
-
-// TODO: use copy text places to avoid duplicate string munging
-// TODO: consider whether splitting make functions into make and makeStatic might simplify the code
 
 RetVal tryKeywordMakeStatic(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
 
