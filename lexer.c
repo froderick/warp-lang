@@ -778,30 +778,27 @@ void exprFree(Expr *expr);
 RetVal tryListAppend(ExprList *list, Expr *expr, Error *error);
 void listFreeContents(ExprList *list);
 
-RetVal tryNumberMake(TokenStream *stream, Expr **ptr, Error *error) {
+/*
+ * Allocate a new string of the same length, and copy the original string into
+ * it.
+ */
+RetVal tryCopyText(wchar_t* from, wchar_t **ptr, uint64_t len, Error *error) {
+
+  wchar_t *to = malloc((sizeof(wchar_t) * len) + 1);
+  if (to == NULL) {
+    return memoryError(error, "malloc wchar_t string");
+  }
+  wcscpy(from, to);
+
+  *ptr = to;
+  return R_SUCCESS;
+}
+
+// TODO: the caller doesn't have to malloc any more
+RetVal tryStringMakeStatic(wchar_t *input, uint64_t length, Expr **ptr, Error *error) {
 
   RetVal ret;
-  Token *token;
-
-  ret = tryStreamNext(stream, &token, error);
-  if (ret != R_SUCCESS) {
-    goto failure;
-  }
-
-  if (token->type != T_NUMBER) {
-    ret = syntaxError(error, token->position, "Token is not a type of T_NUMBER");
-    goto failure;
-  }
-
-  uint64_t value = wcstoull(token->text, NULL, 0);
-  if (errno == EINVAL) {
-    ret = syntaxError(error, token->position, "Token text does not represent a valid number");
-    goto failure;
-  }
-  if (errno == ERANGE) {
-    ret = syntaxError(error, token->position, "Cannot represent a number literal larger than 64 bits unsigned");
-    goto failure;
-  }
+  wchar_t *text;
 
   Expr *expr = malloc(sizeof(Expr));
   if (expr == NULL) {
@@ -809,26 +806,23 @@ RetVal tryNumberMake(TokenStream *stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
-  expr->type = N_NUMBER;
-  expr->number.token = token;
-  expr->number.value = value;
+  ret = tryCopyText(input, &text, length, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  expr->type = N_STRING;
+  expr->string.length = length;
+  expr->string.value = text;
 
   *ptr = expr;
   return R_SUCCESS;
 
   failure:
-  if (token != NULL) {
-    tokenFree(token);
-  }
-  return ret;
-}
-
-void numberFreeContents(ExprNumber *number) {
-  if (number != NULL) {
-    if (number->token != NULL) {
-      tokenFree(number->token);
+    if (text != NULL) {
+      free(text);
     }
-  }
+    return ret;
 }
 
 RetVal tryStringMake(TokenStream *stream, Expr **ptr, Error *error) {
@@ -854,18 +848,17 @@ RetVal tryStringMake(TokenStream *stream, Expr **ptr, Error *error) {
 
   // trim quotes
   text = malloc( sizeof(wchar_t) * (token->length - 1)); // -1 rather than -2 to leave room for null at end
-  wcsncpy(text, token->text + 1, token->length - 2);
+  uint64_t len = token->length - 2;
+  wcsncpy(text, token->text + 1, len);
 
-  Expr *expr = malloc(sizeof(Expr));
-  if (expr == NULL) {
-    ret = memoryError(error, "malloc Expr");
+  Expr *expr;
+  ret = tryStringMakeStatic(text, len, &expr, error);
+  if (ret != R_SUCCESS) {
     goto failure;
   }
 
-  expr->type = N_STRING;
+  free(text); // #tryStringMakeStatic mallocs and copies this
   expr->string.token = token;
-  expr->string.length = token->length - 2;
-  expr->string.value = text;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -891,53 +884,77 @@ void stringFreeContents(ExprString *string) {
   }
 }
 
-RetVal trySymbolMake(TokenStream *stream, Expr **ptr, Error *error) {
+RetVal tryNumberMakeStatic(uint64_t value, Expr **ptr, Error *error) {
+
+  Expr *expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    return memoryError(error, "malloc Expr");
+  }
+
+  expr->type = N_NUMBER;
+  expr->number.value = value;
+
+  *ptr = expr;
+  return R_SUCCESS;
+}
+
+RetVal tryNumberMake(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
-  wchar_t *text;
 
   ret = tryStreamNext(stream, &token, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
 
-  if (token->type != T_SYMBOL) {
-    ret = syntaxError(error, token->position, "Token is not a type of T_SYMBOL");
+  if (token->type != T_NUMBER) {
+    ret = syntaxError(error, token->position, "Token is not a type of T_NUMBER");
     goto failure;
   }
 
-  text = malloc( sizeof(wchar_t) * token->length);
-  wcscpy(token->text, text);
-
-  Expr *expr = malloc(sizeof(Expr));
-  if (expr == NULL) {
-    ret = memoryError(error, "malloc Expr");
+  uint64_t value = wcstoull(token->text, NULL, 0);
+  if (errno == EINVAL) {
+    ret = syntaxError(error, token->position, "Token text does not represent a valid number");
+    goto failure;
+  }
+  if (errno == ERANGE) {
+    ret = syntaxError(error, token->position, "Cannot represent a number literal larger than 64 bits unsigned");
     goto failure;
   }
 
-  expr->type = N_SYMBOL;
-  expr->symbol.token = token;
-  expr->symbol.length = token->length;
-  expr->symbol.value = text;
+  Expr *expr;
+  ret = tryNumberMakeStatic(value, &expr, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+  expr->number.token = token;
 
   *ptr = expr;
   return R_SUCCESS;
 
   failure:
-  if (token != NULL) {
-    tokenFree(token);
-  }
-  if (text != NULL) {
-    free(text);
-  }
-  return ret;
+    if (token != NULL) {
+      tokenFree(token);
+    }
+    return ret;
 }
 
-RetVal trySymbolMakeStatic(wchar_t *name, Expr **ptr, Error *error) {
+void numberFreeContents(ExprNumber *number) {
+  if (number != NULL) {
+    if (number->token != NULL) {
+      tokenFree(number->token);
+    }
+  }
+}
+
+/*
+ * This is for dynamically creating symbols, for instance to handle the reader
+ * macros where certain tokens (like '`') expand into special forms.
+ */
+RetVal trySymbolMakeStatic(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
 
   RetVal ret;
-  uint64_t len;
   wchar_t *value;
 
   Expr *expr = malloc(sizeof(Expr));
@@ -946,13 +963,10 @@ RetVal trySymbolMakeStatic(wchar_t *name, Expr **ptr, Error *error) {
     goto failure;
   }
 
-  len = wcslen(name);
-  value = malloc((sizeof(wchar_t) * len) + 1);
-  if (value == NULL) {
-    ret = memoryError(error, "malloc static Symbol value");
+  ret = tryCopyText(name, &value, len, error);
+  if (ret != R_SUCCESS) {
     goto failure;
   }
-  wcscpy(name, value);
 
   expr->type = N_SYMBOL;
   expr->symbol.token = NULL; // no token
@@ -972,6 +986,38 @@ RetVal trySymbolMakeStatic(wchar_t *name, Expr **ptr, Error *error) {
   return ret;
 }
 
+RetVal trySymbolMake(TokenStream *stream, Expr **ptr, Error *error) {
+
+  RetVal ret;
+  Token *token;
+
+  ret = tryStreamNext(stream, &token, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  if (token->type != T_SYMBOL) {
+    ret = syntaxError(error, token->position, "Token is not a type of T_SYMBOL");
+    goto failure;
+  }
+
+  Expr *expr;
+  ret = trySymbolMakeStatic(token->text, token->length, &expr, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+  expr->symbol.token = token;
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+    if (token != NULL) {
+      tokenFree(token);
+    }
+    return ret;
+}
+
 void symbolFreeContents(ExprSymbol *symbol) {
   if (symbol != NULL) {
     if (symbol->token != NULL) {
@@ -983,11 +1029,44 @@ void symbolFreeContents(ExprSymbol *symbol) {
   }
 }
 
+// TODO: use copy text places to avoid duplicate string munging
+// TODO: consider whether splitting make functions into make and makeStatic might simplify the code
+
+RetVal tryKeywordMakeStatic(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
+
+  RetVal ret;
+  wchar_t *text;
+
+  ret = tryCopyText(name, &text, len, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  Expr *expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    ret = memoryError(error, "malloc Expr");
+    goto failure;
+  }
+
+  expr->type = N_KEYWORD;
+  expr->keyword.token = NULL; // no token
+  expr->keyword.length = len;
+  expr->keyword.value = text;
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+    if (text != NULL) {
+      free(text);
+    }
+    return ret;
+}
+
 RetVal tryKeywordMake(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
-  wchar_t *text;
 
   ret = tryStreamNext(stream, &token, error);
   if (ret != R_SUCCESS) {
@@ -999,31 +1078,21 @@ RetVal tryKeywordMake(TokenStream *stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
-  text = malloc( sizeof(wchar_t) * token->length);
-  wcscpy(token->text, text);
-
-  Expr *expr = malloc(sizeof(Expr));
-  if (expr == NULL) {
-    ret = memoryError(error, "malloc Expr");
+  Expr *expr;
+  ret = tryKeywordMakeStatic(token->text, token->length, &expr, error);
+  if (ret != R_SUCCESS) {
     goto failure;
   }
-
-  expr->type = N_KEYWORD;
   expr->keyword.token = token;
-  expr->keyword.length = token->length;
-  expr->keyword.value = text;
 
   *ptr = expr;
   return R_SUCCESS;
 
   failure:
-  if (token != NULL) {
-    tokenFree(token);
-  }
-  if (text != NULL) {
-    free(text);
-  }
-  return ret;
+    if (token != NULL) {
+      tokenFree(token);
+    }
+    return ret;
 }
 
 void keywordFreeContents(ExprKeyword *keyword) {
@@ -1035,6 +1104,20 @@ void keywordFreeContents(ExprKeyword *keyword) {
       free(keyword->value);
     }
   }
+}
+
+RetVal tryBooleanMakeStatic(bool value, Expr **ptr, Error *error) {
+
+  Expr *expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    return memoryError(error, "malloc Expr");
+  }
+
+  expr->type = N_BOOLEAN;
+  expr->boolean.value = value;
+
+  *ptr = expr;
+  return R_SUCCESS;
 }
 
 RetVal tryBooleanMake(TokenStream *stream, Expr **ptr, Error *error) {
@@ -1052,23 +1135,14 @@ RetVal tryBooleanMake(TokenStream *stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
-  Expr *expr = malloc(sizeof(Expr));
-  if (expr == NULL) {
-    ret = memoryError(error, "malloc Expr");
+  bool value = token->type == T_TRUE;
+
+  Expr *expr;
+  ret = tryBooleanMakeStatic(value, &expr, error);
+  if (ret != R_SUCCESS) {
     goto failure;
   }
-
-  bool value;
-  if (token->type == T_TRUE) {
-    value = true;
-  }
-  else {
-    value = false;
-  }
-
-  expr->type = N_BOOLEAN;
   expr->boolean.token = token;
-  expr->boolean.value = value;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -1088,6 +1162,19 @@ void booleanFreeContents(ExprBoolean *boolean) {
   }
 }
 
+RetVal tryNilMakeStatic(Expr **ptr, Error *error) {
+
+  Expr *expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    return memoryError(error, "malloc Expr");
+  }
+
+  expr->type = N_NIL;
+
+  *ptr = expr;
+  return R_SUCCESS;
+}
+
 RetVal tryNilMake(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
@@ -1103,23 +1190,21 @@ RetVal tryNilMake(TokenStream *stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
-  Expr *expr = malloc(sizeof(Expr));
-  if (expr == NULL) {
-    ret = memoryError(error, "malloc Expr");
+  Expr *expr;
+  ret = tryNilMakeStatic(&expr, error);
+  if (ret != R_SUCCESS) {
     goto failure;
   }
-
-  expr->type = N_NIL;
   expr->nil.token = token;
 
   *ptr = expr;
   return R_SUCCESS;
 
   failure:
-  if (token != NULL) {
-    tokenFree(token);
-  }
-  return ret;
+    if (token != NULL) {
+      tokenFree(token);
+    }
+    return ret;
 }
 
 void nilFreeContents(ExprNil *nil) {
@@ -1135,6 +1220,22 @@ void nilFreeContents(ExprNil *nil) {
 // Assume the opening paren has aready been read.
 // Allocate a list, continue to read expressions and add them to it until a
 // closed-paren is found.
+
+
+RetVal tryListMakeStatic(Expr **ptr, Error *error) {
+
+  Expr *expr = malloc(sizeof(Expr));
+  if (expr == NULL) {
+    return memoryError(error, "malloc Expr");
+  }
+
+  expr->type = N_LIST;
+  expr->list.oParen = NULL; // none exists
+  expr->list.cParen = NULL; // none exists
+
+  *ptr = expr;
+  return R_SUCCESS;
+}
 
 RetVal tryListMake(TokenStream *stream, Expr **ptr, Error *error) {
 
@@ -1166,17 +1267,14 @@ RetVal tryListMake(TokenStream *stream, Expr **ptr, Error *error) {
 
     if (cParen->type == T_CPAREN) { // found our closed paren
 
-      Expr *expr = malloc(sizeof(Expr));
-      if (expr == NULL) {
-        ret = memoryError(error, "malloc Expr");
+      Expr *expr;
+      ret = tryListMakeStatic(&expr, error);
+      if (ret != R_SUCCESS) {
         goto failure;
       }
 
       streamDropPeeked(stream); // consume cParen now that nothing else can fail
       list.cParen = cParen;
-
-      expr->type = N_LIST;
-      expr->list = list;
 
       *ptr = expr;
       return R_SUCCESS;
@@ -1255,7 +1353,7 @@ RetVal tryQuoteMake(TokenStream *stream, Expr **ptr, Error *error) {
   Expr *subexpr;
   Expr *expr;
 
-  ret = trySymbolMakeStatic(L"quote", &quote, error);
+  ret = trySymbolMakeStatic(L"quote", wcslen(L"quote"), &quote, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
@@ -1265,15 +1363,10 @@ RetVal tryQuoteMake(TokenStream *stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
-  expr = malloc(sizeof(Expr));
-  if (expr == NULL) {
-    ret = memoryError(error, "malloc Expr");
+  ret = tryListMakeStatic(&expr, error);
+  if (ret != R_SUCCESS) {
     goto failure;
   }
-
-  expr->type = N_LIST;
-  expr->list.oParen = NULL; // none exists
-  expr->list.cParen = NULL; // none exists
 
   ret = tryListAppend(&expr->list, quote, error);
   if (ret != R_SUCCESS) {
@@ -1291,16 +1384,16 @@ RetVal tryQuoteMake(TokenStream *stream, Expr **ptr, Error *error) {
   return R_SUCCESS;
 
   failure:
-  if (quote != NULL) {
-    exprFree(quote);
-  }
-  if (subexpr != NULL) {
-    exprFree(subexpr);
-  }
-  if (expr != NULL) {
-    exprFree(expr);
-  }
-  return ret;
+    if (quote != NULL) {
+      exprFree(quote);
+    }
+    if (subexpr != NULL) {
+      exprFree(subexpr);
+    }
+    if (expr != NULL) {
+      exprFree(expr);
+    }
+    return ret;
 }
 
 // read the first token off the stream
