@@ -1,8 +1,8 @@
-#include "parser.h"
+#include "analyzer.h"
 
 #include <stdint.h>
 #include <stdlib.h>
-#include "lexer.h"
+#include "reader.h"
 
 // This parser takes in a stream of tokens and emits an ast.
 //

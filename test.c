@@ -5,7 +5,7 @@
 #include <execinfo.h>
 #include <check.h>
 #include <errno.h>
-#include "lexer.h"
+#include "reader.h"
 
 void assertToken(Token *t,
                  TokenType type, wchar_t *text, unsigned long position, unsigned long length) {
@@ -157,48 +157,48 @@ START_TEST(parser) {
     ck_assert_int_eq(tryStreamMake(source, &stream, &e), R_SUCCESS);
 
     // string
-    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_STRING);
     ck_assert(wcscmp(expr->string.value, L"str") == 0);
     ck_assert(expr->string.token->type == T_STRING);
     exprFree(expr);
 
     // number
-    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_NUMBER);
     ck_assert_int_eq(expr->number.value, 102);
     ck_assert(expr->number.token->type == T_NUMBER);
     exprFree(expr);
 
     // symbol
-    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_SYMBOL);
     ck_assert(wcscmp(expr->symbol.value, L"himom") == 0);
     ck_assert(expr->symbol.token->type == T_SYMBOL);
     exprFree(expr);
 
     // keyword
-    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_KEYWORD);
     ck_assert(wcscmp(expr->keyword.value, L"rocks") == 0);
     ck_assert(expr->keyword.token->type == T_KEYWORD);
     exprFree(expr);
 
     // boolean
-    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_BOOLEAN);
     ck_assert(expr->boolean.value == true);
     ck_assert(expr->boolean.token->type == T_TRUE);
     exprFree(expr);
 
     // nil
-    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_NIL);
     ck_assert(expr->nil.token->type == T_NIL);
     exprFree(expr);
 
     // list
-    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_LIST);
     ck_assert(expr->list.oParen->type == T_OPAREN);
     ck_assert(expr->list.cParen->type == T_CPAREN);
@@ -214,7 +214,7 @@ START_TEST(parser) {
     exprFree(expr);
 
     // quote (reader macro)
-    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_LIST);
     ck_assert(expr->list.length == 2);
     // first element

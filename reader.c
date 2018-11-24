@@ -7,7 +7,7 @@
 #include <wctype.h>
 #include <errno.h>
 
-#include "lexer.h"
+#include "reader.h"
 
 /*
  * Lexer input source abstraction.
@@ -754,10 +754,6 @@ RetVal tryStreamFree(TokenStream *s, Error *error) {
  * Here is the basic AST implementation.
  */
 
-RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error);
-RetVal tryListAppend(ExprList *list, Expr *expr, Error *error);
-void listFreeContents(ExprList *list);
-
 /*
  * Allocate a new string of the same length, and copy the original string into
  * it.
@@ -775,7 +771,7 @@ RetVal tryCopyText(wchar_t* from, wchar_t **ptr, uint64_t len, Error *error) {
   return R_SUCCESS;
 }
 
-RetVal tryStringMakeStatic(wchar_t *input, uint64_t length, Expr **ptr, Error *error) {
+RetVal tryStringMake(wchar_t *input, uint64_t length, Expr **ptr, Error *error) {
 
   RetVal ret;
   wchar_t *text;
@@ -806,7 +802,7 @@ RetVal tryStringMakeStatic(wchar_t *input, uint64_t length, Expr **ptr, Error *e
     return ret;
 }
 
-RetVal tryStringMake(TokenStream *stream, Expr **ptr, Error *error) {
+RetVal tryStringRead(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -831,7 +827,7 @@ RetVal tryStringMake(TokenStream *stream, Expr **ptr, Error *error) {
   uint64_t len = token->length - 2;
 
   Expr *expr;
-  ret = tryStringMakeStatic(text, len, &expr, error);
+  ret = tryStringMake(text, len, &expr, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
@@ -862,7 +858,7 @@ void stringFreeContents(ExprString *string) {
   }
 }
 
-RetVal tryNumberMakeStatic(uint64_t value, Expr **ptr, Error *error) {
+RetVal tryNumberMake(uint64_t value, Expr **ptr, Error *error) {
 
   Expr *expr = malloc(sizeof(Expr));
   if (expr == NULL) {
@@ -877,7 +873,7 @@ RetVal tryNumberMakeStatic(uint64_t value, Expr **ptr, Error *error) {
   return R_SUCCESS;
 }
 
-RetVal tryNumberMake(TokenStream *stream, Expr **ptr, Error *error) {
+RetVal tryNumberRead(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -903,7 +899,7 @@ RetVal tryNumberMake(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   Expr *expr;
-  ret = tryNumberMakeStatic(value, &expr, error);
+  ret = tryNumberMake(value, &expr, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
@@ -931,7 +927,7 @@ void numberFreeContents(ExprNumber *number) {
  * This is for dynamically creating symbols, for instance to handle the reader
  * macros where certain tokens (like '`') expand into special forms.
  */
-RetVal trySymbolMakeStatic(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
+RetVal trySymbolMake(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
 
   RetVal ret;
   wchar_t *value;
@@ -965,7 +961,7 @@ RetVal trySymbolMakeStatic(wchar_t *name, uint64_t len, Expr **ptr, Error *error
   return ret;
 }
 
-RetVal trySymbolMake(TokenStream *stream, Expr **ptr, Error *error) {
+RetVal trySymbolRead(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -981,7 +977,7 @@ RetVal trySymbolMake(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   Expr *expr;
-  ret = trySymbolMakeStatic(token->text, token->length, &expr, error);
+  ret = trySymbolMake(token->text, token->length, &expr, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
@@ -1008,7 +1004,7 @@ void symbolFreeContents(ExprSymbol *symbol) {
   }
 }
 
-RetVal tryKeywordMakeStatic(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
+RetVal tryKeywordMake(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
 
   RetVal ret;
   wchar_t *text;
@@ -1039,7 +1035,7 @@ RetVal tryKeywordMakeStatic(wchar_t *name, uint64_t len, Expr **ptr, Error *erro
     return ret;
 }
 
-RetVal tryKeywordMake(TokenStream *stream, Expr **ptr, Error *error) {
+RetVal tryKeywordRead(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -1058,7 +1054,7 @@ RetVal tryKeywordMake(TokenStream *stream, Expr **ptr, Error *error) {
   wchar_t *text = token->text + 1;
 
   Expr *expr;
-  ret = tryKeywordMakeStatic(text, len, &expr, error);
+  ret = tryKeywordMake(text, len, &expr, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
@@ -1085,7 +1081,7 @@ void keywordFreeContents(ExprKeyword *keyword) {
   }
 }
 
-RetVal tryBooleanMakeStatic(bool value, Expr **ptr, Error *error) {
+RetVal tryBooleanMake(bool value, Expr **ptr, Error *error) {
 
   Expr *expr = malloc(sizeof(Expr));
   if (expr == NULL) {
@@ -1100,7 +1096,7 @@ RetVal tryBooleanMakeStatic(bool value, Expr **ptr, Error *error) {
   return R_SUCCESS;
 }
 
-RetVal tryBooleanMake(TokenStream *stream, Expr **ptr, Error *error) {
+RetVal tryBooleanRead(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -1118,7 +1114,7 @@ RetVal tryBooleanMake(TokenStream *stream, Expr **ptr, Error *error) {
   bool value = token->type == T_TRUE;
 
   Expr *expr;
-  ret = tryBooleanMakeStatic(value, &expr, error);
+  ret = tryBooleanMake(value, &expr, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
@@ -1142,7 +1138,7 @@ void booleanFreeContents(ExprBoolean *boolean) {
   }
 }
 
-RetVal tryNilMakeStatic(Expr **ptr, Error *error) {
+RetVal tryNilMake(Expr **ptr, Error *error) {
 
   Expr *expr = malloc(sizeof(Expr));
   if (expr == NULL) {
@@ -1156,7 +1152,7 @@ RetVal tryNilMakeStatic(Expr **ptr, Error *error) {
   return R_SUCCESS;
 }
 
-RetVal tryNilMake(TokenStream *stream, Expr **ptr, Error *error) {
+RetVal tryNilRead(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -1172,7 +1168,7 @@ RetVal tryNilMake(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   Expr *expr;
-  ret = tryNilMakeStatic(&expr, error);
+  ret = tryNilMake(&expr, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
@@ -1198,12 +1194,14 @@ void nilFreeContents(ExprNil *nil) {
 
 // Lists
 
+RetVal tryExprRead(TokenStream *stream, Expr **ptr, Error *error);
+RetVal tryListAppend(ExprList *list, Expr *expr, Error *error);
+
 // Assume the opening paren has aready been read.
 // Allocate a list, continue to read expressions and add them to it until a
 // closed-paren is found.
 
-
-RetVal tryListMakeStatic(Expr **ptr, Error *error) {
+RetVal tryListMake(Expr **ptr, Error *error) {
 
   Expr *expr = malloc(sizeof(Expr));
   if (expr == NULL) {
@@ -1225,7 +1223,7 @@ RetVal tryListMakeStatic(Expr **ptr, Error *error) {
   return R_SUCCESS;
 }
 
-RetVal tryListMake(TokenStream *stream, Expr **ptr, Error *error) {
+RetVal tryListRead(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
 
@@ -1235,7 +1233,7 @@ RetVal tryListMake(TokenStream *stream, Expr **ptr, Error *error) {
 
   // convenience
 
-  ret = tryListMakeStatic(&expr, error);
+  ret = tryListMake(&expr, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
@@ -1271,7 +1269,7 @@ RetVal tryListMake(TokenStream *stream, Expr **ptr, Error *error) {
     }
     else { // read a new expression and add it to the list
 
-      ret = tryExprMake(stream, &subexpr, error);
+      ret = tryExprRead(stream, &subexpr, error);
       if (ret != R_SUCCESS) {
         goto failure;
       }
@@ -1337,7 +1335,7 @@ void listFreeContents(ExprList *list) {
   }
 }
 
-RetVal tryQuoteMake(TokenStream *stream, Expr **ptr, Error *error) {
+RetVal tryQuoteRead(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
 
@@ -1356,19 +1354,19 @@ RetVal tryQuoteMake(TokenStream *stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
-  ret = trySymbolMakeStatic(L"quote", wcslen(L"quote"), &quote, error);
+  ret = trySymbolMake(L"quote", wcslen(L"quote"), &quote, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
   quote->symbol.token = token;
   token = NULL; // token is now a part of quote symbol
 
-  ret = tryExprMake(stream, &subexpr, error);
+  ret = tryExprRead(stream, &subexpr, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
 
-  ret = tryListMakeStatic(&expr, error);
+  ret = tryListMake(&expr, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
@@ -1409,48 +1407,47 @@ RetVal tryQuoteMake(TokenStream *stream, Expr **ptr, Error *error) {
 // if it is a symbol, create a symbol
 // else, explode
 
-RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error) {
+RetVal tryExprRead(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *peek;
 
   ret = tryStreamPeek(stream, &peek, error);
   if (ret != R_SUCCESS) {
-    return ret;
+    return ret; // can be R_EOF or R_ERROR
   }
-  // TODO: probably need to handle EOF here as well, you could call #tryExprMake on an empty stream and it should return EOF, not ERROR
 
   switch (peek->type) {
 
     // atoms
     case T_STRING:
-      ret = tryStringMake(stream, ptr, error);
+      ret = tryStringRead(stream, ptr, error);
       break;
     case T_NUMBER:
-      ret = tryNumberMake(stream, ptr, error);
+      ret = tryNumberRead(stream, ptr, error);
       break;
     case T_SYMBOL:
-      ret = trySymbolMake(stream, ptr, error);
+      ret = trySymbolRead(stream, ptr, error);
       break;
     case T_KEYWORD:
-      ret = tryKeywordMake(stream, ptr, error);
+      ret = tryKeywordRead(stream, ptr, error);
       break;
     case T_TRUE:
     case T_FALSE:
-      ret = tryBooleanMake(stream, ptr, error);
+      ret = tryBooleanRead(stream, ptr, error);
       break;
     case T_NIL:
-      ret = tryNilMake(stream, ptr, error);
+      ret = tryNilRead(stream, ptr, error);
       break;
 
     // lists
     case T_OPAREN:
-      ret = tryListMake(stream, ptr, error);
+      ret = tryListRead(stream, ptr, error);
       break;
 
     // reader macros
     case T_QUOTE:
-        ret = tryQuoteMake(stream, ptr, error);
+      ret = tryQuoteRead(stream, ptr, error);
       break;
 
     default:
@@ -1460,6 +1457,7 @@ RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error) {
   if (ret != R_SUCCESS) {
     return ret;
   }
+
   return R_SUCCESS;
 }
 
@@ -1488,5 +1486,4 @@ void exprFree(Expr *expr) {
   free(expr);
 }
 
-// TODO: write some tests, kick the tires on the ast parsing
 

@@ -4,14 +4,7 @@
 #include "errors.h"
 
 typedef enum TokenType {
-  // invalid token
   T_NONE,
-  // static tokens
-//  T_OVEC,
-//  T_CVEC,
-//  T_OBRACKET,
-//  T_CBRACKET,
-  // value tokens
   T_OPAREN,
   T_CPAREN,
   T_NUMBER,
@@ -32,6 +25,8 @@ typedef struct Token {
   wchar_t text[];
 } Token;
 
+void tokenFree(Token *t);
+
 typedef struct StreamSource *StreamSource_t;
 
 RetVal trySourceMake(
@@ -42,18 +37,20 @@ RetVal trySourceMake(
     StreamSource_t *s,
     Error *error
 );
-RetVal trySourceMakeFilename(char *filename, StreamSource_t *s, Error *error);
+RetVal trySourceFree(StreamSource_t s, Error *error);
+
+// source factories
 RetVal trySourceMakeFile(FILE *file, StreamSource_t *s, Error *error);
 RetVal trySourceMakeString(wchar_t* text, uint64_t length, StreamSource_t *s, Error *error);
-RetVal trySourceFree(StreamSource_t s, Error *error);
 
 typedef struct TokenStream *TokenStream_t;
 
 RetVal tryStreamMake(StreamSource_t source, TokenStream_t *s, Error *error);
+RetVal tryStreamFree(TokenStream_t s, Error *error);
+
+// stream operations
 RetVal tryStreamNext(TokenStream_t s, Token **token, Error *error);
 RetVal tryStreamPeek(TokenStream_t s, Token **token, Error *error);
-void tokenFree(Token *t);
-RetVal tryStreamFree(TokenStream_t s, Error *error);
 
 struct Expr;
 
@@ -126,6 +123,6 @@ typedef struct Expr {
   };
 } Expr;
 
-RetVal tryExprMake(TokenStream_t stream, Expr **expr, Error *error);
+RetVal tryExprRead(TokenStream_t stream, Expr **expr, Error *error);
 void exprFree(Expr *expr);
 
