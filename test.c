@@ -223,6 +223,8 @@ START_TEST(parser) {
     // second element
     ck_assert(expr->list.head->next->expr->type == N_NIL);
     exprFree(expr);
+
+    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_EOF);
   }
 END_TEST
 
