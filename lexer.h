@@ -126,5 +126,6 @@ typedef struct Expr {
   };
 } Expr;
 
-RetVal tryReadExpr(TokenStream_t stream, Expr **expr, Error *error);
+RetVal tryExprMake(TokenStream_t stream, Expr **expr, Error *error);
+void exprFree(Expr *expr);
 

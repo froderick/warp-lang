@@ -7,23 +7,6 @@
 #include <errno.h>
 #include "lexer.h"
 
-void spit(const char* file, const wchar_t* text) {
-  FILE *f = fopen(file, "w");
-
-  if (f == NULL) {
-    if (DEBUG) { printf("error: failed to open file for writing -> '%s'\n", file); }
-    return;
-  }
-
-  if (fprintf(f, "%ls", text) < 0) {
-    if (DEBUG) { printf("error: failed write to file -> '%s'\n", file); }
-  }
-
-  if (fclose(f)) {
-    if (DEBUG) { printf("error: failed write to file -> '%s'\n", file); }
-  }
-}
-
 void assertToken(Token *t,
                  TokenType type, wchar_t *text, unsigned long position, unsigned long length) {
 
@@ -152,12 +135,94 @@ START_TEST(errors) {
     ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_ERROR);
     ck_assert_msg(e.type == E_LEXER);
     ck_assert_msg(e.lexer.position == 0);
-    printf("%ls", e.message);
+//    printf("%ls", e.message);
 
     wchar_t *msg = L"failed to tokenize stream -> keyword token type cannot be empty\n";
     ck_assert_msg(wcscmp(e.message, msg) == 0, "text must match");
 
     ck_assert_int_eq(tryStreamFree(stream, &e), R_SUCCESS);
+  }
+END_TEST
+
+START_TEST(parser) {
+
+    wchar_t* input = L"\"str\" 102 himom :rocks true nil (true false) 'nil";
+
+    Error e;
+    StreamSource_t source;
+    TokenStream_t stream;
+    Expr *expr;
+
+    ck_assert_int_eq(trySourceMakeString(input, wcslen(input), &source, &e), R_SUCCESS);
+    ck_assert_int_eq(tryStreamMake(source, &stream, &e), R_SUCCESS);
+
+    // string
+    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert(expr->type == N_STRING);
+    ck_assert(wcscmp(expr->string.value, L"str") == 0);
+    ck_assert(expr->string.token->type == T_STRING);
+    exprFree(expr);
+
+    // number
+    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert(expr->type == N_NUMBER);
+    ck_assert_int_eq(expr->number.value, 102);
+    ck_assert(expr->number.token->type == T_NUMBER);
+    exprFree(expr);
+
+    // symbol
+    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert(expr->type == N_SYMBOL);
+    ck_assert(wcscmp(expr->symbol.value, L"himom") == 0);
+    ck_assert(expr->symbol.token->type == T_SYMBOL);
+    exprFree(expr);
+
+    // keyword
+    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert(expr->type == N_KEYWORD);
+    ck_assert(wcscmp(expr->keyword.value, L"rocks") == 0);
+    ck_assert(expr->keyword.token->type == T_KEYWORD);
+    exprFree(expr);
+
+    // boolean
+    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert(expr->type == N_BOOLEAN);
+    ck_assert(expr->boolean.value == true);
+    ck_assert(expr->boolean.token->type == T_TRUE);
+    exprFree(expr);
+
+    // nil
+    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert(expr->type == N_NIL);
+    ck_assert(expr->nil.token->type == T_NIL);
+    exprFree(expr);
+
+    // list
+    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert(expr->type == N_LIST);
+    ck_assert(expr->list.oParen->type == T_OPAREN);
+    ck_assert(expr->list.cParen->type == T_CPAREN);
+    ck_assert(expr->list.length == 2);
+    // first element
+    ck_assert(expr->list.head->expr->type == N_BOOLEAN);
+    ck_assert(expr->list.head->expr->boolean.value == true);
+    // second element
+    ck_assert(expr->list.head->next->expr->type == N_BOOLEAN);
+    ck_assert(expr->list.head->next->expr->boolean.value == false);
+    // verify second element is tail
+    ck_assert(expr->list.tail == expr->list.head->next);
+    exprFree(expr);
+
+    // quote (reader macro)
+    ck_assert_int_eq(tryExprMake(stream, &expr, &e), R_SUCCESS);
+    ck_assert(expr->type == N_LIST);
+    ck_assert(expr->list.length == 2);
+    // first element
+    ck_assert(expr->list.head->expr->type == N_SYMBOL);
+    ck_assert(wcscmp(expr->list.head->expr->symbol.value, L"quote") == 0);
+    // second element
+    ck_assert(expr->list.head->next->expr->type == N_NIL);
+    exprFree(expr);
   }
 END_TEST
 
@@ -167,6 +232,7 @@ Suite * suite(void) {
   tcase_add_test(tc_core, basic);
   tcase_add_test(tc_core, eof_mid_number_token);
   tcase_add_test(tc_core, errors);
+  tcase_add_test(tc_core, parser);
 
   Suite *s = suite_create("lexer");
   suite_add_tcase(s, tc_core);

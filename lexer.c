@@ -755,7 +755,6 @@ RetVal tryStreamFree(TokenStream *s, Error *error) {
  */
 
 RetVal tryExprMake(TokenStream *stream, Expr **ptr, Error *error);
-void exprFree(Expr *expr);
 RetVal tryListAppend(ExprList *list, Expr *expr, Error *error);
 void listFreeContents(ExprList *list);
 
@@ -769,7 +768,8 @@ RetVal tryCopyText(wchar_t* from, wchar_t **ptr, uint64_t len, Error *error) {
   if (to == NULL) {
     return memoryError(error, "malloc wchar_t string");
   }
-  wcscpy(from, to);
+  wcsncpy(to, from, len);
+  to[len] = L'\0';
 
   *ptr = to;
   return R_SUCCESS;
@@ -794,6 +794,7 @@ RetVal tryStringMakeStatic(wchar_t *input, uint64_t length, Expr **ptr, Error *e
   expr->type = N_STRING;
   expr->string.length = length;
   expr->string.value = text;
+  expr->string.token = NULL;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -809,7 +810,6 @@ RetVal tryStringMake(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
-  wchar_t *text;
 
   ret = tryStreamNext(stream, &token, error);
   if (ret != R_SUCCESS) {
@@ -827,9 +827,8 @@ RetVal tryStringMake(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   // trim quotes
-  text = malloc( sizeof(wchar_t) * (token->length - 1)); // -1 rather than -2 to leave room for null at end
+  wchar_t *text = token->text + 1;
   uint64_t len = token->length - 2;
-  wcsncpy(text, token->text + 1, len);
 
   Expr *expr;
   ret = tryStringMakeStatic(text, len, &expr, error);
@@ -837,7 +836,6 @@ RetVal tryStringMake(TokenStream *stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
-  free(text); // #tryStringMakeStatic mallocs and copies this
   expr->string.token = token;
 
   *ptr = expr;
@@ -873,6 +871,7 @@ RetVal tryNumberMakeStatic(uint64_t value, Expr **ptr, Error *error) {
 
   expr->type = N_NUMBER;
   expr->number.value = value;
+  expr->number.token = NULL;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -949,9 +948,9 @@ RetVal trySymbolMakeStatic(wchar_t *name, uint64_t len, Expr **ptr, Error *error
   }
 
   expr->type = N_SYMBOL;
-  expr->symbol.token = NULL; // no token
-  expr->symbol.value = name;
+  expr->symbol.value = value;
   expr->symbol.length = len;
+  expr->symbol.token = NULL; // no token
 
   *ptr = expr;
   return R_SUCCESS;
@@ -1026,9 +1025,9 @@ RetVal tryKeywordMakeStatic(wchar_t *name, uint64_t len, Expr **ptr, Error *erro
   }
 
   expr->type = N_KEYWORD;
-  expr->keyword.token = NULL; // no token
   expr->keyword.length = len;
   expr->keyword.value = text;
+  expr->keyword.token = NULL; // no token
 
   *ptr = expr;
   return R_SUCCESS;
@@ -1055,8 +1054,11 @@ RetVal tryKeywordMake(TokenStream *stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
+  uint64_t len = token->length - 1;
+  wchar_t *text = token->text + 1;
+
   Expr *expr;
-  ret = tryKeywordMakeStatic(token->text, token->length, &expr, error);
+  ret = tryKeywordMakeStatic(text, len, &expr, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
@@ -1092,6 +1094,7 @@ RetVal tryBooleanMakeStatic(bool value, Expr **ptr, Error *error) {
 
   expr->type = N_BOOLEAN;
   expr->boolean.value = value;
+  expr->boolean.token = NULL;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -1147,6 +1150,7 @@ RetVal tryNilMakeStatic(Expr **ptr, Error *error) {
   }
 
   expr->type = N_NIL;
+  expr->nil.token = NULL;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -1207,8 +1211,15 @@ RetVal tryListMakeStatic(Expr **ptr, Error *error) {
   }
 
   expr->type = N_LIST;
-  expr->list.oParen = NULL; // none exists
-  expr->list.cParen = NULL; // none exists
+  expr->list.length = 0;
+
+  // valid for zero length list
+  expr->list.head = NULL;
+  expr->list.tail = NULL;
+
+  // these do not exist
+  expr->list.oParen = NULL;
+  expr->list.cParen = NULL;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -1218,16 +1229,24 @@ RetVal tryListMake(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
 
-  ExprList list;
+  // these get cleaned up on failure
+  Expr *expr;
   Expr *subexpr;
 
-  ret = tryStreamNext(stream, &list.oParen, error);
+  // convenience
+
+  ret = tryListMakeStatic(&expr, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
 
-  if (list.oParen->type != T_OPAREN) {
-    ret = syntaxError(error, list.oParen->position, "List must begin with ')'");
+  ret = tryStreamNext(stream, &expr->list.oParen, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  if (expr->list.oParen->type != T_OPAREN) {
+    ret = syntaxError(error, expr->list.oParen->position, "List must begin with ')'");
     goto failure;
   }
 
@@ -1237,21 +1256,15 @@ RetVal tryListMake(TokenStream *stream, Expr **ptr, Error *error) {
     ret = tryStreamPeek(stream, &cParen, error);
     if (ret != R_SUCCESS) {
       if (ret == R_EOF) { // eof too soon
-        ret = syntaxError(error, list.oParen->position, "Encountered EOF, was expecting ')'");
+        ret = syntaxError(error, expr->list.oParen->position, "Encountered EOF, was expecting ')'");
       }
       goto failure;
     }
 
     if (cParen->type == T_CPAREN) { // found our closed paren
 
-      Expr *expr;
-      ret = tryListMakeStatic(&expr, error);
-      if (ret != R_SUCCESS) {
-        goto failure;
-      }
-
       streamDropPeeked(stream); // consume cParen now that nothing else can fail
-      list.cParen = cParen;
+      expr->list.cParen = cParen;
 
       *ptr = expr;
       return R_SUCCESS;
@@ -1263,7 +1276,7 @@ RetVal tryListMake(TokenStream *stream, Expr **ptr, Error *error) {
         goto failure;
       }
 
-      ret = tryListAppend(&list, subexpr, error);
+      ret = tryListAppend(&expr->list, subexpr, error);
       if (ret != R_SUCCESS) {
         goto failure;
       }
@@ -1272,11 +1285,11 @@ RetVal tryListMake(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   failure:
-  listFreeContents(&list);
-  if (subexpr != NULL) {
-    exprFree(subexpr);
-  }
-  return ret;
+    if (subexpr != NULL) {
+      exprFree(subexpr);
+    }
+    exprFree(expr);
+    return ret;
 }
 
 RetVal tryListAppend(ExprList *list, Expr *expr, Error *error) {
@@ -1285,6 +1298,9 @@ RetVal tryListAppend(ExprList *list, Expr *expr, Error *error) {
   if (elem == NULL) {
     return memoryError(error, "malloc ExprList");
   }
+
+  elem->expr = expr;
+  elem->next = NULL;
 
   if (list->head == NULL) { // no elements
     list->head = elem;
@@ -1299,7 +1315,6 @@ RetVal tryListAppend(ExprList *list, Expr *expr, Error *error) {
     list->tail = elem;
   }
 
-  elem->expr = expr;
   list->length = list->length + 1;
 
   return R_SUCCESS;
@@ -1326,14 +1341,27 @@ RetVal tryQuoteMake(TokenStream *stream, Expr **ptr, Error *error) {
 
   RetVal ret;
 
+  Token *token;
   Expr *quote;
   Expr *subexpr;
   Expr *expr;
+
+  ret = tryStreamNext(stream, &token, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
+  if (token->type != T_QUOTE) {
+    ret = syntaxError(error, token->position, "Syntax quote must begin with '`'");
+    goto failure;
+  }
 
   ret = trySymbolMakeStatic(L"quote", wcslen(L"quote"), &quote, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
+  quote->symbol.token = token;
+  token = NULL; // token is now a part of quote symbol
 
   ret = tryExprMake(stream, &subexpr, error);
   if (ret != R_SUCCESS) {
@@ -1361,6 +1389,9 @@ RetVal tryQuoteMake(TokenStream *stream, Expr **ptr, Error *error) {
   return R_SUCCESS;
 
   failure:
+    if (token != NULL) {
+      tokenFree(token);
+    }
     if (quote != NULL) {
       exprFree(quote);
     }
@@ -1456,4 +1487,6 @@ void exprFree(Expr *expr) {
   }
   free(expr);
 }
+
+// TODO: write some tests, kick the tires on the ast parsing
 
