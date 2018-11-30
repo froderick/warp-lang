@@ -73,3 +73,24 @@ code is essentially the same as without continuation support.
 
 https://www.cs.indiana.edu/~dyb/papers/3imp.pdf
 
+## Misc Docs
+
+*TODO* - Here follows a piece of text that seems maybe useful when writing 
+documentation for the reader/analyzer, though isn't complete. I just need it 
+out of the code.
+
+```
+// This parser takes in a stream of tokens and emits an ast.
+//
+// The parser first creates a basic AST that represents a hierarchical model
+// of the parsed tokens. Basic semantic validity is enforced, such as matching
+// parens, etc. Syntax errors are reported back in a way that can be helpfully
+// rendered to the user via an Errors struct.
+//
+// Next, the parser runs an analysis phase attempting to validate the semantics
+// of the program. It tracks symbol references, procedure and var definitions,
+// and function calls. It also rewrites reader syntax to reflect calls to
+// builtin procedures. The resulting ast represents valid language constructs.
+// Semantic errors are reported back in a way that can be helpfully rendered
+// to the user via an Errors struct.
+```

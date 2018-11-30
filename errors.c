@@ -27,6 +27,15 @@ RetVal ioError(Error *error, char *desc) {
   return R_ERROR;
 }
 
+RetVal internalError(Error *error, char *desc) {
+
+  error->type = E_INTERNAL;
+  swprintf(error->message, ERROR_MSG_LENGTH, L"encountered internal failure, probably a bug: %s\n", desc, strerror(errno));
+
+  if (DEBUG) { printf("(debug) error: %ls\n", error->message); }
+  return R_ERROR;
+}
+
 RetVal tokenizationError(Error *error, unsigned long position, char *desc) {
 
   error->type = E_LEXER;

@@ -1,8 +1,12 @@
+#ifndef WARP_LANG_ERRORS_H
+#define WARP_LANG_ERRORS_H
+
 #include <stdint.h>
 
 typedef enum ErrorType {
   E_MEMORY,
   E_IO,
+  E_INTERNAL,
   E_LEXER,
   E_SYNTAX,
 } ErrorType;
@@ -58,5 +62,8 @@ typedef enum RetVal {
 
 RetVal memoryError(Error *error, char *desc);
 RetVal ioError(Error *error, char *desc);
+RetVal internalError(Error *error, char *desc);
 RetVal tokenizationError(Error *error, unsigned long position, char *desc);
 RetVal syntaxError(Error *error, unsigned long position, char *desc);
+
+#endif //WARP_LANG_ERRORS_H

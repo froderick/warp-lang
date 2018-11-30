@@ -14,7 +14,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(check REQUIRED check)
 
 add_library(errors errors.c)
-add_library(compiler reader.c analyzer.c)
+add_library(compiler reader.c analyzer.c utils.c)
 
 add_executable(tests test.c)
 target_link_libraries(tests check errors compiler)
