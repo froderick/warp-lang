@@ -1,4 +1,4 @@
-#include <wchar.h>
+  #include <wchar.h>
 #include <string.h>
 #include <errno.h>
 #include "errors.h"
@@ -55,5 +55,4 @@ RetVal syntaxError(Error *error, unsigned long position, char *desc) {
   if (DEBUG) { printf("(debug) error: %ls\n", error->message); }
   return R_ERROR;
 }
-
 

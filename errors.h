@@ -2,6 +2,7 @@
 #define WARP_LANG_ERRORS_H
 
 #include <stdint.h>
+#include <wchar.h>
 
 typedef enum ErrorType {
   E_MEMORY,
@@ -66,4 +67,60 @@ RetVal internalError(Error *error, char *desc);
 RetVal tokenizationError(Error *error, unsigned long position, char *desc);
 RetVal syntaxError(Error *error, unsigned long position, char *desc);
 
+#define throwMemoryError(error, str, ...) {\
+  int len = 64; \
+  char msg[len]; \
+  snprintf(msg, len, str, ##__VA_ARGS__); \
+  ret = memoryError(error, msg); \
+  goto failure; \
+}
+
+#define throwIOError(error, str, ...) {\
+  int len = 64; \
+  char msg[len]; \
+  snprintf(msg, len, str, ##__VA_ARGS__); \
+  ret = ioError(error, msg); \
+  goto failure; \
+}
+
+#define throwInternalError(error, str, ...) {\
+  int len = 64; \
+  char msg[len]; \
+  snprintf(msg, len, str, ##__VA_ARGS__); \
+  ret = internalError(error, msg); \
+  goto failure; \
+}
+
+#define throwTokenizationError(error, pos, str, ...) {\
+  int len = 64; \
+  char msg[len]; \
+  snprintf(msg, len, str, ##__VA_ARGS__); \
+  ret = tokenizationError(error, pos, msg); \
+  goto failure; \
+}
+
+#define throwSyntaxError(error, pos, str, ...) {\
+  int len = 64; \
+  char msg[len]; \
+  snprintf(msg, len, str, ##__VA_ARGS__); \
+  ret = syntaxError(error, pos, msg); \
+  goto failure; \
+}
+
+#define throws(f) {\
+  ret = f;\
+  if (ret != R_SUCCESS) {\
+    goto failure;\
+  }\
+}
+
+#define tryMalloc(var, size, desc) {\
+  var = malloc(size);\
+  if (var == NULL) {\
+    ret = memoryError(error, desc);\
+    goto failure; \
+  }\
+}
+
 #endif //WARP_LANG_ERRORS_H
+
