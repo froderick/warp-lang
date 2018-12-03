@@ -104,8 +104,14 @@ typedef struct FormVarRef {
   Var *var;
 } FormVarRef;
 
+typedef struct FormFnArg {
+  wchar_t *name;
+  uint64_t nameLength;
+  Expr *expr;
+} FormFnArg;
+
 typedef struct FormFn {
-  Form *args;
+  FormFnArg *args;
   uint64_t numArgs;
   Form *forms;
   uint64_t numForms;
@@ -168,10 +174,37 @@ typedef struct Namespace {
 
 } Namespace;
 
+
+/*
+ * I need a way to track the symbols that are currently in scope, lexically speaking.
+ * I could use a stack for this, where each element in the stack is an array of environment
+ * bindings. Each binding would contain the symbol name, as well as what. Not sure.
+ * But I can start by tracking them and figure that out later.
+ */
+
+typedef struct EnvBinding {
+  wchar_t *name;
+  uint64_t nameLength;
+  FormEnvRefType type;
+  uint64_t index;
+} EnvBinding;
+
+typedef struct EnvBindingScope {
+  uint64_t numBindings;
+  EnvBinding *bindings;
+  struct EnvBindingScope *next;
+} EnvBindingScope;
+
+typedef struct EnvBindingStack {
+  uint64_t depth;
+  EnvBindingScope *head;
+} EnvBindingStack;
+
 typedef struct FormAnalyzer {
   Namespace *namespaces;
   uint64_t numNamespaces;
   Namespace *currentNamespace;
+  EnvBindingStack bindingStack;
 } FormAnalyzer;
 
 RetVal tryAnalyzerMake(FormAnalyzer **ptr, Error *error);

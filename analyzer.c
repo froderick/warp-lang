@@ -4,6 +4,8 @@
 #include "analyzer.h"
 #include "utils.h"
 
+RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Error *error);
+
 RetVal tryNamespaceMake(wchar_t *name, uint64_t length, Namespace **ptr , Error *error) {
 
   Namespace *ns = malloc(sizeof(Namespace));
@@ -55,6 +57,8 @@ RetVal tryAnalyzerMake(FormAnalyzer **ptr, Error *error) {
   analyzer->currentNamespace = userNs;
   analyzer->namespaces = userNs;
   analyzer->numNamespaces = 1;
+  analyzer->bindingStack.head = NULL;
+  analyzer->bindingStack.depth = 0;
 
   *ptr = analyzer;
   return R_SUCCESS;
@@ -79,18 +83,13 @@ void analyzerFree(FormAnalyzer *analyzer) {
   }
 }
 
-void constantAnalyze(Expr* expr, Form *form) {
-  form->type = F_CONST;
-  form->constant = expr;
-}
+void ifFreeContents(FormIf *iff);
 
-void constantFreeContents(Expr *constant) {
-    // nothing to do
-}
+RetVal tryIfAnalyze(FormAnalyzer *analyzer, Expr* ifExpr, FormIf *iff, Error *error) {
 
-RetVal tryIfAnalyze(FormAnalyzer *analyzer, Expr* ifExpr, Form *form, Error *error) {
-
-  // TODO: why do these functions take generic Forms and not specific ones?
+  iff->test = NULL;
+  iff->ifBranch = NULL;
+  iff->elseBranch = NULL;
 
   RetVal ret;
 
@@ -112,43 +111,27 @@ RetVal tryIfAnalyze(FormAnalyzer *analyzer, Expr* ifExpr, Form *form, Error *err
   Expr *ifBranchExpr = ifExpr->list.head->next->next->expr;
   Expr *elseBranchExpr = ifExpr->list.head->next->next->next->expr;
 
-  Form *test;
-  Form *ifBranch;
-  Form *elseBranch;
-
-  ret = tryFormAnalyze(analyzer, testExpr, &test, error);
+  ret = tryFormAnalyze(analyzer, testExpr, &iff->test, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
 
-  ret = tryFormAnalyze(analyzer, ifBranchExpr, &ifBranch, error);
+  ret = tryFormAnalyze(analyzer, ifBranchExpr, &iff->ifBranch, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
 
   if (ifExpr->list.length == 4) {
-    ret = tryFormAnalyze(analyzer, elseBranchExpr, &elseBranch, error);
+    ret = tryFormAnalyze(analyzer, elseBranchExpr, &iff->elseBranch, error);
     if (ret != R_SUCCESS) {
       goto failure;
     }
   }
 
-  form->iff.test = test;
-  form->iff.ifBranch = ifBranch;
-  form->iff.elseBranch = elseBranch;
-
   return R_SUCCESS;
 
   failure:
-    if (test != NULL) {
-      formFree(test);
-    }
-    if (ifBranch != NULL) {
-      formFree(ifBranch);
-    }
-    if (elseBranch != NULL) {
-      formFree(elseBranch);
-    }
+    ifFreeContents(iff);
     return ret;
 }
 
@@ -174,7 +157,14 @@ void ifFreeContents(FormIf *iff) {
 //   expr1
 //   expr2)
 
-RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, Form *form, Error *error) {
+void letFreeContents(FormLet *let);
+
+RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error *error) {
+
+  let->numBindings = 0;
+  let->bindings = NULL;
+  let->numForms = 0;
+  let->forms = NULL;
 
   RetVal ret;
 
@@ -194,15 +184,13 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, Form *form, Error *e
     goto failure;
   }
 
-  uint64_t numBindings = bindingsExpr->list.length / 2;
+  let->numBindings = bindingsExpr->list.length / 2;
 
   // things that get cleaned up on failure
-  LexicalBinding *bindings;
   Form *bindingValue;
-  Form *forms;
 
-  bindings = malloc(sizeof(LexicalBinding) * numBindings);
-  if (bindings == NULL) {
+  let->bindings = malloc(sizeof(LexicalBinding) * let->numBindings);
+  if (let->bindings == NULL) {
     ret = memoryError(error, "LexicalBinding array");
     goto failure;
   }
@@ -220,54 +208,36 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, Form *form, Error *e
       goto failure;
     }
 
-    bindings[i].symbol = bindingElem->expr;
-    bindings[i].value = bindingValue;
+    let->bindings[i].symbol = bindingElem->expr;
+    let->bindings[i].value = bindingValue;
     bindingValue = NULL; // now part of bindings
 
     bindingElem = bindingElem->next->next;
   }
 
-  uint64_t numForms = letExpr->list.length - 2;
-  forms = malloc(sizeof(Form) * numForms);
-  if (forms == NULL) {
+  let->numForms = letExpr->list.length - 2;
+  let->forms = malloc(sizeof(Form) * let->numForms);
+  if (let->forms == NULL) {
     ret = memoryError(error, "Forms array");
     goto failure;
   }
 
   Expr *expr = letExpr->list.head->next->next->expr;
-  for (int i=0; i<numForms; i++) {
-    Form *thisForm = forms + i;
-    ret = tryFormAnalyze(analyzer, expr, &thisForm, error);
+  for (int i=0; i<let->numForms; i++) {
+    Form *thisForm = let->forms + i;
+    ret = tryFormAnalyzeContents(analyzer, expr, thisForm, error);
     if (ret != R_SUCCESS) {
       goto failure;
     }
   }
 
-  form->let.bindings = bindings;
-  form->let.numBindings = numBindings;
-  form->let.forms = forms;
-  form->let.numForms = numForms;
-
   return R_SUCCESS;
 
   failure:
-    if (bindings != NULL) {
-      for (int i=0; i<numBindings; i++) {
-        LexicalBinding *b = bindings + i;
-        // don't need to free symbol
-        formFree(b->value);
-      }
-      free(bindings);
-    }
     if (bindingValue != NULL) {
       formFree(bindingValue);
     }
-    if (forms != NULL) {
-      for (int i=0; i<numForms; i++) {
-        formFreeContents(forms + i);
-      }
-      free(forms);
-    }
+    letFreeContents(let);
     return ret;
 }
 
@@ -294,18 +264,228 @@ void letFreeContents(FormLet *let) {
   }
 }
 
-RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, Form *form, Error *error);
+void fnFreeContents(FormFn *fn);
 
-RetVal tryFormAnalyze(FormAnalyzer *analyzer, Expr* expr, Form **ptr, Error *error) {
+RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, FormFn *fn, Error *error) {
 
   RetVal ret;
-  Form *form;
 
-  form = malloc(sizeof(Form));
-  if (form == NULL) {
-    ret = memoryError(error, "Form");
+  fn->numForms = 0;
+  fn->args = NULL;
+  fn->numForms = 0;
+  fn->forms = NULL;
+
+  // sanity checking
+  uint64_t pos = fnExpr->list.oParen->position;
+  if (fnExpr->list.length < 2) {
+    ret = syntaxError(error, pos, "the 'fn' special form requires at least one parameter");
     goto failure;
   }
+  Expr *argsExpr = fnExpr->list.head->next->expr;
+  if (argsExpr->type != N_LIST) {
+    ret = syntaxError(error, pos, "the 'fn' special form requires the first parameter to be a list");
+    goto failure;
+  }
+
+  fn->numArgs = fnExpr->list.length;
+  fn->args = malloc(sizeof(FormFnArg) * fn->numArgs);
+  if (fn->args == NULL) {
+    ret = memoryError(error, "FormFnArg array");
+    goto failure;
+  }
+
+  ListElement *argElem = argsExpr->list.head;
+  for (int i=0; i<fn->numArgs; i++) {
+
+    if (argElem->expr->type != N_SYMBOL) {
+      ret = syntaxError(error, pos, "only symbols can be used as function arguments");
+      goto failure;
+    }
+
+    FormFnArg *arg = fn->args + i;
+    arg->expr = argElem.expr;
+    arg->nameLength = arg->expr->symbol.length;
+    arg->name = NULL;
+
+    ret = tryCopyText(arg->expr->symbol.value, &arg->name, arg->nameLength, error);
+    if (ret != R_SUCCESS) {
+      goto failure;
+    }
+
+    argElem = argElem->next;
+  }
+
+  fn->numForms = fnExpr->list.length - 2;
+  fn->forms = malloc(sizeof(Form) * fn->numForms);
+  if (fn->forms == NULL) {
+    ret = memoryError(error, "Forms array");
+    goto failure;
+  }
+
+  Expr *expr = fnExpr->list.head->next->next->expr;
+  for (int i=0; i<fn->numForms; i++) {
+    Form *thisForm = fn->forms + i;
+    ret = tryFormAnalyzeContents(analyzer, expr, thisForm, error);
+    if (ret != R_SUCCESS) {
+      goto failure;
+    }
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    fnFreeContents(fn);
+    return ret;
+}
+
+void fnFreeContents(FormFn *fn) {
+  if (fn != NULL) {
+    if (fn->args != NULL) {
+      for (int i=0; i<fn->numArgs; i++) {
+        FormFnArg *arg = fn->args + i;
+        if (arg->name != NULL) {
+          free(arg->name);
+          arg->name = NULL;
+        }
+        // don't need to free expr
+      }
+      free(fn->args);
+      fn->args = NULL;
+      fn->numArgs = 0;
+    }
+    if (fn->forms != NULL) {
+      for (int i = 0; i < fn->numForms; i++) {
+        formFreeContents(fn->forms + i);
+      }
+      free(fn->forms);
+      fn->forms = NULL;
+      fn->numForms = 0;
+    }
+  }
+}
+
+void freeScope(EnvBindingScope *scope);
+
+RetVal tryMakeScope(uint64_t numBindings, Error *error) {
+
+  RetVal ret;
+
+  EnvBindingScope *scope = malloc(sizeof(EnvBindingScope));
+  if (scope == NULL) {
+    ret = memoryError(error, "EnvBindingScope");
+    goto failure;
+  }
+
+  scope->numBindings = numBindings;
+  scope->bindings = NULL;
+  scope->next = NULL;
+
+  scope->bindings = malloc(sizeof(EnvBinding));
+  if (scope->bindings == NULL) {
+    ret = memoryError(error, "EnvBinding array");
+    goto failure;
+  }
+
+  failure:
+    freeScope(scope);
+    return ret;
+}
+
+void freeScope(EnvBindingScope *scope) {
+  if (scope != NULL) {
+    if (scope->bindings != NULL) {
+      free(scope->bindings);
+    }
+    free(scope);
+  }
+}
+
+void pushScope(EnvBindingStack *stack, EnvBindingScope *scope) {
+  scope->next = stack->head;
+  stack->head = scope;
+  stack->depth = stack->depth + 1;
+}
+
+void popScope(EnvBindingStack *stack) {
+  EnvBindingScope *scope = stack->head;
+  stack->head = scope->next;
+  stack->depth = stack->depth - 1;
+}
+
+EnvBinding* findBinding(EnvBindingStack *stack, wchar_t *bindingName) {
+  EnvBindingScope *scope = stack->head;
+  while (scope != NULL) {
+    for (int i=0; i<scope->numBindings; i++) {
+      if (wcscmp(bindingName, scope->bindings[i].name) == 0) {
+        return &scope->bindings[i];
+      }
+    }
+  }
+  return NULL;
+}
+
+
+RetVal tryEnvRefAnalyze(FormAnalyzer *analyzer, Expr *expr, EnvBinding *binding, FormEnvRef *envRef, Error *error) {
+
+  envRef->expr = expr;
+  envRef->type = binding->type;
+  envRef->index = binding->index;
+
+  return R_SUCCESS;
+}
+
+Var* resolveVar(FormAnalyzer *analyzer, wchar_t *symbolName, uint64_t symbolNameLength) {
+
+  Namespace *ns;
+  wchar_t *searchName;
+  uint64_t searchNameLength;
+
+  // assume unqualified namespace at first
+  ns = analyzer->currentNamespace;
+  searchName = symbolName;
+  searchNameLength = symbolNameLength;
+
+  if (symbolNameLength > 2) { // need at least three characters to qualify a var name with a namespace: ('q/n')
+
+    // attempt to find a qualified namespace
+    wchar_t *slashPtr = wcschr(symbolName, L'/');
+    if (slashPtr != NULL) { // qualified
+      uint64_t nsLen = slashPtr - symbolName;
+
+      for (int i=0; i<analyzer->numNamespaces; i++) {
+
+        Namespace *thisNs = &analyzer->namespaces[i];
+        if (wcsncmp(symbolName, thisNs->name, nsLen) == 0) {
+          ns = thisNs;
+          searchName = slashPtr + 1;
+          searchNameLength = symbolNameLength - (nsLen + 1);
+          break;
+        }
+      }
+    }
+  }
+
+  // find var within namespace
+
+  for (int i=0; i<ns->numLocalVars; i++) {
+    if (wcsncmp(searchName, ns->localVars[i].name, searchNameLength) == 0) {
+      return &ns->localVars[i];
+    }
+  }
+
+  return NULL;
+}
+
+RetVal tryVarRefAnalyze(FormAnalyzer *analyzer, Expr *expr, Var *var, FormVarRef *varRef, Error *error) {
+
+  varRef->var = var;
+
+  return R_SUCCESS;
+}
+
+RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Error *error) {
+
+  RetVal ret;
 
   switch (expr->type) {
 
@@ -315,40 +495,57 @@ RetVal tryFormAnalyze(FormAnalyzer *analyzer, Expr* expr, Form **ptr, Error *err
     case N_KEYWORD:
     case N_BOOLEAN:
     case N_NIL: {
-      constantAnalyze(expr, form);
+      form->type = F_CONST;
+      form->constant = expr;
       ret = R_SUCCESS;
       break;
     }
 
     case N_SYMBOL: {
       if (wcscmp(expr->symbol.value, L"if") == 0) {
-        ret = tryIfAnalyze(analyzer, expr, form, error);
+        ret = tryIfAnalyze(analyzer, expr, &form->iff, error);
         if (ret != R_SUCCESS) {
           goto failure;
         }
         break;
       }
-      else if (wcscmp(expr->symbol.value, L"let") == 0) {
-        ret = tryLetAnalyze(analyzer, expr, form, error);
+
+      if (wcscmp(expr->symbol.value, L"let") == 0) {
+        ret = tryLetAnalyze(analyzer, expr, &form->let, error);
         if (ret != R_SUCCESS) {
           goto failure;
         }
         break;
       }
-//      else if (wcscmp(expr->symbol.value, L"fn") == 0) {
-//        ret = tryFnAnalyze(analyzer, expr, form, error);
-//        if (ret != R_SUCCESS) {
-//          goto failure;
-//        }
-//        break;
-//      }
-//      else if (isEnvRef()) {
-//        analyzeEnvRef();
-//      }
-//      else if (isVarRef()) {
-//        analyzeVarRef();
-//      }
-      else {
+
+      if (wcscmp(expr->symbol.value, L"fn") == 0) {
+        ret = tryFnAnalyze(analyzer, expr, &form->fn, error);
+        if (ret != R_SUCCESS) {
+          goto failure;
+        }
+        break;
+      }
+
+      EnvBinding *envBinding = findBinding(&analyzer->bindingStack, expr->symbol.value);
+      if (envBinding != NULL) {
+        ret = tryEnvRefAnalyze(analyzer, expr, &form->envRef, error);
+        if (ret != R_SUCCESS) {
+          goto failure;
+        }
+        break;
+      }
+
+      Var *var = resolveVar(analyzer, expr->symbol.value, expr->symbol.length);
+      if (var != NULL) {
+        ret = tryVarRefAnalyze(analyzer, expr, &form->envRef, error);
+        if (ret != R_SUCCESS) {
+          goto failure;
+        }
+        break;
+      }
+
+      // explode if we can't resolve the symbol
+      {
         int len = 64;
         char msg[len];
         snprintf(msg, len, "cannot resolve symbol: '%ls'", expr->symbol.value);
@@ -359,7 +556,8 @@ RetVal tryFormAnalyze(FormAnalyzer *analyzer, Expr* expr, Form **ptr, Error *err
 
     case N_LIST: {
       if (expr->list.length == 0) {
-        constantAnalyze(expr, form);
+        form->type = F_CONST;
+        form->constant = expr;
         ret = R_SUCCESS;
         break;
       }
@@ -395,6 +593,28 @@ RetVal tryFormAnalyze(FormAnalyzer *analyzer, Expr* expr, Form **ptr, Error *err
     }
   }
 
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryFormAnalyze(FormAnalyzer *analyzer, Expr* expr, Form **ptr, Error *error) {
+
+  RetVal ret;
+  Form *form;
+
+  form = malloc(sizeof(Form));
+  if (form == NULL) {
+    ret = memoryError(error, "Form");
+    goto failure;
+  }
+
+  ret = tryFormAnalyzeContents(analyzer, expr, form, error);
+  if (ret != R_SUCCESS) {
+    goto failure;
+  }
+
   *ptr = form;
   return R_SUCCESS;
 
@@ -409,7 +629,7 @@ void formFree(Form* form) {
   if (form != NULL) {
     switch (form->type) {
       case F_CONST:
-        constantFreeContents(form->constant);
+        // do nothing (FOR NOW)
         break;
       case F_IF:
         ifFreeContents(&form->iff);
