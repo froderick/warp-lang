@@ -199,8 +199,6 @@ void analyzerFree(FormAnalyzer *analyzer) {
   }
 }
 
-// TODO: need a more sustainable way to create protocols over different kinds of objects
-
 uint64_t getExprPosition(Expr *expr) {
   switch (expr->type) {
     case N_STRING:
@@ -217,7 +215,7 @@ uint64_t getExprPosition(Expr *expr) {
       return expr->nil.token->position;
     case N_LIST:
       return expr->list.oParen->position;
-    default:
+    case N_NONE:
       return 0;
   }
 }
@@ -240,7 +238,7 @@ uint64_t getFormPosition(Form *form) {
       return getExprPosition(form->builtin.expr);
     case F_FN_CALL:
       return getExprPosition(form->fnCall.expr);
-    default:
+    case F_NONE:
       return 0;
   }
 }
@@ -262,7 +260,7 @@ RetVal tryIfAnalyze(FormAnalyzer *analyzer, Expr* ifExpr, FormIf *iff, Error *er
 
   RetVal ret;
 
-  uint64_t pos = ifExpr->list.oParen->position;
+  uint64_t pos = getExprPosition(ifExpr);
   if (ifExpr->list.length < 2) {
     throwSyntaxError(error, pos, "the 'if' special form requires a test");
   }
@@ -318,7 +316,7 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
   RetVal ret;
 
   // sanity checking
-  uint64_t pos = letExpr->list.oParen->position;
+  uint64_t pos = getExprPosition(letExpr);
   if (letExpr->list.length < 2) {
     throwSyntaxError(error, pos, "the 'let' special form requires at least one parameter");
   }
@@ -409,7 +407,7 @@ RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, FormFn *fn, Error *err
   fn->forms = NULL;
 
   // sanity checking
-  uint64_t pos = fnExpr->list.oParen->position;
+  uint64_t pos = getExprPosition(fnExpr);
   if (fnExpr->list.length < 2) {
     throwSyntaxError(error, pos, "the 'fn' special form requires at least one parameter");
   }
@@ -609,7 +607,7 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
         throws(tryVarRefAnalyze(analyzer, expr, var, &form->varRef, error));
       }
       else {
-        throwSyntaxError(error, expr->symbol.token->position, "cannot resolve symbol: '%ls'", sym);
+        throwSyntaxError(error, getExprPosition(expr), "cannot resolve symbol: '%ls'", sym);
       }
       break;
     }
