@@ -70,6 +70,7 @@ typedef struct Form Form;
 typedef struct Var Var;
 
 typedef struct FormIf {
+  Expr *expr;
   Form *test;
   Form *ifBranch;
   Form *elseBranch;
@@ -81,6 +82,7 @@ typedef struct LexicalBinding {
 } LexicalBinding;
 
 typedef struct FormLet {
+  Expr *expr;
   LexicalBinding *bindings;
   uint64_t numBindings;
   Form *forms;
@@ -101,6 +103,7 @@ typedef struct FormEnvRef {
 } FormEnvRef;
 
 typedef struct FormVarRef {
+  Expr *symbol;
   Var *var;
 } FormVarRef;
 
@@ -111,6 +114,7 @@ typedef struct FormFnArg {
 } FormFnArg;
 
 typedef struct FormFn {
+  Expr *expr;
   FormFnArg *args;
   uint64_t numArgs;
   Form *forms;
@@ -118,6 +122,7 @@ typedef struct FormFn {
 } FormFn;
 
 typedef struct FormFnCall {
+  Expr *expr;
   Form *fnCallable;
   Form *args;
   uint64_t numArgs;
@@ -128,6 +133,7 @@ typedef enum FormBuiltinType {
 } FormBuiltinType;
 
 typedef struct FormBuiltin {
+  Expr *expr;
   wchar_t* name;
   Form *args;
   uint64_t numArgs;

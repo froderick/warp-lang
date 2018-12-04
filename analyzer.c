@@ -83,6 +83,7 @@ void ifFreeContents(FormIf *iff);
 
 RetVal tryIfAnalyze(FormAnalyzer *analyzer, Expr* ifExpr, FormIf *iff, Error *error) {
 
+  iff->expr = ifExpr;
   iff->test = NULL;
   iff->ifBranch = NULL;
   iff->elseBranch = NULL;
@@ -141,6 +142,7 @@ void letFreeContents(FormLet *let);
 
 RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error *error) {
 
+  let->expr = letExpr;
   let->numBindings = 0;
   let->bindings = NULL;
   let->numForms = 0;
@@ -233,6 +235,7 @@ RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, FormFn *fn, Error *err
 
   RetVal ret;
 
+  fn->expr = fnExpr;
   fn->numForms = 0;
   fn->args = NULL;
   fn->numForms = 0;
@@ -445,6 +448,132 @@ RetVal tryVarRefAnalyze(FormAnalyzer *analyzer, Expr *expr, Var *var, FormVarRef
   return R_SUCCESS;
 }
 
+// TODO: need a more sustainable way to create protocols over different kinds of objects
+
+uint64_t getExprPosition(Expr *expr) {
+  switch (expr->type) {
+    case N_STRING:
+      return expr->string.token->position;
+    case N_NUMBER:
+      return expr->number.token->position;
+    case N_SYMBOL:
+      return expr->symbol.token->position;
+    case N_KEYWORD:
+      return expr->keyword.token->position;
+    case N_BOOLEAN:
+      return expr->boolean.token->position;
+    case N_NIL:
+      return expr->nil.token->position;
+    case N_LIST:
+      return expr->list.oParen->position;
+    default:
+      return 0;
+  }
+}
+
+uint64_t getFormPosition(Form *form) {
+  switch (form->type) {
+    case F_CONST:
+      return getExprPosition(form->constant);
+    case F_IF:
+      return getExprPosition(form->iff.expr);
+    case F_LET:
+      return getExprPosition(form->let.expr);
+    case F_ENV_REF:
+      return getExprPosition(form->envRef.expr);
+    case F_VAR_REF:
+      return getExprPosition(form->varRef.symbol);
+    case F_FN:
+      return getExprPosition(form->fn.expr);
+    case F_BUILTIN:
+      return getExprPosition(form->builtin.expr);
+    case F_FN_CALL:
+      return getExprPosition(form->fnCall.expr);
+    default:
+      return 0;
+  }
+}
+
+RetVal assertFnCallable(Form *form, Error *error) {
+
+  RetVal ret;
+
+  switch (form->type) {
+
+    case F_IF:
+    case F_LET:
+    case F_FN:
+    case F_BUILTIN:
+    case F_FN_CALL:
+    case F_ENV_REF:
+      break;
+
+    case F_VAR_REF:
+      if (form->varRef.var->value.type != F_FN) {
+        throwSyntaxError(error, getFormPosition(form),
+                         "var's value does not contain a function: '%ls'", form->varRef.var->name);
+      }
+      break;
+
+    case F_CONST:
+      if (form->constant->type != N_KEYWORD) {
+        throwSyntaxError(error, getFormPosition(form),
+                         "first list element cannot be called as a function: '%i'", form->constant->type);
+      }
+      break;
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+
+void fnCallFreeContents(FormFnCall *fnCall);
+
+RetVal tryFnCallAnalyze(FormAnalyzer *analyzer, Expr *expr, FormFnCall *fnCall, Error *error) {
+
+  RetVal ret;
+
+  fnCall->expr = expr;
+
+  throws(tryFormAnalyze(analyzer, expr->list.head->expr, &fnCall->fnCallable, error));
+  throws(assertFnCallable(fnCall->fnCallable, error));
+
+  fnCall->numArgs = expr->list.length - 1;
+  tryMalloc(fnCall->args, sizeof(Form) * fnCall->numArgs, "Form array");
+
+  ListElement *argExpr = expr->list.head->next;
+  for (int i=0; i<fnCall->numArgs; i++) {
+    Form *arg = fnCall->args + i;
+    throws(tryFormAnalyzeContents(analyzer, argExpr->expr, arg, error));
+    argExpr = argExpr->next;
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    fnCallFreeContents(fnCall);
+    return ret;
+}
+
+void fnCallFreeContents(FormFnCall *fnCall) {
+  if (fnCall != NULL) {
+    if (fnCall->fnCallable != NULL) {
+      formFree(fnCall->fnCallable);
+      fnCall->fnCallable = NULL;
+    }
+    if (fnCall->args != NULL) {
+      for (int i=0; i<fnCall->numArgs; i++) {
+        formFreeContents(fnCall->args + i);
+      }
+      free(fnCall->args);
+      fnCall->args = NULL;
+      fnCall->numArgs = 0;
+    }
+  }
+}
 
 RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Error *error) {
 
@@ -460,60 +589,59 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
     case N_NIL: {
       form->type = F_CONST;
       form->constant = expr;
-      return R_SUCCESS;
+      break;
     }
 
     case N_SYMBOL: {
 
       wchar_t *sym = expr->symbol.value;
-
       EnvBinding *envBinding;
       Var *var;
 
-      if (wcscmp(sym, L"if") == 0) {
-        throws(tryIfAnalyze(analyzer, expr, &form->iff, error));
-      }
-      else if (wcscmp(sym, L"let") == 0) {
-        throws(tryLetAnalyze(analyzer, expr, &form->let, error));
-      }
-      else if (wcscmp(sym, L"fn") == 0) {
-        throws(tryFnAnalyze(analyzer, expr, &form->fn, error));
-      }
-      else if ((envBinding = findBinding(&analyzer->bindingStack, sym)) != NULL) {
+      if ((envBinding = findBinding(&analyzer->bindingStack, sym)) != NULL) {
         throws(tryEnvRefAnalyze(analyzer, expr, envBinding, &form->envRef, error));
       }
       else if ((var = resolveVar(analyzer, sym, expr->symbol.length)) != NULL) {
         throws(tryVarRefAnalyze(analyzer, expr, var, &form->varRef, error));
       }
-      throwSyntaxError(error, expr->symbol.token->position, "cannot resolve symbol: '%ls'", sym);
+      else {
+        throwSyntaxError(error, expr->symbol.token->position, "cannot resolve symbol: '%ls'", sym);
+      }
+      break;
     }
 
     case N_LIST: {
+
+      // empty list
       if (expr->list.length == 0) {
         form->type = F_CONST;
         form->constant = expr;
-        return R_SUCCESS;
+        break;
       }
-      else {
-        Expr* first = expr->list.head->expr;
-        switch (first->type) {
-          case N_LIST: {
-            // it may:
-            // - define an fn
-            // - call a function that could return an fn
-          }
-          case N_KEYWORD:
-            // - keywords can be called as functions
-          case N_SYMBOL:
-            // it may:
-            // - point to a var, which must then currently contain a function as its value
-            // - point to a binding, which may contain a fn definition now which can be enforced, or which may compute a function and return it at runtime
-            // - point to a builtin function
-            break;
-          default:
-            throwSyntaxError(error, expr->symbol.token->position, "token cannot be called as a function: '%i'", first->type);
+
+      // special forms
+      if (expr->list.head->expr.type == N_SYMBOL) {
+        wchar_t *sym = expr->list.head->expr->symbol.value;
+
+        if (wcscmp(sym, L"if") == 0) {
+          throws(tryIfAnalyze(analyzer, expr, &form->iff, error));
+          break;
+        }
+
+        if (wcscmp(sym, L"let") == 0) {
+          throws(tryLetAnalyze(analyzer, expr, &form->let, error));
+          break;
+        }
+
+        if (wcscmp(sym, L"fn") == 0) {
+          throws(tryFnAnalyze(analyzer, expr, &form->fn, error));
+          break;
         }
       }
+
+      // assume fn-callable
+      throws(tryFnCallAnalyze(analyzer, expr, &form->fnCall, error));
+      break;
     }
 
     default: {
