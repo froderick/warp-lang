@@ -1,10 +1,130 @@
-  #include <stdint.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 #include "analyzer.h"
 #include "utils.h"
 
-RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Error *error);
+/*
+ * Core analyzer behavior.
+ */
+
+Var* resolveVar(FormAnalyzer *analyzer, wchar_t *symbolName, uint64_t symbolNameLength) {
+
+  Namespace *ns;
+  wchar_t *searchName;
+  uint64_t searchNameLength;
+
+  // assume unqualified namespace at first
+  ns = analyzer->currentNamespace;
+  searchName = symbolName;
+  searchNameLength = symbolNameLength;
+
+  if (symbolNameLength > 2) { // need at least three characters to qualify a var name with a namespace: ('q/n')
+
+    // attempt to find a qualified namespace
+    wchar_t *slashPtr = wcschr(symbolName, L'/');
+    if (slashPtr != NULL) { // qualified
+      uint64_t nsLen = slashPtr - symbolName;
+
+      for (int i=0; i<analyzer->numNamespaces; i++) {
+
+        Namespace *thisNs = &analyzer->namespaces[i];
+        if (wcsncmp(symbolName, thisNs->name, nsLen) == 0) {
+          ns = thisNs;
+          searchName = slashPtr + 1;
+          searchNameLength = symbolNameLength - (nsLen + 1);
+          break;
+        }
+      }
+    }
+  }
+
+  // find var within namespace
+
+  for (int i=0; i<ns->numLocalVars; i++) {
+    if (wcsncmp(searchName, ns->localVars[i].name, searchNameLength) == 0) {
+      return &ns->localVars[i];
+    }
+  }
+
+  return NULL;
+}
+
+void freeScope(EnvBindingScope *scope);
+
+RetVal tryMakeScope(uint64_t numBindings, EnvBindingScope **ptr, Error *error) {
+
+  RetVal ret;
+
+  EnvBindingScope *scope;
+  tryMalloc(scope, sizeof(EnvBindingScope), "EnvBindingScope");
+
+  scope->numBindings = numBindings;
+  scope->bindings = NULL;
+  scope->next = NULL;
+
+  tryMalloc(scope->bindings, sizeof(EnvBinding) * scope->numBindings, "EnvBinding array");
+
+  for (int i=0; i<scope->numBindings; i++) {
+    EnvBinding *b = scope->bindings + i;
+    b->nameLength = 0;
+    b->name = NULL;
+    b->type = RT_NONE;
+    b->index = 0;
+  }
+
+  *ptr = scope;
+  return R_SUCCESS;
+
+  failure:
+  freeScope(scope);
+  return ret;
+}
+
+void freeBindingContents(EnvBinding *binding) {
+  if (binding != NULL) {
+    if (binding->name != NULL) {
+      free(binding->name);
+      binding->name = NULL;
+    }
+  }
+}
+
+void freeScope(EnvBindingScope *scope) {
+  if (scope != NULL) {
+    if (scope->bindings != NULL) {
+      for (int i=0; i<scope->numBindings; i++) {
+        freeBindingContents(scope->bindings + i);
+      }
+      free(scope->bindings);
+    }
+    free(scope);
+  }
+}
+
+void pushScope(EnvBindingStack *stack, EnvBindingScope *scope) {
+  scope->next = stack->head;
+  stack->head = scope;
+  stack->depth = stack->depth + 1;
+}
+
+void popScope(EnvBindingStack *stack) {
+  EnvBindingScope *scope = stack->head;
+  stack->head = scope->next;
+  stack->depth = stack->depth - 1;
+}
+
+EnvBinding* findBinding(EnvBindingStack *stack, wchar_t *bindingName) {
+  EnvBindingScope *scope = stack->head;
+  while (scope != NULL) {
+    for (int i=0; i<scope->numBindings; i++) {
+      if (wcscmp(bindingName, scope->bindings[i].name) == 0) {
+        return &scope->bindings[i];
+      }
+    }
+  }
+  return NULL;
+}
 
 RetVal tryNamespaceMake(wchar_t *name, uint64_t length, Namespace **ptr , Error *error) {
 
@@ -25,10 +145,10 @@ RetVal tryNamespaceMake(wchar_t *name, uint64_t length, Namespace **ptr , Error 
   return R_SUCCESS;
 
   failure:
-    if (ns != NULL) {
-      free(ns);
-    }
-    return ret;
+  if (ns != NULL) {
+    free(ns);
+  }
+  return ret;
 }
 
 void namespaceFree(Namespace *ns) {
@@ -60,10 +180,10 @@ RetVal tryAnalyzerMake(FormAnalyzer **ptr, Error *error) {
   return R_SUCCESS;
 
   failure:
-    if (analyzer != NULL) {
-      free(analyzer);
-    }
-    return ret;
+  if (analyzer != NULL) {
+    free(analyzer);
+  }
+  return ret;
 }
 
 void analyzerFree(FormAnalyzer *analyzer) {
@@ -78,6 +198,58 @@ void analyzerFree(FormAnalyzer *analyzer) {
     free(analyzer);
   }
 }
+
+// TODO: need a more sustainable way to create protocols over different kinds of objects
+
+uint64_t getExprPosition(Expr *expr) {
+  switch (expr->type) {
+    case N_STRING:
+      return expr->string.token->position;
+    case N_NUMBER:
+      return expr->number.token->position;
+    case N_SYMBOL:
+      return expr->symbol.token->position;
+    case N_KEYWORD:
+      return expr->keyword.token->position;
+    case N_BOOLEAN:
+      return expr->boolean.token->position;
+    case N_NIL:
+      return expr->nil.token->position;
+    case N_LIST:
+      return expr->list.oParen->position;
+    default:
+      return 0;
+  }
+}
+
+uint64_t getFormPosition(Form *form) {
+  switch (form->type) {
+    case F_CONST:
+      return getExprPosition(form->constant);
+    case F_IF:
+      return getExprPosition(form->iff.expr);
+    case F_LET:
+      return getExprPosition(form->let.expr);
+    case F_ENV_REF:
+      return getExprPosition(form->envRef.expr);
+    case F_VAR_REF:
+      return getExprPosition(form->varRef.symbol);
+    case F_FN:
+      return getExprPosition(form->fn.expr);
+    case F_BUILTIN:
+      return getExprPosition(form->builtin.expr);
+    case F_FN_CALL:
+      return getExprPosition(form->fnCall.expr);
+    default:
+      return 0;
+  }
+}
+
+/*
+ * Analyzers for the different types of forms.
+ */
+
+RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Error *error);
 
 void ifFreeContents(FormIf *iff);
 
@@ -132,11 +304,6 @@ void ifFreeContents(FormIf *iff) {
     }
   }
 }
-
-// (let (sym expr
-//       sym expr)
-//   expr1
-//   expr2)
 
 void letFreeContents(FormLet *let);
 
@@ -313,83 +480,6 @@ void fnFreeContents(FormFn *fn) {
   }
 }
 
-void freeScope(EnvBindingScope *scope);
-
-RetVal tryMakeScope(uint64_t numBindings, EnvBindingScope **ptr, Error *error) {
-
-  RetVal ret;
-
-  EnvBindingScope *scope;
-  tryMalloc(scope, sizeof(EnvBindingScope), "EnvBindingScope");
-
-  scope->numBindings = numBindings;
-  scope->bindings = NULL;
-  scope->next = NULL;
-
-  tryMalloc(scope->bindings, sizeof(EnvBinding) * scope->numBindings, "EnvBinding array");
-
-  for (int i=0; i<scope->numBindings; i++) {
-    EnvBinding *b = scope->bindings + i;
-    b->nameLength = 0;
-    b->name = NULL;
-    b->type = RT_NONE;
-    b->index = 0;
-  }
-
-  *ptr = scope;
-  return R_SUCCESS;
-
-  failure:
-    freeScope(scope);
-    return ret;
-}
-
-void freeBindingContents(EnvBinding *binding) {
-  if (binding != NULL) {
-    if (binding->name != NULL) {
-      free(binding->name);
-      binding->name = NULL;
-    }
-  }
-}
-
-void freeScope(EnvBindingScope *scope) {
-  if (scope != NULL) {
-    if (scope->bindings != NULL) {
-      for (int i=0; i<scope->numBindings; i++) {
-        freeBindingContents(scope->bindings + i);
-      }
-      free(scope->bindings);
-    }
-    free(scope);
-  }
-}
-
-void pushScope(EnvBindingStack *stack, EnvBindingScope *scope) {
-  scope->next = stack->head;
-  stack->head = scope;
-  stack->depth = stack->depth + 1;
-}
-
-void popScope(EnvBindingStack *stack) {
-  EnvBindingScope *scope = stack->head;
-  stack->head = scope->next;
-  stack->depth = stack->depth - 1;
-}
-
-EnvBinding* findBinding(EnvBindingStack *stack, wchar_t *bindingName) {
-  EnvBindingScope *scope = stack->head;
-  while (scope != NULL) {
-    for (int i=0; i<scope->numBindings; i++) {
-      if (wcscmp(bindingName, scope->bindings[i].name) == 0) {
-        return &scope->bindings[i];
-      }
-    }
-  }
-  return NULL;
-}
-
-
 RetVal tryEnvRefAnalyze(FormAnalyzer *analyzer, Expr *expr, EnvBinding *binding, FormEnvRef *envRef, Error *error) {
 
   envRef->expr = expr;
@@ -399,99 +489,11 @@ RetVal tryEnvRefAnalyze(FormAnalyzer *analyzer, Expr *expr, EnvBinding *binding,
   return R_SUCCESS;
 }
 
-Var* resolveVar(FormAnalyzer *analyzer, wchar_t *symbolName, uint64_t symbolNameLength) {
-
-  Namespace *ns;
-  wchar_t *searchName;
-  uint64_t searchNameLength;
-
-  // assume unqualified namespace at first
-  ns = analyzer->currentNamespace;
-  searchName = symbolName;
-  searchNameLength = symbolNameLength;
-
-  if (symbolNameLength > 2) { // need at least three characters to qualify a var name with a namespace: ('q/n')
-
-    // attempt to find a qualified namespace
-    wchar_t *slashPtr = wcschr(symbolName, L'/');
-    if (slashPtr != NULL) { // qualified
-      uint64_t nsLen = slashPtr - symbolName;
-
-      for (int i=0; i<analyzer->numNamespaces; i++) {
-
-        Namespace *thisNs = &analyzer->namespaces[i];
-        if (wcsncmp(symbolName, thisNs->name, nsLen) == 0) {
-          ns = thisNs;
-          searchName = slashPtr + 1;
-          searchNameLength = symbolNameLength - (nsLen + 1);
-          break;
-        }
-      }
-    }
-  }
-
-  // find var within namespace
-
-  for (int i=0; i<ns->numLocalVars; i++) {
-    if (wcsncmp(searchName, ns->localVars[i].name, searchNameLength) == 0) {
-      return &ns->localVars[i];
-    }
-  }
-
-  return NULL;
-}
-
 RetVal tryVarRefAnalyze(FormAnalyzer *analyzer, Expr *expr, Var *var, FormVarRef *varRef, Error *error) {
 
   varRef->var = var;
 
   return R_SUCCESS;
-}
-
-// TODO: need a more sustainable way to create protocols over different kinds of objects
-
-uint64_t getExprPosition(Expr *expr) {
-  switch (expr->type) {
-    case N_STRING:
-      return expr->string.token->position;
-    case N_NUMBER:
-      return expr->number.token->position;
-    case N_SYMBOL:
-      return expr->symbol.token->position;
-    case N_KEYWORD:
-      return expr->keyword.token->position;
-    case N_BOOLEAN:
-      return expr->boolean.token->position;
-    case N_NIL:
-      return expr->nil.token->position;
-    case N_LIST:
-      return expr->list.oParen->position;
-    default:
-      return 0;
-  }
-}
-
-uint64_t getFormPosition(Form *form) {
-  switch (form->type) {
-    case F_CONST:
-      return getExprPosition(form->constant);
-    case F_IF:
-      return getExprPosition(form->iff.expr);
-    case F_LET:
-      return getExprPosition(form->let.expr);
-    case F_ENV_REF:
-      return getExprPosition(form->envRef.expr);
-    case F_VAR_REF:
-      return getExprPosition(form->varRef.symbol);
-    case F_FN:
-      return getExprPosition(form->fn.expr);
-    case F_BUILTIN:
-      return getExprPosition(form->builtin.expr);
-    case F_FN_CALL:
-      return getExprPosition(form->fnCall.expr);
-    default:
-      return 0;
-  }
 }
 
 RetVal assertFnCallable(Form *form, Error *error) {
@@ -509,7 +511,7 @@ RetVal assertFnCallable(Form *form, Error *error) {
       break;
 
     case F_VAR_REF:
-      if (form->varRef.var->value.type != F_FN) {
+      if (form->varRef.var->value->type != F_FN) {
         throwSyntaxError(error, getFormPosition(form),
                          "var's value does not contain a function: '%ls'", form->varRef.var->name);
       }
@@ -521,6 +523,9 @@ RetVal assertFnCallable(Form *form, Error *error) {
                          "first list element cannot be called as a function: '%i'", form->constant->type);
       }
       break;
+
+    default:
+      throwInternalError(error, "unhandled case %i", form->type);
   }
 
   return R_SUCCESS;
@@ -528,7 +533,6 @@ RetVal assertFnCallable(Form *form, Error *error) {
   failure:
     return ret;
 }
-
 
 void fnCallFreeContents(FormFnCall *fnCall);
 
@@ -620,7 +624,7 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
       }
 
       // special forms
-      if (expr->list.head->expr.type == N_SYMBOL) {
+      if (expr->list.head->expr->type == N_SYMBOL) {
         wchar_t *sym = expr->list.head->expr->symbol.value;
 
         if (wcscmp(sym, L"if") == 0) {
@@ -660,12 +664,7 @@ RetVal tryFormAnalyze(FormAnalyzer *analyzer, Expr* expr, Form **ptr, Error *err
   RetVal ret;
   Form *form;
 
-  form = malloc(sizeof(Form));
-  if (form == NULL) {
-    ret = memoryError(error, "Form");
-    goto failure;
-  }
-
+  tryMalloc(form, sizeof(Form), "Form");
   throws(tryFormAnalyzeContents(analyzer, expr, form, error));
 
   *ptr = form;
@@ -691,17 +690,21 @@ void formFree(Form* form) {
         letFreeContents(&form->let);
         break;
       case F_ENV_REF:
+        // do nothing (FOR NOW)
         break;
       case F_VAR_REF:
+        // do nothing (FOR NOW)
         break;
       case F_FN:
+        fnFreeContents(&form->fn);
         break;
       case F_BUILTIN:
+        // TODO
         break;
       case F_FN_CALL:
+        fnCallFreeContents(&form->fnCall);
         break;
-      default:
-        // TODO: explode
+      case F_NONE:
         break;
     }
     free(form);
