@@ -276,6 +276,8 @@ void bufferClear(StringBuffer *b) {
 
 typedef struct LexerState {
   unsigned long position;
+  unsigned long lineNumber;
+  unsigned long colNumber;
   StringBuffer *b;
 } LexerState;
 
@@ -307,7 +309,7 @@ const char* tokenName(TokenType type) {
 }
 
 RetVal tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsigned long length,
-                 Token **ptr, Error *error) {
+                    unsigned long lineNumber, unsigned long colNumber, Token **ptr, Error *error) {
 
   Token *t;
 
@@ -320,6 +322,8 @@ RetVal tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsig
   t->typeName = tokenName(type);
   t->position = position;
   t->length = length;
+  t->lineNumber = lineNumber;
+  t->colNumber = colNumber;
   wcpncpy(t->text, text, length);
   t->text[length] = L'\0';
 
@@ -329,7 +333,7 @@ RetVal tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsig
 }
 
 RetVal tryTokenInitFromLexer(LexerState *s, TokenType type, Token **ptr, Error *error) {
-  return tryTokenInit(type, s->b->data, s->position, s->b->usedChars, ptr, error);
+  return tryTokenInit(type, s->b->data, s->position, s->b->usedChars, s->lineNumber, s->colNumber, ptr, error);
 }
 
 void tokenFree(Token *t) {
@@ -352,6 +356,8 @@ RetVal tryLexerStateMake(LexerState **ptr, Error *error) {
   }
 
   s->position = 0;
+  s->lineNumber = 1;
+  s->colNumber = 1;
   s->b = b;
 
   *ptr = s;
@@ -369,6 +375,10 @@ bool isWhitespace(wchar_t ch) {
   return ch == L'\n'
       || ch == L' '
       || ch == L'\t';
+}
+
+bool isNewline(wchar_t ch) {
+  return ch == L'\n';
 }
 
 RetVal tryReadString(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
@@ -585,6 +595,11 @@ RetVal tryTokenRead(StreamSource *source, LexerState *s, Token **token, Error *e
     }
     if (isWhitespace(ch)) {
       s->position = s->position + 1;
+
+      if (isNewline(ch)) {
+        s->lineNumber = s->lineNumber + 1; // newlines increment lineNumber
+        s->colNumber = 1;                  // newlines reset colNumber
+      }
     }
     else {
       break;
@@ -595,10 +610,10 @@ RetVal tryTokenRead(StreamSource *source, LexerState *s, Token **token, Error *e
 
   // single-character tokens, do not require buffering
   if (ch == L'(') {
-    ret = tryTokenInit(T_OPAREN, L"(", s->position, 1, token, error);
+    ret = tryTokenInit(T_OPAREN, L"(", s->position, 1, s->lineNumber, s->colNumber, token, error);
   }
   else if (ch == L')') {
-    ret = tryTokenInit(T_CPAREN, L")", s->position, 1, token, error);
+    ret = tryTokenInit(T_CPAREN, L")", s->position, 1, s->lineNumber, s->colNumber, token, error);
   }
 //  else if (ch == L'[') {
 //    ret = tryTokenInit(T_OVEC, L"[", s->position, 1, token, error);
@@ -613,7 +628,7 @@ RetVal tryTokenRead(StreamSource *source, LexerState *s, Token **token, Error *e
 //    ret = tryTokenInit(T_CBRACKET, L"}", s->position, 1, token, error);
 //  }
   else if (ch == L'\'') {
-    ret = tryTokenInit(T_QUOTE, L"'", s->position, 1, token, error);
+    ret = tryTokenInit(T_QUOTE, L"'", s->position, 1, s->lineNumber, s->colNumber, token, error);
   }
 
   // multi-character tokens
@@ -641,6 +656,7 @@ RetVal tryTokenRead(StreamSource *source, LexerState *s, Token **token, Error *e
   // if we created a token, increment the lexer position
   if (ret != R_ERROR && *token != NULL) {
     s->position = s->position + (*token)->length;
+    s->colNumber = s->colNumber + (*token)->length;
   }
 
   return ret;

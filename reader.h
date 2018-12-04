@@ -22,6 +22,9 @@ typedef struct Token {
   const char* typeName;
   unsigned long position;
   unsigned long length;
+  unsigned long lineNumber;
+  unsigned long colNumber;
+  // TODO: track rows/cols within reader, include start/end row/cols within each token
   wchar_t text[];
 } Token;
 

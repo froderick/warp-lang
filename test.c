@@ -130,7 +130,7 @@ END_TEST
 
 START_TEST(parser) {
 
-    wchar_t* input = L"\"str\" 102 himom :rocks true nil (true false) 'nil";
+    wchar_t* input = L"\"str\" 102 \n himom :rocks true nil (true false) 'nil";
 
     Error e;
     StreamSource_t source;
@@ -146,6 +146,8 @@ START_TEST(parser) {
     ck_assert(wcscmp(expr->string.value, L"str") == 0);
     ck_assert_int_eq(expr->string.length, 3);
     ck_assert(expr->string.token->type == T_STRING);
+    ck_assert_int_eq(expr->number.token->lineNumber, 1);
+    ck_assert_int_eq(expr->number.token->colNumber, 1);
     exprFree(expr);
 
     // number
@@ -153,6 +155,8 @@ START_TEST(parser) {
     ck_assert(expr->type == N_NUMBER);
     ck_assert_int_eq(expr->number.value, 102);
     ck_assert(expr->number.token->type == T_NUMBER);
+    ck_assert_int_eq(expr->number.token->lineNumber, 1);
+    ck_assert_int_eq(expr->number.token->colNumber, 6);
     exprFree(expr);
 
     // symbol
@@ -161,6 +165,8 @@ START_TEST(parser) {
     ck_assert(wcscmp(expr->symbol.value, L"himom") == 0);
     ck_assert_int_eq(expr->symbol.length, 5);
     ck_assert(expr->symbol.token->type == T_SYMBOL);
+    ck_assert_int_eq(expr->symbol.token->lineNumber, 2);
+    ck_assert_int_eq(expr->number.token->colNumber, 1);
     exprFree(expr);
 
     // keyword
