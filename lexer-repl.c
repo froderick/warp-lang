@@ -27,7 +27,7 @@ int main(void) {
       printf("> encountered lexer error\n\n");
     }
     else if (read == R_SUCCESS) {
-      printf("token: %ls (%s) %lu %lu\n", t->text, t->typeName, t->position, t->length);
+      printf("token: %ls (%s) %llu %llu\n", t->text, t->typeName, t->source.position, t->source.length);
     }
     else {
       printf("encountered unknown response from lexer: %i\n", read);

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <wchar.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include "errors.h"
 
@@ -17,14 +18,19 @@ typedef enum TokenType {
   T_NIL
 } TokenType;
 
+
+typedef struct SourceLocation {
+  bool isSet;
+  uint64_t position;
+  uint64_t lineNumber;
+  uint64_t colNumber;
+  uint64_t length;
+} SourceLocation;
+
 typedef struct Token {
   TokenType type;
   const char* typeName;
-  unsigned long position;
-  unsigned long length;
-  unsigned long lineNumber;
-  unsigned long colNumber;
-  // TODO: track rows/cols within reader, include start/end row/cols within each token
+  SourceLocation source;
   wchar_t text[];
 } Token;
 
@@ -58,36 +64,27 @@ RetVal tryStreamPeek(TokenStream_t s, Token **token, Error *error);
 struct Expr;
 
 typedef struct ExprString {
-  Token *token;
-  uint64_t length;
   wchar_t *value;
+  uint64_t length;
 } ExprString;
 
 typedef struct ExprNumber {
-  Token *token;
   uint64_t value;
 } ExprNumber;
 
 typedef struct ExprSymbol {
-  Token *token;
-  uint64_t length;
   wchar_t *value;
+  uint64_t length;
 } ExprSymbol;
 
 typedef struct ExprKeyword {
-  Token *token;
-  uint64_t length;
   wchar_t *value;
+  uint64_t length;
 } ExprKeyword;
 
 typedef struct ExprBoolean {
-  Token *token;
   bool value;
 } ExprBoolean;
-
-typedef struct ExprNil {
-  Token *token;
-} ExprNil;
 
 typedef struct ListElement {
   struct Expr *expr;
@@ -95,8 +92,6 @@ typedef struct ListElement {
 } ListElement;
 
 typedef struct ExprList {
-  Token* oParen;
-  Token* cParen;
   uint64_t length;
   ListElement *head;
   ListElement *tail;
@@ -121,9 +116,9 @@ typedef struct Expr {
     ExprSymbol symbol;
     ExprKeyword keyword;
     ExprBoolean boolean;
-    ExprNil nil;
     ExprList list;
   };
+  SourceLocation source;
 } Expr;
 
 RetVal tryExprRead(TokenStream_t stream, Expr **expr, Error *error);

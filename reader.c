@@ -320,10 +320,11 @@ RetVal tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsig
 
   t->type = type;
   t->typeName = tokenName(type);
-  t->position = position;
-  t->length = length;
-  t->lineNumber = lineNumber;
-  t->colNumber = colNumber;
+  t->source.isSet = true;
+  t->source.position = position;
+  t->source.length = length;
+  t->source.lineNumber = lineNumber;
+  t->source.colNumber = colNumber;
   wcpncpy(t->text, text, length);
   t->text[length] = L'\0';
 
@@ -655,8 +656,8 @@ RetVal tryTokenRead(StreamSource *source, LexerState *s, Token **token, Error *e
 
   // if we created a token, increment the lexer position
   if (ret != R_ERROR && *token != NULL) {
-    s->position = s->position + (*token)->length;
-    s->colNumber = s->colNumber + (*token)->length;
+    s->position = s->position + (*token)->source.length;
+    s->colNumber = s->colNumber + (*token)->source.length;
   }
 
   return ret;
@@ -790,7 +791,7 @@ RetVal tryStringMake(wchar_t *input, uint64_t length, Expr **ptr, Error *error) 
   expr->type = N_STRING;
   expr->string.length = length;
   expr->string.value = text;
-  expr->string.token = NULL;
+  expr->source.isSet = false;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -813,18 +814,18 @@ RetVal tryStringRead(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   if (token->type != T_STRING) {
-    ret = syntaxError(error, token->position, "Token is not a type of T_STRING");
+    ret = syntaxError(error, token->source.position, "Token is not a type of T_STRING");
     goto failure;
   }
 
-  if (token->length < 2) {
-    ret = syntaxError(error, token->position, "Token should start and end with '\"'");
+  if (token->source.length < 2) {
+    ret = syntaxError(error, token->source.position, "Token should start and end with '\"'");
     goto failure;
   }
 
   // trim quotes
   wchar_t *text = token->text + 1;
-  uint64_t len = token->length - 2;
+  uint64_t len = token->source.length - 2;
 
   Expr *expr;
   ret = tryStringMake(text, len, &expr, error);
@@ -832,9 +833,10 @@ RetVal tryStringRead(TokenStream *stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
-  expr->string.token = token;
+  expr->source = token->source;
 
   *ptr = expr;
+  tokenFree(token);
   return R_SUCCESS;
 
   failure:
@@ -849,9 +851,6 @@ RetVal tryStringRead(TokenStream *stream, Expr **ptr, Error *error) {
 
 void stringFreeContents(ExprString *string) {
   if (string != NULL) {
-    if (string->token != NULL) {
-      tokenFree(string->token);
-    }
     if (string->value != NULL) {
       free(string->value);
     }
@@ -867,7 +866,7 @@ RetVal tryNumberMake(uint64_t value, Expr **ptr, Error *error) {
 
   expr->type = N_NUMBER;
   expr->number.value = value;
-  expr->number.token = NULL;
+  expr->source.isSet = false;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -884,17 +883,17 @@ RetVal tryNumberRead(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   if (token->type != T_NUMBER) {
-    ret = syntaxError(error, token->position, "Token is not a type of T_NUMBER");
+    ret = syntaxError(error, token->source.position, "Token is not a type of T_NUMBER");
     goto failure;
   }
 
   uint64_t value = wcstoull(token->text, NULL, 0);
   if (errno == EINVAL) {
-    ret = syntaxError(error, token->position, "Token text does not represent a valid number");
+    ret = syntaxError(error, token->source.position, "Token text does not represent a valid number");
     goto failure;
   }
   if (errno == ERANGE) {
-    ret = syntaxError(error, token->position, "Cannot represent a number literal larger than 64 bits unsigned");
+    ret = syntaxError(error, token->source.position, "Cannot represent a number literal larger than 64 bits unsigned");
     goto failure;
   }
 
@@ -903,9 +902,11 @@ RetVal tryNumberRead(TokenStream *stream, Expr **ptr, Error *error) {
   if (ret != R_SUCCESS) {
     goto failure;
   }
-  expr->number.token = token;
+
+  expr->source = token->source;
 
   *ptr = expr;
+  tokenFree(token);
   return R_SUCCESS;
 
   failure:
@@ -913,14 +914,6 @@ RetVal tryNumberRead(TokenStream *stream, Expr **ptr, Error *error) {
       tokenFree(token);
     }
     return ret;
-}
-
-void numberFreeContents(ExprNumber *number) {
-  if (number != NULL) {
-    if (number->token != NULL) {
-      tokenFree(number->token);
-    }
-  }
 }
 
 /*
@@ -946,19 +939,19 @@ RetVal trySymbolMake(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
   expr->type = N_SYMBOL;
   expr->symbol.value = value;
   expr->symbol.length = len;
-  expr->symbol.token = NULL; // no token
+  expr->source.isSet = false;
 
   *ptr = expr;
   return R_SUCCESS;
 
   failure:
-  if (expr != NULL) {
-    exprFree(expr);
-  }
-  if (value != NULL) {
-    free(value);
-  }
-  return ret;
+    if (expr != NULL) {
+      exprFree(expr);
+    }
+    if (value != NULL) {
+      free(value);
+    }
+    return ret;
 }
 
 RetVal trySymbolRead(TokenStream *stream, Expr **ptr, Error *error) {
@@ -972,18 +965,20 @@ RetVal trySymbolRead(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   if (token->type != T_SYMBOL) {
-    ret = syntaxError(error, token->position, "Token is not a type of T_SYMBOL");
+    ret = syntaxError(error, token->source.position, "Token is not a type of T_SYMBOL");
     goto failure;
   }
 
   Expr *expr;
-  ret = trySymbolMake(token->text, token->length, &expr, error);
+  ret = trySymbolMake(token->text, token->source.length, &expr, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
-  expr->symbol.token = token;
+
+  expr->source = token->source;
 
   *ptr = expr;
+  tokenFree(token);
   return R_SUCCESS;
 
   failure:
@@ -995,9 +990,6 @@ RetVal trySymbolRead(TokenStream *stream, Expr **ptr, Error *error) {
 
 void symbolFreeContents(ExprSymbol *symbol) {
   if (symbol != NULL) {
-    if (symbol->token != NULL) {
-      tokenFree(symbol->token);
-    }
     if (symbol->value != NULL) {
       free(symbol->value);
     }
@@ -1023,7 +1015,7 @@ RetVal tryKeywordMake(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
   expr->type = N_KEYWORD;
   expr->keyword.length = len;
   expr->keyword.value = text;
-  expr->keyword.token = NULL; // no token
+  expr->source.isSet = false;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -1046,11 +1038,11 @@ RetVal tryKeywordRead(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   if (token->type != T_KEYWORD) {
-    ret = syntaxError(error, token->position, "Token is not a type of T_KEYWORD");
+    ret = syntaxError(error, token->source.position, "Token is not a type of T_KEYWORD");
     goto failure;
   }
 
-  uint64_t len = token->length - 1;
+  uint64_t len = token->source.length - 1;
   wchar_t *text = token->text + 1;
 
   Expr *expr;
@@ -1058,9 +1050,11 @@ RetVal tryKeywordRead(TokenStream *stream, Expr **ptr, Error *error) {
   if (ret != R_SUCCESS) {
     goto failure;
   }
-  expr->keyword.token = token;
+
+  expr->source = token->source;
 
   *ptr = expr;
+  tokenFree(token);
   return R_SUCCESS;
 
   failure:
@@ -1072,9 +1066,6 @@ RetVal tryKeywordRead(TokenStream *stream, Expr **ptr, Error *error) {
 
 void keywordFreeContents(ExprKeyword *keyword) {
   if (keyword!= NULL) {
-    if (keyword->token != NULL) {
-      tokenFree(keyword->token);
-    }
     if (keyword->value != NULL) {
       free(keyword->value);
     }
@@ -1090,7 +1081,7 @@ RetVal tryBooleanMake(bool value, Expr **ptr, Error *error) {
 
   expr->type = N_BOOLEAN;
   expr->boolean.value = value;
-  expr->boolean.token = NULL;
+  expr->source.isSet = false;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -1107,7 +1098,7 @@ RetVal tryBooleanRead(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   if (token->type != T_TRUE && token->type != T_FALSE) {
-    ret = syntaxError(error, token->position, "Token is not a type of T_TRUE or T_FALSE");
+    ret = syntaxError(error, token->source.position, "Token is not a type of T_TRUE or T_FALSE");
     goto failure;
   }
 
@@ -1118,9 +1109,11 @@ RetVal tryBooleanRead(TokenStream *stream, Expr **ptr, Error *error) {
   if (ret != R_SUCCESS) {
     goto failure;
   }
-  expr->boolean.token = token;
+
+  expr->source = token->source;
 
   *ptr = expr;
+  tokenFree(token);
   return R_SUCCESS;
 
   failure:
@@ -1128,14 +1121,6 @@ RetVal tryBooleanRead(TokenStream *stream, Expr **ptr, Error *error) {
     tokenFree(token);
   }
   return ret;
-}
-
-void booleanFreeContents(ExprBoolean *boolean) {
-  if (boolean != NULL) {
-    if (boolean->token != NULL) {
-      tokenFree(boolean->token);
-    }
-  }
 }
 
 RetVal tryNilMake(Expr **ptr, Error *error) {
@@ -1146,7 +1131,7 @@ RetVal tryNilMake(Expr **ptr, Error *error) {
   }
 
   expr->type = N_NIL;
-  expr->nil.token = NULL;
+  expr->source.isSet = false;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -1163,7 +1148,7 @@ RetVal tryNilRead(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   if (token->type != T_NIL) {
-    ret = syntaxError(error, token->position, "Token is not a type of T_NIL");
+    ret = syntaxError(error, token->source.position, "Token is not a type of T_NIL");
     goto failure;
   }
 
@@ -1172,9 +1157,11 @@ RetVal tryNilRead(TokenStream *stream, Expr **ptr, Error *error) {
   if (ret != R_SUCCESS) {
     goto failure;
   }
-  expr->nil.token = token;
+
+  expr->source = token->source;
 
   *ptr = expr;
+  tokenFree(token);
   return R_SUCCESS;
 
   failure:
@@ -1182,14 +1169,6 @@ RetVal tryNilRead(TokenStream *stream, Expr **ptr, Error *error) {
       tokenFree(token);
     }
     return ret;
-}
-
-void nilFreeContents(ExprNil *nil) {
-  if (nil != NULL) {
-    if (nil->token != NULL) {
-      tokenFree(nil->token);
-    }
-  }
 }
 
 // Lists
@@ -1215,9 +1194,7 @@ RetVal tryListMake(Expr **ptr, Error *error) {
   expr->list.head = NULL;
   expr->list.tail = NULL;
 
-  // these do not exist
-  expr->list.oParen = NULL;
-  expr->list.cParen = NULL;
+  expr->source.isSet = false;
 
   *ptr = expr;
   return R_SUCCESS;
@@ -1228,6 +1205,7 @@ RetVal tryListRead(TokenStream *stream, Expr **ptr, Error *error) {
   RetVal ret;
 
   // these get cleaned up on failure
+  Token *oParen, *cParen;
   Expr *expr;
   Expr *subexpr;
 
@@ -1238,13 +1216,13 @@ RetVal tryListRead(TokenStream *stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
-  ret = tryStreamNext(stream, &expr->list.oParen, error);
+  ret = tryStreamNext(stream, &oParen, error);
   if (ret != R_SUCCESS) {
     goto failure;
   }
 
-  if (expr->list.oParen->type != T_OPAREN) {
-    ret = syntaxError(error, expr->list.oParen->position, "List must begin with ')'");
+  if (oParen->type != T_OPAREN) {
+    ret = syntaxError(error, oParen->source.position, "List must begin with ')'");
     goto failure;
   }
 
@@ -1254,7 +1232,7 @@ RetVal tryListRead(TokenStream *stream, Expr **ptr, Error *error) {
     ret = tryStreamPeek(stream, &cParen, error);
     if (ret != R_SUCCESS) {
       if (ret == R_EOF) { // eof too soon
-        ret = syntaxError(error, expr->list.oParen->position, "Encountered EOF, was expecting ')'");
+        ret = syntaxError(error, oParen->source.position, "Encountered EOF, was expecting ')'");
       }
       goto failure;
     }
@@ -1262,9 +1240,13 @@ RetVal tryListRead(TokenStream *stream, Expr **ptr, Error *error) {
     if (cParen->type == T_CPAREN) { // found our closed paren
 
       streamDropPeeked(stream); // consume cParen now that nothing else can fail
-      expr->list.cParen = cParen;
+
+      expr->source = oParen->source;
+      expr->source.length = cParen->source.position - oParen->source.position;
 
       *ptr = expr;
+      tokenFree(oParen);
+      tokenFree(cParen);
       return R_SUCCESS;
     }
     else { // read a new expression and add it to the list
@@ -1283,6 +1265,12 @@ RetVal tryListRead(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   failure:
+    if (oParen != NULL) {
+      tokenFree(oParen);
+    }
+    if (cParen != NULL) {
+      tokenFree(cParen);
+    }
     if (subexpr != NULL) {
       exprFree(subexpr);
     }
@@ -1319,14 +1307,6 @@ RetVal tryListAppend(ExprList *list, Expr *expr, Error *error) {
 }
 
 void listFreeContents(ExprList *list) {
-
-  if (list->oParen != NULL) {
-    tokenFree(list->oParen);
-  }
-  if (list->cParen != NULL) {
-    tokenFree(list->cParen);
-  }
-
   while (list->head != NULL) {
     ListElement *elem = list->head;
     list->head = list->head->next;
@@ -1350,7 +1330,7 @@ RetVal tryQuoteRead(TokenStream *stream, Expr **ptr, Error *error) {
   }
 
   if (token->type != T_QUOTE) {
-    ret = syntaxError(error, token->position, "Syntax quote must begin with '`'");
+    ret = syntaxError(error, token->source.position, "Syntax quote must begin with '`'");
     goto failure;
   }
 
@@ -1358,7 +1338,7 @@ RetVal tryQuoteRead(TokenStream *stream, Expr **ptr, Error *error) {
   if (ret != R_SUCCESS) {
     goto failure;
   }
-  quote->symbol.token = token;
+  quote->source = token->source;
   token = NULL; // token is now a part of quote symbol
 
   ret = tryExprRead(stream, &subexpr, error);
@@ -1451,7 +1431,7 @@ RetVal tryExprRead(TokenStream *stream, Expr **ptr, Error *error) {
       break;
 
     default:
-      ret = syntaxError(error, peek->position, "Unknown token type");
+      ret = syntaxError(error, peek->source.position, "Unknown token type");
   }
 
   if (ret != R_SUCCESS) {
@@ -1466,7 +1446,7 @@ void exprFree(Expr *expr) {
     stringFreeContents(&expr->string);
   }
   else if (expr->type == N_NUMBER) {
-    numberFreeContents(&expr->number);
+    // nothing to do
   }
   else if (expr->type == N_SYMBOL) {
     symbolFreeContents(&expr->symbol);
@@ -1475,10 +1455,10 @@ void exprFree(Expr *expr) {
     keywordFreeContents(&expr->keyword);
   }
   else if (expr->type == N_BOOLEAN) {
-    booleanFreeContents(&expr->boolean);
+    // nothing to do
   }
   else if (expr->type == N_NIL) {
-    nilFreeContents(&expr->nil);
+    // nothing to do
   }
   else if (expr->type == N_LIST) {
     listFreeContents(&expr->list);

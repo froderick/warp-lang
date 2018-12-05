@@ -102,6 +102,8 @@ void freeScope(EnvBindingScope *scope) {
   }
 }
 
+// TODO: manage the scopes as the analysis is happening
+
 void pushScope(EnvBindingStack *stack, EnvBindingScope *scope) {
   scope->next = stack->head;
   stack->head = scope;
@@ -200,24 +202,7 @@ void analyzerFree(FormAnalyzer *analyzer) {
 }
 
 uint64_t getExprPosition(Expr *expr) {
-  switch (expr->type) {
-    case N_STRING:
-      return expr->string.token->position;
-    case N_NUMBER:
-      return expr->number.token->position;
-    case N_SYMBOL:
-      return expr->symbol.token->position;
-    case N_KEYWORD:
-      return expr->keyword.token->position;
-    case N_BOOLEAN:
-      return expr->boolean.token->position;
-    case N_NIL:
-      return expr->nil.token->position;
-    case N_LIST:
-      return expr->list.oParen->position;
-    case N_NONE:
-      return 0;
-  }
+  return expr->source.position;
 }
 
 uint64_t getFormPosition(Form *form) {

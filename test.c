@@ -12,8 +12,8 @@ void assertToken(Token *t,
 
   ck_assert_int_eq(t->type, type);
   ck_assert_msg(wcscmp(t->text, text) == 0, "text must match");
-  ck_assert_int_eq(t->position, position);
-  ck_assert_int_eq(t->length, length);
+  ck_assert_int_eq(t->source.position, position);
+  ck_assert_int_eq(t->source.length, length);
 }
 
 START_TEST(basic) {
@@ -145,18 +145,16 @@ START_TEST(parser) {
     ck_assert(expr->type == N_STRING);
     ck_assert(wcscmp(expr->string.value, L"str") == 0);
     ck_assert_int_eq(expr->string.length, 3);
-    ck_assert(expr->string.token->type == T_STRING);
-    ck_assert_int_eq(expr->number.token->lineNumber, 1);
-    ck_assert_int_eq(expr->number.token->colNumber, 1);
+    ck_assert_int_eq(expr->source.lineNumber, 1);
+    ck_assert_int_eq(expr->source.colNumber, 1);
     exprFree(expr);
 
     // number
     ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_NUMBER);
     ck_assert_int_eq(expr->number.value, 102);
-    ck_assert(expr->number.token->type == T_NUMBER);
-    ck_assert_int_eq(expr->number.token->lineNumber, 1);
-    ck_assert_int_eq(expr->number.token->colNumber, 6);
+    ck_assert_int_eq(expr->source.lineNumber, 1);
+    ck_assert_int_eq(expr->source.colNumber, 6);
     exprFree(expr);
 
     // symbol
@@ -164,9 +162,8 @@ START_TEST(parser) {
     ck_assert(expr->type == N_SYMBOL);
     ck_assert(wcscmp(expr->symbol.value, L"himom") == 0);
     ck_assert_int_eq(expr->symbol.length, 5);
-    ck_assert(expr->symbol.token->type == T_SYMBOL);
-    ck_assert_int_eq(expr->symbol.token->lineNumber, 2);
-    ck_assert_int_eq(expr->number.token->colNumber, 1);
+    ck_assert_int_eq(expr->source.lineNumber, 2);
+    ck_assert_int_eq(expr->source.colNumber, 1);
     exprFree(expr);
 
     // keyword
@@ -174,27 +171,22 @@ START_TEST(parser) {
     ck_assert(expr->type == N_KEYWORD);
     ck_assert(wcscmp(expr->keyword.value, L"rocks") == 0);
     ck_assert_int_eq(expr->keyword.length, 5);
-    ck_assert(expr->keyword.token->type == T_KEYWORD);
     exprFree(expr);
 
     // boolean
     ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_BOOLEAN);
     ck_assert(expr->boolean.value == true);
-    ck_assert(expr->boolean.token->type == T_TRUE);
     exprFree(expr);
 
     // nil
     ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_NIL);
-    ck_assert(expr->nil.token->type == T_NIL);
     exprFree(expr);
 
     // list
     ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_LIST);
-    ck_assert(expr->list.oParen->type == T_OPAREN);
-    ck_assert(expr->list.cParen->type == T_CPAREN);
     ck_assert(expr->list.length == 2);
     // first element
     ck_assert(expr->list.head->expr->type == N_BOOLEAN);

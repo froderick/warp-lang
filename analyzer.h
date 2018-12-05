@@ -154,6 +154,7 @@ typedef enum FormType {
 typedef struct Form {
   FormType type;
   union {
+    // TODO: Expr is not a good name here, since they don't really get evaluated.
     Expr *constant; // TODO: deep copy these
     // TODO: high-level forms should not retain references to expressions or tokens at all
     FormIf iff;
