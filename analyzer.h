@@ -1,3 +1,6 @@
+#ifndef WARP_LANG_ANALYZER_H
+#define WARP_LANG_ANALYZER_H
+
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -220,7 +223,9 @@ void formFree(Form* expr);
 // lexical scope into the function object itself. So the compiler needs a way to figure out how to generate
 // code that copies these values whenever they are captured.
 
+#endif //WARP_LANG_ANALYZER_H
 
+// TODO: use macros to make file names and line numbers in error messages
 
 
 

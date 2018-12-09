@@ -753,6 +753,7 @@ void streamDropPeeked(TokenStream *s) {
   s->next = NULL;
 }
 
+// this frees the source as well
 RetVal tryStreamFree(TokenStream *s, Error *error) {
 
   if (s == NULL) {

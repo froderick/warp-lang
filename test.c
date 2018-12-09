@@ -6,6 +6,7 @@
 #include <check.h>
 #include <errno.h>
 #include "reader.h"
+#include "analyzer.h"
 
 void assertToken(Token *t,
                  TokenType type, wchar_t *text, unsigned long position, unsigned long length) {
@@ -213,6 +214,99 @@ START_TEST(parser) {
   }
 END_TEST
 
+RetVal tryParse(wchar_t *input, Expr **ptr, Error *error) {
+
+  RetVal ret;
+
+  StreamSource_t source;
+  TokenStream_t stream;
+  Expr *expr;
+
+  throws(trySourceMakeString(input, wcslen(input), &source, error));
+  throws(tryStreamMake(source, &stream, error));
+
+  throws(tryExprRead(stream, &expr, error));
+
+  throws(tryStreamFree(stream, error));
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+START_TEST(analyzer) {
+
+    Error e;
+    FormAnalyzer *analyzer;
+    Expr *expr;
+    Form *form;
+
+    ck_assert_int_eq(tryAnalyzerMake(&analyzer, &e), R_SUCCESS);
+
+    // constant
+    ck_assert_int_eq(tryParse(L"\"str\"", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    exprFree(expr);
+    ck_assert_int_eq(form->type, F_CONST);
+    formFree(form);
+
+    // if
+    ck_assert_int_eq(tryParse(L"(if true 10 20)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    exprFree(expr);
+    ck_assert_int_eq(form->type, F_IF);
+    formFree(form);
+
+    // let
+    ck_assert_int_eq(tryParse(L"(let (a nil) true)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    exprFree(expr);
+    ck_assert_int_eq(form->type, F_LET);
+    formFree(form);
+
+    // env-ref
+//    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
+//    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+//    exprFree(expr);
+//    ck_assert_int_eq(form->type, F_ENV_REF);
+//    formFree(form);
+
+    // var-ref
+//    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
+//    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+//    exprFree(expr);
+//    ck_assert_int_eq(form->type, F_VAR_REF);
+//    formFree(form);
+
+    // fn
+    ck_assert_int_eq(tryParse(L"(fn (a b c) false)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    exprFree(expr);
+    ck_assert_int_eq(form->type, F_FN);
+    formFree(form);
+
+    // def
+//    ck_assert_int_eq(tryParse(L"(def barf 100)", &expr, &e), R_SUCCESS);
+//    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+//    exprFree(expr);
+//    ck_assert_int_eq(form->type, F_FN_CALL);
+//    formFree(form);
+
+    // fn-call
+//    ck_assert_int_eq(tryParse(L"(def barf (fn () 100)) (barf)", &expr, &e), R_SUCCESS);
+//    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+//    exprFree(expr);
+//    ck_assert_int_eq(form->type, F_FN_CALL);
+//    formFree(form);
+
+// TODO:
+//        F_BUILTIN,
+
+  }
+END_TEST
+
 Suite * suite(void) {
 
   TCase *tc_core = tcase_create("Core");
@@ -220,6 +314,7 @@ Suite * suite(void) {
   tcase_add_test(tc_core, eof_mid_number_token);
   tcase_add_test(tc_core, errors);
   tcase_add_test(tc_core, parser);
+  tcase_add_test(tc_core, analyzer);
 
   Suite *s = suite_create("lexer");
   suite_add_tcase(s, tc_core);

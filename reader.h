@@ -1,3 +1,6 @@
+#ifndef WARP_LANG_READER_H
+#define WARP_LANG_READER_H
+
 #include <stdio.h>
 #include <wchar.h>
 #include <stdint.h>
@@ -126,3 +129,4 @@ void exprFree(Expr *expr);
 
 RetVal tryDeepCopy(Expr *from, Expr **ptr, Error *error);
 
+#endif //WARP_LANG_READER_H

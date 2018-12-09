@@ -297,7 +297,7 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
   tryMalloc(let->bindings, sizeof(LexicalBinding) * let->numBindings, "LexicalBinding array");
 
   ListElement *bindingElem = bindingsExpr->list.head;
-  for (int i=0; i<letExpr->list.length; i += 2) {
+  for (int i=0; i + 2 < letExpr->list.length; i += 2) {
 
     if (bindingElem->expr->type != N_SYMBOL) {
       throwSyntaxError(error, pos, "only symbols can be bound as names");
@@ -499,6 +499,9 @@ RetVal tryFnCallAnalyze(FormAnalyzer *analyzer, Expr *expr, FormFnCall *fnCall, 
 
   RetVal ret;
 
+  fnCall->fnCallable = NULL;
+  fnCall->args = NULL;
+
   throws(tryFormAnalyze(analyzer, expr->list.head->expr, &fnCall->fnCallable, error));
   throws(assertFnCallable(fnCall->fnCallable, error));
 
@@ -536,11 +539,12 @@ void fnCallFreeContents(FormFnCall *fnCall) {
   }
 }
 
-RetVal tryConstantAnalyze(Expr* expr, Expr *constant, Error *error) {
+RetVal tryConstantAnalyze(Expr* expr, Expr **constant, Error *error) {
 
   RetVal ret;
 
-  throws(tryDeepCopy(expr, &constant, error));
+  throws(tryDeepCopy(expr, constant, error));
+  return R_SUCCESS;
 
   failure:
     return ret;
@@ -568,7 +572,7 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
     case N_BOOLEAN:
     case N_NIL: {
       form->type = F_CONST;
-      throws(tryConstantAnalyze(expr, form->constant, error));
+      throws(tryConstantAnalyze(expr, &form->constant, error));
       break;
     }
 
@@ -597,7 +601,7 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
       // empty list
       if (expr->list.length == 0) {
         form->type = F_CONST;
-        throws(tryConstantAnalyze(expr, form->constant, error));
+        throws(tryConstantAnalyze(expr, &form->constant, error));
         break;
       }
 
@@ -659,7 +663,7 @@ RetVal tryFormAnalyze(FormAnalyzer *analyzer, Expr* expr, Form **ptr, Error *err
     return ret;
 }
 
-void formFree(Form* form) {
+void formFreeContents(Form* form) {
   if (form != NULL) {
     switch (form->type) {
       case F_CONST:
@@ -689,10 +693,15 @@ void formFree(Form* form) {
       case F_NONE:
         break;
     }
-    free(form);
   }
 }
 
+void formFree(Form* form) {
+  if (form != NULL) {
+    formFreeContents(form);
+    free(form);
+  }
+}
 
 
 
