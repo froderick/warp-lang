@@ -92,6 +92,12 @@ typedef struct FormLet {
   uint64_t numForms;
 } FormLet;
 
+typedef struct FormDef {
+  wchar_t *name;
+  uint64_t nameLength;
+  Form *value;
+} FormDef;
+
 typedef enum FormEnvRefType {
   RT_NONE,
   RT_ARG,         // function argument
@@ -142,6 +148,7 @@ typedef enum FormType {
   F_CONST,
   F_IF,
   F_LET,
+  F_DEF,
   F_ENV_REF,
   F_VAR_REF,
   F_FN,
@@ -155,6 +162,7 @@ typedef struct Form {
     Expr *constant;
     FormIf iff;
     FormLet let;
+    FormDef def;
     FormEnvRef envRef;
     FormVarRef varRef;
     FormFn fn;
@@ -170,10 +178,15 @@ typedef struct Var {
   Form *value;
 } Var;
 
+typedef struct VarList {
+  uint64_t allocatedLength;
+  uint64_t length;
+  Var *vars;
+} VarList;
+
 typedef struct Namespace {
   wchar_t *name;
-  Var *localVars;
-  uint64_t numLocalVars;
+  VarList localVars;
   Var *importedVars;
   uint64_t numImportedVars;
 } Namespace;

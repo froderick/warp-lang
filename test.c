@@ -274,7 +274,7 @@ START_TEST(analyzer) {
 //    formFree(form);
 
     // var-ref
-//    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
+//    ck_assert_int_eq(tryParse(L"", &expr, &e), R_SUCCESS);
 //    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
 //    exprFree(expr);
 //    ck_assert_int_eq(form->type, F_VAR_REF);
@@ -288,11 +288,11 @@ START_TEST(analyzer) {
     formFree(form);
 
     // def
-//    ck_assert_int_eq(tryParse(L"(def barf 100)", &expr, &e), R_SUCCESS);
-//    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
-//    exprFree(expr);
-//    ck_assert_int_eq(form->type, F_FN_CALL);
-//    formFree(form);
+    ck_assert_int_eq(tryParse(L"(def money 100)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    exprFree(expr);
+    ck_assert_int_eq(form->type, F_DEF);
+    formFree(form);
 
     // fn-call
 //    ck_assert_int_eq(tryParse(L"(def barf (fn () 100)) (barf)", &expr, &e), R_SUCCESS);

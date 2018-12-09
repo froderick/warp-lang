@@ -8,6 +8,50 @@
  * Core analyzer behavior.
  */
 
+void varFree(Var *var);
+RetVal tryFormDeepCopy(Form *from, Form **to, Error *error);
+
+RetVal tryVarInit(wchar_t *namespace, wchar_t *name, Var *var, Error *error) {
+  RetVal ret;
+
+  var->namespace = NULL;
+  var->name = NULL;
+  var->value = NULL;
+
+  throws(tryCopyText(namespace, &var->namespace, wcslen(namespace), error));
+  throws(tryCopyText(name, &var->name, wcslen(name), error));
+
+  return R_SUCCESS;
+
+  failure:
+    varFree(var);
+    return ret;
+}
+
+void varFreeContents(Var *var) {
+  if (var != NULL) {
+    if (var->namespace != NULL) {
+      free(var->namespace);
+      var->namespace = NULL;
+    }
+    if (var->name != NULL) {
+      free(var->name);
+      var->name = NULL;
+    }
+    if (var->value != NULL) {
+      formFree(var->value);
+      var->value = NULL;
+    }
+  }
+}
+
+void varFree(Var *var) {
+  if (var != NULL) {
+    varFreeContents(var);
+    free(var);
+  }
+}
+
 Var* resolveVar(FormAnalyzer *analyzer, wchar_t *symbolName, uint64_t symbolNameLength) {
 
   Namespace *ns;
@@ -41,14 +85,100 @@ Var* resolveVar(FormAnalyzer *analyzer, wchar_t *symbolName, uint64_t symbolName
 
   // find var within namespace
 
-  for (int i=0; i<ns->numLocalVars; i++) {
-    if (wcsncmp(searchName, ns->localVars[i].name, searchNameLength) == 0) {
-      return &ns->localVars[i];
+  for (int i=0; i<ns->localVars.length; i++) {
+    if (wcsncmp(searchName, ns->localVars.vars[i].name, searchNameLength) == 0) {
+      return &ns->localVars.vars[i];
     }
   }
 
   return NULL;
 }
+
+void varListInit(VarList *list) {
+  list->length = 0;
+  list->allocatedLength = 0;
+  list->vars = NULL;
+}
+
+void varListFreeContents(VarList *list) {
+  if (list != NULL) {
+    if (list->vars != NULL) {
+      for (int i=0; i<list->length; i++) {
+        varFreeContents(&list->vars[i]);
+      }
+      free(list->vars);
+      list->vars = NULL;
+      list->length = 0;
+      list->allocatedLength = 0;
+    }
+  }
+}
+
+RetVal tryAppendVar(VarList *list, Var var, Error* error) {
+
+  RetVal ret;
+
+  if (list->vars == NULL) {
+    uint64_t len = 16;
+    tryMalloc(list->vars, len * sizeof(Var), "Var array");
+    list->allocatedLength = len;
+  }
+  else if (list->length == list->allocatedLength) {
+    uint64_t newAllocatedLength = list->allocatedLength * 2;
+
+    Var* resizedVars = realloc(list->vars, newAllocatedLength);
+    if (resizedVars == NULL) {
+      ret = memoryError(error, "realloc Var array");
+      goto failure;
+    }
+
+    list->allocatedLength = newAllocatedLength;
+    list->vars = resizedVars;
+  }
+
+  list->vars[list->length] = var;
+  list->length = list->length + 1;
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryDefVar(FormAnalyzer *analyzer, wchar_t *symbolName, uint64_t symbolNameLength, Form *value, Error *error) {
+  RetVal ret;
+
+  // these get cleaned up on failure
+  Var createdVar;
+  Form *copiedValue;
+
+  Var *resolvedVar = resolveVar(analyzer, symbolName, symbolNameLength);
+  if (resolvedVar == NULL) {
+    Namespace *ns = analyzer->currentNamespace;
+    throws(tryVarInit(ns->name, symbolName, &createdVar, error));
+    throws(tryFormDeepCopy(value, &createdVar.value, error));
+    throws(tryAppendVar(&ns->localVars, createdVar, error));
+  }
+  else if (resolvedVar->value == NULL) {
+    throws(tryFormDeepCopy(value, &resolvedVar->value, error));
+  }
+  else {
+    throws(tryFormDeepCopy(value, &copiedValue, error));
+    formFree(resolvedVar->value);
+    resolvedVar->value = copiedValue;
+    copiedValue = NULL; // now part of resolvedVar
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    varFreeContents(&createdVar);
+    if (copiedValue != NULL) {
+      formFree(copiedValue);
+    }
+    return ret;
+}
+
 
 void freeScope(EnvBindingScope *scope);
 
@@ -138,8 +268,8 @@ RetVal tryNamespaceMake(wchar_t *name, uint64_t length, Namespace **ptr , Error 
   ns->name = NULL;
   ns->importedVars = NULL;
   ns->numImportedVars = 0;
-  ns->localVars = NULL;
-  ns->numLocalVars = 0;
+
+  varListInit(&ns->localVars);
 
   throws(tryCopyText(name, &ns->name, length, error));
 
@@ -157,7 +287,7 @@ void namespaceFree(Namespace *ns) {
   if (ns != NULL) {
     free(ns->name);
     free(ns->importedVars);
-    free(ns->localVars);
+    varListFreeContents(&ns->localVars);
     free(ns);
   }
 }
@@ -357,6 +487,59 @@ void letFreeContents(FormLet *let) {
   }
 }
 
+void defFreeContents(FormDef *let);
+
+RetVal tryDefAnalyze(FormAnalyzer *analyzer, Expr* defExpr, FormDef *def, Error *error) {
+
+  def->name = NULL;
+  def->nameLength = 0;
+  def->value = NULL;
+
+  RetVal ret;
+
+  // sanity checking
+  uint64_t pos = getExprPosition(defExpr);
+  if (defExpr->list.length < 2) {
+    throwSyntaxError(error, pos, "the 'def' special form requires at least one parameter");
+  }
+  if (defExpr->list.length > 3) {
+    throwSyntaxError(error, pos, "the 'def' special form takes at most two parameters");
+  }
+  Expr *symbol = defExpr->list.head->next->expr;
+  if (symbol->type != N_SYMBOL) {
+    throwSyntaxError(error, pos, "the 'let' special form requires the first parameter to be a symbol");
+  }
+
+  def->nameLength = symbol->symbol.length;
+  throws(tryCopyText(symbol->symbol.value, &def->name, def->nameLength, error));
+
+  if (defExpr->list.length == 3) {
+    throws(tryFormAnalyze(analyzer, defExpr->list.head->next->next->expr, &def->value, error));
+  }
+
+  // update the analyzer state so it knows about this def
+  throws(tryDefVar(analyzer, def->name, def->nameLength, def->value, error));
+
+  return R_SUCCESS;
+
+  failure:
+    defFreeContents(def);
+    return ret;
+}
+
+void defFreeContents(FormDef *def) {
+  if (def != NULL) {
+    if (def->name != NULL) {
+      free(def->name);
+      def->name = NULL;
+    }
+    if (def->value != NULL) {
+      formFree(def->value);
+      def->value = NULL;
+    };
+  }
+}
+
 void fnFreeContents(FormFn *fn);
 
 RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, FormFn *fn, Error *error) {
@@ -543,7 +726,7 @@ RetVal tryConstantAnalyze(Expr* expr, Expr **constant, Error *error) {
 
   RetVal ret;
 
-  throws(tryDeepCopy(expr, constant, error));
+  throws(tryExprDeepCopy(expr, constant, error));
   return R_SUCCESS;
 
   failure:
@@ -621,6 +804,12 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
           break;
         }
 
+        if (wcscmp(sym, L"def") == 0) {
+          form->type = F_DEF;
+          throws(tryDefAnalyze(analyzer, expr, &form->def, error));
+          break;
+        }
+
         if (wcscmp(sym, L"fn") == 0) {
           form->type = F_FN;
           throws(tryFnAnalyze(analyzer, expr, &form->fn, error));
@@ -675,6 +864,9 @@ void formFreeContents(Form* form) {
       case F_LET:
         letFreeContents(&form->let);
         break;
+      case F_DEF:
+        defFreeContents(&form->def);
+        break;
       case F_ENV_REF:
         // do nothing (FOR NOW)
         break;
@@ -703,7 +895,128 @@ void formFree(Form* form) {
   }
 }
 
+// TODO: remove the duplication for init found in tryFormDeepCopy
 
+RetVal tryFormDeepCopy(Form *from, Form **ptr, Error *error) {
+  RetVal ret;
+
+  Form *to;
+  tryMalloc(to, sizeof(Form), "Form");
+
+  switch (from->type) {
+    case F_CONST:
+      throws(tryExprDeepCopy(from->constant, &to->constant, error));
+      break;
+
+    case F_IF:
+      throws(tryFormDeepCopy(from->iff.test, &to->iff.test, error));
+      throws(tryFormDeepCopy(from->iff.ifBranch, &to->iff.ifBranch, error));
+      if (from->iff.elseBranch != NULL) {
+        throws(tryFormDeepCopy(from->iff.elseBranch, &to->iff.elseBranch, error));
+      }
+      break;
+
+    case F_LET:
+      to->let.numBindings = from->let.numBindings;
+      tryMalloc(to->let.bindings, sizeof(LexicalBinding) * to->let.numBindings, "LexicalBinding array");
+
+      for (int i=0; i<to->let.numBindings; i++) {
+        LexicalBinding *fromBinding = &from->let.bindings[i];
+        LexicalBinding *toBinding = &to->let.bindings[i];
+
+        toBinding->nameLength = fromBinding->nameLength;
+        toBinding->source = fromBinding->source;
+
+        throws(tryCopyText(fromBinding->name, &toBinding->name, toBinding->nameLength, error));
+        throws(tryFormDeepCopy(fromBinding->value, &toBinding->value, error));
+      }
+
+      to->let.numForms = from->let.numForms;
+      tryMalloc(to->let.bindings, sizeof(Form) * to->let.numForms, "Form array");
+
+      for (int i=0; i<to->let.numForms; i++) {
+        Form *fromForm = &from->let.forms[i];
+        Form *toForm = &to->let.forms[i];
+        throws(tryFormDeepCopy(fromForm, &toForm, error));
+      }
+
+      break;
+
+    case F_DEF:
+      to->def.nameLength = from->def.nameLength;
+      throws(tryCopyText(from->def.name, &to->def.name, to->def.nameLength, error));
+      throws(tryFormDeepCopy(from->def.value, &to->def.value, error));
+      break;
+
+    case F_ENV_REF:
+      to->envRef.type = from->envRef.type;
+      to->envRef.index = from->envRef.index;
+      break;
+
+    case F_VAR_REF:
+      to->varRef.var = from->varRef.var; // var references don't get deep copied
+      break;
+
+    case F_FN:
+      to->fn.numArgs = from->fn.numArgs;
+      tryMalloc(to->fn.args, sizeof(FormFnArg) * to->fn.numArgs, "FormFnArg array");
+
+      for (int i=0; i<to->fn.numArgs; i++) {
+        FormFnArg *fromArg = &from->fn.args[i];
+        FormFnArg *toArg = &to->fn.args[i];
+
+        toArg->nameLength = fromArg->nameLength;
+        toArg->source = fromArg->source;
+
+        throws(tryCopyText(fromArg->name, &toArg->name, toArg->nameLength, error));
+      }
+
+      to->fn.numForms = from->fn.numForms;
+      tryMalloc(to->fn.forms, sizeof(Form) * to->fn.numForms, "Form array");
+
+      for (int i=0; i<to->fn.numForms; i++) {
+        Form *fromForm = &from->fn.forms[i];
+        Form *toForm = &to->fn.forms[i];
+        throws(tryFormDeepCopy(fromForm, &toForm, error));
+      }
+
+      break;
+
+    case F_BUILTIN:
+      // TODO
+      break;
+
+    case F_FN_CALL:
+
+      throws(tryFormDeepCopy(from->fnCall.fnCallable, &to->fnCall.fnCallable, error));
+
+      to->fnCall.numArgs = from->fnCall.numArgs;
+      tryMalloc(to->fnCall.args, sizeof(Form) * to->fnCall.numArgs, "Form array");
+
+      for (int i=0; i<to->fnCall.numArgs; i++) {
+        Form *fromForm = &from->fnCall.args[i];
+        Form *toForm = &to->fnCall.args[i];
+        throws(tryFormDeepCopy(fromForm, &toForm, error));
+      }
+
+      break;
+
+    case F_NONE:
+      break;
+  }
+
+  to->type = from->type;
+  to->source = from->source;
+
+  *ptr = to;
+  return R_SUCCESS;
+
+  failure:
+    if (to != NULL) {
+      formFree(to);
+    }
+    return ret;
+}
 
 
 

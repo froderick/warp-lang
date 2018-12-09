@@ -1467,7 +1467,7 @@ void exprFree(Expr *expr) {
   free(expr);
 }
 
-RetVal tryDeepCopy(Expr *from, Expr **ptr, Error *error) {
+RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error) {
 
   RetVal ret;
 
@@ -1502,7 +1502,7 @@ RetVal tryDeepCopy(Expr *from, Expr **ptr, Error *error) {
       ListElement *elem = from->list.head;
       while (elem != NULL) {
 
-        throws(tryDeepCopy(elem->expr, &listItem, error));
+        throws(tryExprDeepCopy(elem->expr, &listItem, error));
         throws(tryListAppend(&to->list, listItem, error));
         listItem = NULL; // item is now part of list
 

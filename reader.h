@@ -127,6 +127,6 @@ typedef struct Expr {
 RetVal tryExprRead(TokenStream_t stream, Expr **expr, Error *error);
 void exprFree(Expr *expr);
 
-RetVal tryDeepCopy(Expr *from, Expr **ptr, Error *error);
+RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error);
 
 #endif //WARP_LANG_READER_H
