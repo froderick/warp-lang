@@ -1466,4 +1466,86 @@ void exprFree(Expr *expr) {
   free(expr);
 }
 
+RetVal tryDeepCopy(Expr *from, Expr **ptr, Error *error) {
+
+  RetVal ret;
+
+  // these get cleaned up on failure
+  Expr *to;
+  Expr *listItem;
+
+  switch (from->type) {
+
+    // atoms
+    case N_STRING:
+      throws(tryStringMake(from->string.value, from->string.length, &to, error));
+      break;
+    case N_NUMBER:
+      throws(tryNumberMake(from->number.value, &to, error));
+      break;
+    case N_SYMBOL:
+      throws(trySymbolMake(from->symbol.value, from->symbol.length, &to, error));
+      break;
+    case N_KEYWORD:
+      throws(tryKeywordMake(from->keyword.value, from->keyword.length, &to, error));
+      break;
+    case N_BOOLEAN:
+      throws(tryBooleanMake(from->boolean.value, &to, error));
+      break;
+    case N_NIL:
+      throws(tryNilMake(&to, error));
+      break;
+    case N_LIST: {
+      throws(tryListMake(&to, error));
+
+      ListElement *elem = from->list.head;
+      while (elem != NULL) {
+
+        throws(tryDeepCopy(elem->expr, &listItem, error));
+        throws(tryListAppend(&to->list, listItem, error));
+        listItem = NULL; // item is now part of list
+
+        elem = elem->next;
+      }
+    }
+
+    default:
+      throwSyntaxError(error, from->source.position, "Unknown expr type '%i'", from->type);
+  }
+
+  to->source = from->source;
+  *ptr = to;
+
+  return R_SUCCESS;
+
+  failure:
+    if (to != NULL) {
+      exprFree(to);
+    }
+    if (listItem != NULL) {
+      exprFree(listItem);
+    }
+    return ret;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

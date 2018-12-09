@@ -149,7 +149,7 @@ typedef enum FormType {
 typedef struct Form {
   FormType type;
   union {
-    Expr *constant; // TODO: deep copy these
+    Expr *constant;
     FormIf iff;
     FormLet let;
     FormEnvRef envRef;

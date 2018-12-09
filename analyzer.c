@@ -536,6 +536,22 @@ void fnCallFreeContents(FormFnCall *fnCall) {
   }
 }
 
+RetVal tryConstantAnalyze(Expr* expr, Expr *constant, Error *error) {
+
+  RetVal ret;
+
+  throws(tryDeepCopy(expr, &constant, error));
+
+  failure:
+    return ret;
+}
+
+void constantFreeContents(Expr *constant) {
+  if (constant != NULL) {
+    exprFree(constant);
+  }
+}
+
 RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Error *error) {
 
   // copy expression source metadata
@@ -552,7 +568,7 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
     case N_BOOLEAN:
     case N_NIL: {
       form->type = F_CONST;
-      form->constant = expr;
+      throws(tryConstantAnalyze(expr, form->constant, error));
       break;
     }
 
@@ -563,6 +579,7 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
       Var *var;
 
       if ((envBinding = findBinding(&analyzer->bindingStack, sym)) != NULL) {
+        // TODO: where are the form types being set?
         throws(tryEnvRefAnalyze(analyzer, expr, envBinding, &form->envRef, error));
       }
       else if ((var = resolveVar(analyzer, sym, expr->symbol.length)) != NULL) {
@@ -579,7 +596,7 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
       // empty list
       if (expr->list.length == 0) {
         form->type = F_CONST;
-        form->constant = expr;
+        throws(tryConstantAnalyze(expr, form->constant, error));
         break;
       }
 
@@ -641,7 +658,7 @@ void formFree(Form* form) {
   if (form != NULL) {
     switch (form->type) {
       case F_CONST:
-        // do nothing (FOR NOW)
+        constantFreeContents(form->constant);
         break;
       case F_IF:
         ifFreeContents(&form->iff);
@@ -670,10 +687,6 @@ void formFree(Form* form) {
     free(form);
   }
 }
-
-
-// TODO: consider a deep copy of input expressions so that you don't have to keep the original input expressions around for freeing later
-// seems like it would be tricky to handle freeing properly when two different data structures both point to the same stuff
 
 
 
