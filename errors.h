@@ -29,6 +29,9 @@ typedef struct Error {
     LexerError lexer;
   };
   wchar_t message[ERROR_MSG_LENGTH + 1];
+  const char *fileName;
+  uint64_t lineNumber;
+  const char *functionName;
 } Error;
 
 
@@ -72,6 +75,9 @@ RetVal syntaxError(Error *error, unsigned long position, char *desc);
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   ret = memoryError(error, msg); \
+  error->fileName = __FILE__; \
+  error->lineNumber = __LINE__; \
+  error->functionName = __func__; \
   goto failure; \
 }
 
@@ -80,6 +86,9 @@ RetVal syntaxError(Error *error, unsigned long position, char *desc);
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   ret = ioError(error, msg); \
+  error->fileName = __FILE__; \
+  error->lineNumber = __LINE__; \
+  error->functionName = __func__; \
   goto failure; \
 }
 
@@ -88,6 +97,9 @@ RetVal syntaxError(Error *error, unsigned long position, char *desc);
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   ret = internalError(error, msg); \
+  error->fileName = __FILE__; \
+  error->lineNumber = __LINE__; \
+  error->functionName = __func__; \
   goto failure; \
 }
 
@@ -96,6 +108,9 @@ RetVal syntaxError(Error *error, unsigned long position, char *desc);
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   ret = tokenizationError(error, pos, msg); \
+  error->fileName = __FILE__; \
+  error->lineNumber = __LINE__; \
+  error->functionName = __func__; \
   goto failure; \
 }
 
@@ -104,6 +119,9 @@ RetVal syntaxError(Error *error, unsigned long position, char *desc);
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   ret = syntaxError(error, pos, msg); \
+  error->fileName = __FILE__; \
+  error->lineNumber = __LINE__; \
+  error->functionName = __func__; \
   goto failure; \
 }
 
@@ -118,6 +136,9 @@ RetVal syntaxError(Error *error, unsigned long position, char *desc);
   var = malloc(size);\
   if (var == NULL) {\
     ret = memoryError(error, desc);\
+    error->fileName = __FILE__; \
+    error->lineNumber = __LINE__; \
+    error->functionName = __func__; \
     goto failure; \
   }\
 }

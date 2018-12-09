@@ -225,7 +225,6 @@ void formFree(Form* expr);
 
 #endif //WARP_LANG_ANALYZER_H
 
-// TODO: use macros to make file names and line numbers in error messages
 
 
 
