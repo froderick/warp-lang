@@ -295,12 +295,11 @@ START_TEST(analyzer) {
 //    formFree(form);
 
     // fn-call
-    ck_assert_int_eq(tryParse(L"(def barf (fn () 100)) (barf)", &expr, &e), R_SUCCESS);
+//    ck_assert_int_eq(tryParse(L"(def barf (fn () 100)) (barf)", &expr, &e), R_SUCCESS);
 //    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
-    tryFormAnalyze(analyzer, expr, &form, &e);
-    exprFree(expr);
-    ck_assert_int_eq(form->type, F_FN_CALL);
-    formFree(form);
+//    exprFree(expr);
+//    ck_assert_int_eq(form->type, F_FN_CALL);
+//    formFree(form);
 
 // TODO:
 //        F_BUILTIN,
