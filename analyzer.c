@@ -579,10 +579,11 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
       Var *var;
 
       if ((envBinding = findBinding(&analyzer->bindingStack, sym)) != NULL) {
-        // TODO: where are the form types being set?
+        form->type = F_ENV_REF;
         throws(tryEnvRefAnalyze(analyzer, expr, envBinding, &form->envRef, error));
       }
       else if ((var = resolveVar(analyzer, sym, expr->symbol.length)) != NULL) {
+        form->type = F_VAR_REF;
         throws(tryVarRefAnalyze(analyzer, expr, var, &form->varRef, error));
       }
       else {
@@ -605,22 +606,26 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
         wchar_t *sym = expr->list.head->expr->symbol.value;
 
         if (wcscmp(sym, L"if") == 0) {
+          form->type = F_IF;
           throws(tryIfAnalyze(analyzer, expr, &form->iff, error));
           break;
         }
 
         if (wcscmp(sym, L"let") == 0) {
+          form->type = F_LET;
           throws(tryLetAnalyze(analyzer, expr, &form->let, error));
           break;
         }
 
         if (wcscmp(sym, L"fn") == 0) {
+          form->type = F_FN;
           throws(tryFnAnalyze(analyzer, expr, &form->fn, error));
           break;
         }
       }
 
       // assume fn-callable
+      form->type = F_FN_CALL;
       throws(tryFnCallAnalyze(analyzer, expr, &form->fnCall, error));
       break;
     }
