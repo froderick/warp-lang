@@ -206,26 +206,7 @@ uint64_t getExprPosition(Expr *expr) {
 }
 
 uint64_t getFormPosition(Form *form) {
-  switch (form->type) {
-    case F_CONST:
-      return getExprPosition(form->constant);
-    case F_IF:
-      return getExprPosition(form->iff.expr);
-    case F_LET:
-      return getExprPosition(form->let.expr);
-    case F_ENV_REF:
-      return getExprPosition(form->envRef.expr);
-    case F_VAR_REF:
-      return getExprPosition(form->varRef.symbol);
-    case F_FN:
-      return getExprPosition(form->fn.expr);
-    case F_BUILTIN:
-      return getExprPosition(form->builtin.expr);
-    case F_FN_CALL:
-      return getExprPosition(form->fnCall.expr);
-    case F_NONE:
-      return 0;
-  }
+  return form->source.position;
 }
 
 /*
@@ -238,7 +219,6 @@ void ifFreeContents(FormIf *iff);
 
 RetVal tryIfAnalyze(FormAnalyzer *analyzer, Expr* ifExpr, FormIf *iff, Error *error) {
 
-  iff->expr = ifExpr;
   iff->test = NULL;
   iff->ifBranch = NULL;
   iff->elseBranch = NULL;
@@ -292,7 +272,6 @@ void letFreeContents(FormLet *let);
 
 RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error *error) {
 
-  let->expr = letExpr;
   let->numBindings = 0;
   let->bindings = NULL;
   let->numForms = 0;
@@ -315,9 +294,6 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
 
   let->numBindings = bindingsExpr->list.length / 2;
 
-  // things that get cleaned up on failure
-  Form *bindingValue;
-
   tryMalloc(let->bindings, sizeof(LexicalBinding) * let->numBindings, "LexicalBinding array");
 
   ListElement *bindingElem = bindingsExpr->list.head;
@@ -327,11 +303,12 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
       throwSyntaxError(error, pos, "only symbols can be bound as names");
     }
 
-    throws(tryFormAnalyze(analyzer, bindingElem->next->expr, &bindingValue, error));
+    LexicalBinding *b = let->bindings + i;
+    b->nameLength = bindingElem->expr->symbol.length;
+    b->source = bindingElem->expr->source;
 
-    let->bindings[i].symbol = bindingElem->expr;
-    let->bindings[i].value = bindingValue;
-    bindingValue = NULL; // now part of bindings
+    throws(tryCopyText(bindingElem->expr->symbol.value, &b->name, b->nameLength, error));
+    throws(tryFormAnalyze(analyzer, bindingElem->next->expr, &b->value, error));
 
     bindingElem = bindingElem->next->next;
   }
@@ -349,9 +326,6 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
   return R_SUCCESS;
 
   failure:
-    if (bindingValue != NULL) {
-      formFree(bindingValue);
-    }
     letFreeContents(let);
     return ret;
 }
@@ -361,8 +335,12 @@ void letFreeContents(FormLet *let) {
     if (let->bindings != NULL) {
       for (int i=0; i<let->numBindings; i++) {
         LexicalBinding *b = let->bindings + i;
-        // don't need to free symbol
-        formFree(b->value);
+        if (b->name != NULL) {
+          free(b->name);
+        }
+        if (b->value != NULL) {
+          formFree(b->value);
+        }
       }
       free(let->bindings);
       let->bindings = NULL;
@@ -385,7 +363,6 @@ RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, FormFn *fn, Error *err
 
   RetVal ret;
 
-  fn->expr = fnExpr;
   fn->numForms = 0;
   fn->args = NULL;
   fn->numForms = 0;
@@ -412,11 +389,11 @@ RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, FormFn *fn, Error *err
     }
 
     FormFnArg *arg = fn->args + i;
-    arg->expr = argElem->expr;
-    arg->nameLength = arg->expr->symbol.length;
+    arg->nameLength = argElem->expr->symbol.length;
     arg->name = NULL;
+    arg->source = argElem->expr->source;
 
-    throws(tryCopyText(arg->expr->symbol.value, &arg->name, arg->nameLength, error));
+    throws(tryCopyText(argElem->expr->symbol.value, &arg->name, arg->nameLength, error));
 
     argElem = argElem->next;
   }
@@ -465,7 +442,6 @@ void fnFreeContents(FormFn *fn) {
 
 RetVal tryEnvRefAnalyze(FormAnalyzer *analyzer, Expr *expr, EnvBinding *binding, FormEnvRef *envRef, Error *error) {
 
-  envRef->expr = expr;
   envRef->type = binding->type;
   envRef->index = binding->index;
 
@@ -523,8 +499,6 @@ RetVal tryFnCallAnalyze(FormAnalyzer *analyzer, Expr *expr, FormFnCall *fnCall, 
 
   RetVal ret;
 
-  fnCall->expr = expr;
-
   throws(tryFormAnalyze(analyzer, expr->list.head->expr, &fnCall->fnCallable, error));
   throws(assertFnCallable(fnCall->fnCallable, error));
 
@@ -563,6 +537,9 @@ void fnCallFreeContents(FormFnCall *fnCall) {
 }
 
 RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Error *error) {
+
+  // copy expression source metadata
+  form->source = expr->source;
 
   RetVal ret;
 

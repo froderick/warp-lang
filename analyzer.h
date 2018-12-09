@@ -70,19 +70,19 @@ typedef struct Form Form;
 typedef struct Var Var;
 
 typedef struct FormIf {
-  Expr *expr;
   Form *test;
   Form *ifBranch;
   Form *elseBranch;
 } FormIf;
 
 typedef struct LexicalBinding {
-  Expr *symbol;
+  wchar_t *name;
+  uint64_t nameLength;
+  SourceLocation source;
   Form *value;
 } LexicalBinding;
 
 typedef struct FormLet {
-  Expr *expr;
   LexicalBinding *bindings;
   uint64_t numBindings;
   Form *forms;
@@ -99,22 +99,19 @@ typedef enum FormEnvRefType {
 typedef struct FormEnvRef {
   FormEnvRefType type;
   uint64_t index;
-  Expr *expr;
 } FormEnvRef;
 
 typedef struct FormVarRef {
-  Expr *symbol;
   Var *var;
 } FormVarRef;
 
 typedef struct FormFnArg {
   wchar_t *name;
   uint64_t nameLength;
-  Expr *expr;
+  SourceLocation source;
 } FormFnArg;
 
 typedef struct FormFn {
-  Expr *expr;
   FormFnArg *args;
   uint64_t numArgs;
   Form *forms;
@@ -122,7 +119,6 @@ typedef struct FormFn {
 } FormFn;
 
 typedef struct FormFnCall {
-  Expr *expr;
   Form *fnCallable;
   Form *args;
   uint64_t numArgs;
@@ -133,7 +129,6 @@ typedef enum FormBuiltinType {
 } FormBuiltinType;
 
 typedef struct FormBuiltin {
-  Expr *expr;
   wchar_t* name;
   Form *args;
   uint64_t numArgs;
@@ -154,9 +149,7 @@ typedef enum FormType {
 typedef struct Form {
   FormType type;
   union {
-    // TODO: Expr is not a good name here, since they don't really get evaluated.
     Expr *constant; // TODO: deep copy these
-    // TODO: high-level forms should not retain references to expressions or tokens at all
     FormIf iff;
     FormLet let;
     FormEnvRef envRef;
@@ -165,6 +158,7 @@ typedef struct Form {
     FormFnCall fnCall;
     FormBuiltin builtin;
   };
+  SourceLocation source;
 } Form;
 
 typedef struct Var {
@@ -179,7 +173,6 @@ typedef struct Namespace {
   uint64_t numLocalVars;
   Var *importedVars;
   uint64_t numImportedVars;
-
 } Namespace;
 
 
