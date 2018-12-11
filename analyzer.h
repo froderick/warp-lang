@@ -107,6 +107,9 @@ typedef enum FormEnvRefType {
 
 // TODO: in the call stack, these fields don't really tell you much about this
 // binding other than that it exists, and how it was defined. is this enough?
+// --
+// also, the captured type isn't terribly helpful, since that isn't a property
+// of the environment, but rather a property of the reference itself
 typedef struct FormEnvRef {
   FormEnvRefType type;
   uint64_t index;
