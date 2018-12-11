@@ -426,8 +426,8 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
     throwSyntaxError(error, pos, "the 'let' special form requires the first parameter to be a list with an even number of arguments");
   }
 
+  // create the bindings
   let->numBindings = bindingsExpr->list.length / 2;
-
   tryMalloc(let->bindings, sizeof(LexicalBinding) * let->numBindings, "LexicalBinding array");
 
   ListElement *bindingElem = bindingsExpr->list.head;
@@ -447,23 +447,22 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
     bindingElem = bindingElem->next->next;
   }
 
-  let->numForms = letExpr->list.length - 2;
+  // register the bindings in the environment stack
+  throws(tryScopeMake(let->numBindings, &scope, error));
 
-  tryMalloc(let->forms, sizeof(Form) * let->numForms, "Forms array");
-
-  {
-    throws(tryScopeMake(let->numBindings, &scope, error));
-
-    for (uint64_t i=0; i<let->numBindings; i++) {
-      scope->bindings[i].nameLength = let->bindings[i].nameLength;
-      throws(tryCopyText(let->bindings[i].name, &scope->bindings[i].name, scope->bindings[i].nameLength, error));
-      scope->bindings[i].type = RT_LOCAL;
-      scope->bindings[i].index = i;
-    }
-
-    pushScope(&analyzer->bindingStack, scope);
-    scopePushed = true;
+  for (uint64_t i=0; i<let->numBindings; i++) {
+    scope->bindings[i].nameLength = let->bindings[i].nameLength;
+    throws(tryCopyText(let->bindings[i].name, &scope->bindings[i].name, scope->bindings[i].nameLength, error));
+    scope->bindings[i].type = RT_LOCAL;
+    scope->bindings[i].index = i;
   }
+
+  pushScope(&analyzer->bindingStack, scope);
+  scopePushed = true;
+
+  // create the forms within this lexical scope
+  let->numForms = letExpr->list.length - 2;
+  tryMalloc(let->forms, sizeof(Form) * let->numForms, "Forms array");
 
   Expr *expr = letExpr->list.head->next->next->expr;
   for (int i=0; i<let->numForms; i++) {
@@ -471,6 +470,7 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
     throws(tryFormAnalyzeContents(analyzer, expr, thisForm, error));
   }
 
+  // discard the registered bindings from the environment stack
   popScope(&analyzer->bindingStack);
   scopeFree(scope);
 
@@ -573,6 +573,10 @@ RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, FormFn *fn, Error *err
 
   RetVal ret;
 
+  // things that get cleaned up on failure
+  EnvBindingScope *scope = NULL;
+  bool scopePushed = false;
+
   fn->numForms = 0;
   fn->args = NULL;
   fn->numForms = 0;
@@ -588,7 +592,8 @@ RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, FormFn *fn, Error *err
     throwSyntaxError(error, pos, "the 'fn' special form requires the first parameter to be a list");
   }
 
-  fn->numArgs = fnExpr->list.length;
+  // create the arguments
+  fn->numArgs = argsExpr->list.length;
   tryMalloc(fn->args, sizeof(FormFnArg) * fn->numArgs, "FormFnArg array");
 
   ListElement *argElem = argsExpr->list.head;
@@ -608,6 +613,20 @@ RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, FormFn *fn, Error *err
     argElem = argElem->next;
   }
 
+  // register the arguments in the environment stack
+  throws(tryScopeMake(fn->numArgs, &scope, error));
+
+  for (uint64_t i=0; i<fn->numArgs; i++) {
+    scope->bindings[i].nameLength = fn->args[i].nameLength;
+    throws(tryCopyText(fn->args[i].name, &scope->bindings[i].name, scope->bindings[i].nameLength, error));
+    scope->bindings[i].type = RT_ARG;
+    scope->bindings[i].index = i;
+  }
+
+  pushScope(&analyzer->bindingStack, scope);
+  scopePushed = true;
+
+  // create the forms within this lexical scope
   fn->numForms = fnExpr->list.length - 2;
   tryMalloc(fn->forms, sizeof(Form) * fn->numForms, "Forms array");
 
@@ -617,10 +636,20 @@ RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, FormFn *fn, Error *err
     throws(tryFormAnalyzeContents(analyzer, expr, thisForm, error));
   }
 
+  // discard the registered arguments from the environment stack
+  popScope(&analyzer->bindingStack);
+  scopeFree(scope);
+
   return R_SUCCESS;
 
   failure:
     fnFreeContents(fn);
+    if (scope != NULL) {
+      scopeFree(scope);
+    }
+    if (scopePushed) {
+      popScope(&analyzer->bindingStack);
+    }
     return ret;
 }
 

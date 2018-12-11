@@ -290,20 +290,30 @@ START_TEST(analyzer) {
     ck_assert_int_eq(form->type, F_VAR_REF);
     formFree(form);
 
-    // fn
-    ck_assert_int_eq(tryParse(L"(fn (a b c) false)", &expr, &e), R_SUCCESS);
+    // fn with args
+    ck_assert_int_eq(tryParse(L"(fn (a b c) a)", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_FN);
+    ck_assert_int_eq(form->fn.forms[0].type, F_ENV_REF);
+    ck_assert_int_eq(form->fn.forms[0].envRef.index, 0);
+    ck_assert_int_eq(form->fn.forms[0].envRef.type, RT_ARG);
     formFree(form);
 
-
     // fn-call
-//    ck_assert_int_eq(tryParse(L"(def barf (fn () 100)) (barf)", &expr, &e), R_SUCCESS);
-//    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
-//    exprFree(expr);
-//    ck_assert_int_eq(form->type, F_FN_CALL);
-//    formFree(form);
+    ck_assert_int_eq(tryParse(L"(def barf (fn () 100))", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    exprFree(expr);
+    ck_assert_int_eq(form->type, F_DEF);
+    formFree(form);
+
+    ck_assert_int_eq(tryParse(L"(barf)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    exprFree(expr);
+    ck_assert_int_eq(form->type, F_FN_CALL);
+    ck_assert_int_eq(form->fnCall.fnCallable->type , F_VAR_REF);
+    ck_assert_int_eq(form->fnCall.fnCallable->varRef.var->value->type, F_FN);
+    formFree(form);
 
 // TODO:
 //        F_BUILTIN,

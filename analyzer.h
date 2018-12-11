@@ -105,6 +105,8 @@ typedef enum FormEnvRefType {
   RT_RT_CAPTURED  // a captured variable from the surrounding lexical context
 } FormEnvRefType;
 
+// TODO: in the call stack, these fields don't really tell you much about this
+// binding other than that it exists, and how it was defined. is this enough?
 typedef struct FormEnvRef {
   FormEnvRefType type;
   uint64_t index;
