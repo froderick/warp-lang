@@ -266,6 +266,16 @@ START_TEST(analyzer) {
     ck_assert_int_eq(form->type, F_LET);
     formFree(form);
 
+    // env-ref
+    ck_assert_int_eq(tryParse(L"(let (a nil) a)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    exprFree(expr);
+    ck_assert_int_eq(form->type, F_LET);
+    ck_assert_int_eq(form->let.forms[0].type, F_ENV_REF);
+    ck_assert_int_eq(form->let.forms[0].envRef.index, 0);
+    ck_assert_int_eq(form->let.forms[0].envRef.type, RT_LOCAL);
+    formFree(form);
+
     // def
     ck_assert_int_eq(tryParse(L"(def money 100)", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
@@ -273,19 +283,12 @@ START_TEST(analyzer) {
     ck_assert_int_eq(form->type, F_DEF);
     formFree(form);
 
-    // env-ref
-//    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
-//    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
-//    exprFree(expr);
-//    ck_assert_int_eq(form->type, F_ENV_REF);
-//    formFree(form);
-
     // var-ref
-//    ck_assert_int_eq(tryParse(L"", &expr, &e), R_SUCCESS);
-//    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
-//    exprFree(expr);
-//    ck_assert_int_eq(form->type, F_VAR_REF);
-//    formFree(form);
+    ck_assert_int_eq(tryParse(L"money", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    exprFree(expr);
+    ck_assert_int_eq(form->type, F_VAR_REF);
+    formFree(form);
 
     // fn
     ck_assert_int_eq(tryParse(L"(fn (a b c) false)", &expr, &e), R_SUCCESS);

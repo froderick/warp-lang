@@ -180,9 +180,9 @@ RetVal tryDefVar(FormAnalyzer *analyzer, wchar_t *symbolName, uint64_t symbolNam
 }
 
 
-void freeScope(EnvBindingScope *scope);
+void scopeFree(EnvBindingScope *scope);
 
-RetVal tryMakeScope(uint64_t numBindings, EnvBindingScope **ptr, Error *error) {
+RetVal tryScopeMake(uint64_t numBindings, EnvBindingScope **ptr, Error *error) {
 
   RetVal ret;
 
@@ -207,11 +207,11 @@ RetVal tryMakeScope(uint64_t numBindings, EnvBindingScope **ptr, Error *error) {
   return R_SUCCESS;
 
   failure:
-  freeScope(scope);
+  scopeFree(scope);
   return ret;
 }
 
-void freeBindingContents(EnvBinding *binding) {
+void bindingFreeContents(EnvBinding *binding) {
   if (binding != NULL) {
     if (binding->name != NULL) {
       free(binding->name);
@@ -220,11 +220,11 @@ void freeBindingContents(EnvBinding *binding) {
   }
 }
 
-void freeScope(EnvBindingScope *scope) {
+void scopeFree(EnvBindingScope *scope) {
   if (scope != NULL) {
     if (scope->bindings != NULL) {
       for (int i=0; i<scope->numBindings; i++) {
-        freeBindingContents(scope->bindings + i);
+        bindingFreeContents(scope->bindings + i);
       }
       free(scope->bindings);
     }
@@ -409,6 +409,10 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
 
   RetVal ret;
 
+  // things that get cleaned up on failure
+  EnvBindingScope *scope = NULL;
+  bool scopePushed = false;
+
   // sanity checking
   uint64_t pos = getExprPosition(letExpr);
   if (letExpr->list.length < 2) {
@@ -447,16 +451,39 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
 
   tryMalloc(let->forms, sizeof(Form) * let->numForms, "Forms array");
 
+  {
+    throws(tryScopeMake(let->numBindings, &scope, error));
+
+    for (uint64_t i=0; i<let->numBindings; i++) {
+      scope->bindings[i].nameLength = let->bindings[i].nameLength;
+      throws(tryCopyText(let->bindings[i].name, &scope->bindings[i].name, scope->bindings[i].nameLength, error));
+      scope->bindings[i].type = RT_LOCAL;
+      scope->bindings[i].index = i;
+    }
+
+    pushScope(&analyzer->bindingStack, scope);
+    scopePushed = true;
+  }
+
   Expr *expr = letExpr->list.head->next->next->expr;
   for (int i=0; i<let->numForms; i++) {
     Form *thisForm = let->forms + i;
     throws(tryFormAnalyzeContents(analyzer, expr, thisForm, error));
   }
 
+  popScope(&analyzer->bindingStack);
+  scopeFree(scope);
+
   return R_SUCCESS;
 
   failure:
     letFreeContents(let);
+    if (scope != NULL) {
+      scopeFree(scope);
+    }
+    if (scopePushed) {
+      popScope(&analyzer->bindingStack);
+    }
     return ret;
 }
 
