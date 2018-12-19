@@ -1529,6 +1529,68 @@ RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error) {
     return ret;
 }
 
+RetVal tryExprPrn(Expr* expr, FILE *file, Error *error) {
+
+  // TODO: allocate an expanding buffer, print into that, copy it into a malloced string, free the buffer, return the malloced string
+  // consider writing a twin to stream source called something like 'output stream' that can let you write to an abstraction
+
+  RetVal ret;
+
+  switch (expr->type) {
+
+    // atoms
+    case N_STRING:
+      printf("\"%ls\"", expr->string.value);
+      break;
+    case N_NUMBER:
+      printf("%llu", expr->number.value);
+      break;
+    case N_SYMBOL:
+      printf("%ls", expr->symbol.value);
+      break;
+    case N_KEYWORD:
+      printf(":%ls", expr->keyword.value);
+      break;
+    case N_BOOLEAN: {
+      char *val;
+      if (expr->boolean.value) {
+        val = "true";
+      } else {
+        val = "false";
+      }
+      printf("%s", val);
+      break;
+    }
+    case N_NIL:
+      printf("nil");
+      break;
+    case N_LIST: {
+      printf("(");
+      ListElement *elem = expr->list.head;
+      for (int i=0; i<expr->list.length; i++) {
+
+        throws(tryExprPrn(elem->expr, file, error));
+
+        if (i + 1 < expr->list.length) {
+          printf(" ");
+        }
+
+        elem = elem->next;
+      }
+      printf(")");
+      break;
+    }
+
+    default:
+      throwSyntaxError(error, expr->source.position, "Unknown expr type '%i'", expr->type);
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 
 
 

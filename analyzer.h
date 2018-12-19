@@ -130,6 +130,11 @@ typedef struct FormFn {
   uint64_t numArgs;
   Form *forms;
   uint64_t numForms;
+
+  // TODO: things to consider implementing in the analysis phase
+  uint64_t numLocals;
+  bool tailRecursive;
+
 } FormFn;
 
 typedef struct FormFnCall {
@@ -173,6 +178,7 @@ typedef struct Form {
     FormFn fn;
     FormFnCall fnCall;
     FormBuiltin builtin;
+    // TODO: need to support 'ns' special form
   };
   SourceLocation source;
 } Form;
@@ -195,14 +201,6 @@ typedef struct Namespace {
   Var *importedVars;
   uint64_t numImportedVars;
 } Namespace;
-
-
-/*
- * I need a way to track the symbols that are currently in scope, lexically speaking.
- * I could use a stack for this, where each element in the stack is an array of environment
- * bindings. Each binding would contain the symbol name, as well as what. Not sure.
- * But I can start by tracking them and figure that out later.
- */
 
 typedef struct EnvBinding {
   wchar_t *name;
@@ -240,6 +238,8 @@ void formFree(Form* expr);
 // TODO: when a function definition captures values from its lexical scope, those values are copied from their
 // lexical scope into the function object itself. So the compiler needs a way to figure out how to generate
 // code that copies these values whenever they are captured.
+
+RetVal formPrn(Form* form, FILE *file, Error *error);
 
 #endif //WARP_LANG_ANALYZER_H
 

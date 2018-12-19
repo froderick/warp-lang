@@ -129,4 +129,6 @@ void exprFree(Expr *expr);
 
 RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error);
 
+RetVal tryExprPrn(Expr* expr, FILE *file, Error *error);
+
 #endif //WARP_LANG_READER_H

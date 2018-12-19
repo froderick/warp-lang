@@ -236,6 +236,23 @@ RetVal tryParse(wchar_t *input, Expr **ptr, Error *error) {
     return ret;
 }
 
+START_TEST(exprPrn)
+  {
+
+    Error e;
+    FormAnalyzer *analyzer;
+    Expr *expr;
+
+    ck_assert_int_eq(tryAnalyzerMake(&analyzer, &e), R_SUCCESS);
+
+    // constant
+    ck_assert_int_eq(tryParse(L"(himom () '(one :two 102 nil true false) \"str\")", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprPrn(expr, stdin, &e), R_SUCCESS);
+    printf("\n");
+    exprFree(expr);
+  }
+END_TEST
+
 START_TEST(analyzer) {
 
     Error e;
@@ -328,6 +345,7 @@ Suite * suite(void) {
   tcase_add_test(tc_core, eof_mid_number_token);
   tcase_add_test(tc_core, errors);
   tcase_add_test(tc_core, parser);
+  tcase_add_test(tc_core, exprPrn);
   tcase_add_test(tc_core, analyzer);
 
   Suite *s = suite_create("lexer");

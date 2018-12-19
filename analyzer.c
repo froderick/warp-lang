@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "analyzer.h"
 #include "utils.h"
@@ -1073,32 +1074,5 @@ RetVal tryFormDeepCopy(Form *from, Form **ptr, Error *error) {
     }
     return ret;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
