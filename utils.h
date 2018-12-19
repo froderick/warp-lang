@@ -37,4 +37,28 @@ RetVal tryInputStreamUnreadChar(InputStream_t input, wchar_t ch, Error *error);
 RetVal tryFileInputStreamMake(FILE *file, InputStream_t *s, Error *error);
 RetVal tryStringInputStreamMake(wchar_t *text, uint64_t length, InputStream_t *s, Error *error);
 
+typedef struct OutputStream *OutputStream_t;
+
+RetVal tryOutputStreamMake(
+    void *state,
+    RetVal (*writeWString)(void *state, wchar_t *ch, Error *error),
+    RetVal (*flush)(void *state, Error *error),
+    RetVal (*close)(void *state, Error *error),
+    RetVal (*freeState)(void *state, Error *error),
+    InputStream_t *ptr,
+    Error *error
+);
+RetVal tryOutputStreamFree(InputStream_t input, Error *error);
+
+// supported operations
+RetVal tryOutputStreamWriteWString(OutputStream_t output, wchar_t* ch, Error *error);
+RetVal tryOutputStreamFlush(OutputStream_t output, Error *error);
+RetVal tryOutputStreamClose(OutputStream_t output, Error *error);
+
+// source factories
+RetVal tryFileOutputStreamMake(FILE *file, OutputStream_t output, Error *error);
+RetVal tryStringOutputStreamMake(wchar_t *text, uint64_t length, OutputStream_t output, Error *error);
+
 #endif //WARP_LANG_UTILS_H
+
+
