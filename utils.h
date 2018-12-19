@@ -39,6 +39,7 @@ RetVal tryStringInputStreamMake(wchar_t *text, uint64_t length, InputStream_t *s
 
 typedef struct OutputStream *OutputStream_t;
 
+// TODO: implement this so *prn can use it for printing exprs and forms
 RetVal tryOutputStreamMake(
     void *state,
     RetVal (*writeWString)(void *state, wchar_t *ch, Error *error),
