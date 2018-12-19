@@ -11,4 +11,8 @@
  * macros, and load them into the VM as it discovers them. Every form gets macro-expanded as a part of compilation.
  * When the compiler encounters a reference to a macro, it could take the arguments and feed them into a call to the
  * compiled macro inside the VM, and then use the result for compilation.
+ *
+ * TODO: think about this: one of the benefits of this model is that it allows us to handle resolving Vars with
+ * // the actual virtual machine itself, rather than having to duplicate this in the compiler/analyzer itself.
+ * // of course, this suggests that the var resolution should perhaps not be done in the analyzer at all...
  */

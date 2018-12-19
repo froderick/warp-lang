@@ -8,6 +8,10 @@
 #include "errors.h"
 #include "utils.h"
 
+// TODO: I'm not sure there is any value in exposing tokens in this api at all...
+// consider just pulling this inside the reader, and having read() just take
+// an InputStream...
+
 typedef enum TokenType {
   T_NONE,
   T_OPAREN,
@@ -21,7 +25,6 @@ typedef enum TokenType {
   T_FALSE,
   T_NIL
 } TokenType;
-
 
 typedef struct SourceLocation {
   bool isSet;
