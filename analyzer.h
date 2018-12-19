@@ -116,7 +116,7 @@ typedef struct FormEnvRef {
 } FormEnvRef;
 
 typedef struct FormVarRef {
-  Var *var;
+  Var *var; // TODO: make this just the symbol name, no Var reference here... this needs to get moved into the compiler/vm
 } FormVarRef;
 
 typedef struct FormFnArg {

@@ -15,4 +15,6 @@
  * TODO: think about this: one of the benefits of this model is that it allows us to handle resolving Vars with
  * // the actual virtual machine itself, rather than having to duplicate this in the compiler/analyzer itself.
  * // of course, this suggests that the var resolution should perhaps not be done in the analyzer at all...
+ * // rather, the VarRef can just be the name of the symbol, unqualified. the compiler can inspect the symbols in
+ * // the namespaces and do compile-time resolution based on what it finds in the virtual machine.
  */
