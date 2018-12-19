@@ -23,8 +23,8 @@ START_TEST(basic) {
 
   Error e;
 
-  StreamSource_t source;
-  ck_assert_int_eq(trySourceMakeString(text, wcslen(text), &source, &e), R_SUCCESS);
+  InputStream_t source;
+  ck_assert_int_eq(tryStringInputStreamMake(text, wcslen(text), &source, &e), R_SUCCESS);
 
   TokenStream_t stream;
   ck_assert_int_eq(tryStreamMake(source, &stream, &e), R_SUCCESS);
@@ -84,8 +84,8 @@ START_TEST(eof_mid_number_token) {
 
     Error e;
 
-    StreamSource_t source;
-    ck_assert_int_eq(trySourceMakeString(text, wcslen(text), &source, &e), R_SUCCESS);
+    InputStream_t source;
+    ck_assert_int_eq(tryStringInputStreamMake(text, wcslen(text), &source, &e), R_SUCCESS);
 
     TokenStream_t stream;
     ck_assert_int_eq(tryStreamMake(source, &stream, &e), R_SUCCESS);
@@ -109,8 +109,8 @@ START_TEST(errors) {
 
     Error e;
 
-    StreamSource_t source;
-    ck_assert_int_eq(trySourceMakeString(text, wcslen(text), &source, &e), R_SUCCESS);
+    InputStream_t source;
+    ck_assert_int_eq(tryStringInputStreamMake(text, wcslen(text), &source, &e), R_SUCCESS);
 
     TokenStream_t stream;
     ck_assert_int_eq(tryStreamMake(source, &stream, &e), R_SUCCESS);
@@ -134,11 +134,11 @@ START_TEST(parser) {
     wchar_t* input = L"\"str\" 102 \n himom :rocks true nil (true false) 'nil";
 
     Error e;
-    StreamSource_t source;
+    InputStream_t source;
     TokenStream_t stream;
     Expr *expr;
 
-    ck_assert_int_eq(trySourceMakeString(input, wcslen(input), &source, &e), R_SUCCESS);
+    ck_assert_int_eq(tryStringInputStreamMake(input, wcslen(input), &source, &e), R_SUCCESS);
     ck_assert_int_eq(tryStreamMake(source, &stream, &e), R_SUCCESS);
 
     // string
@@ -218,11 +218,11 @@ RetVal tryParse(wchar_t *input, Expr **ptr, Error *error) {
 
   RetVal ret;
 
-  StreamSource_t source;
+  InputStream_t source;
   TokenStream_t stream;
   Expr *expr;
 
-  throws(trySourceMakeString(input, wcslen(input), &source, error));
+  throws(tryStringInputStreamMake(input, wcslen(input), &source, error));
   throws(tryStreamMake(source, &stream, error));
 
   throws(tryExprRead(stream, &expr, error));

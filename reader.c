@@ -10,188 +10,6 @@
 #include "utils.h"
 #include "reader.h"
 
-/*
- * Lexer input source abstraction.
- *
- * Mainly did this because not all operating systems have the builtin concept
- * of a 'string stream' (looking at you, MacOS).
- */
-
-typedef struct StreamSource {
-  void *state;
-  RetVal (*readChar)(void *state, wchar_t *ch, Error *error);
-  RetVal (*unreadChar)(void * state, wchar_t ch, Error *error);
-  RetVal (*freeState)(void *state, Error *error);
-} StreamSource;
-
-RetVal trySourceMake(
-    void *state,
-    RetVal (*readChar)(void *state, wchar_t *ch, Error *error),
-    RetVal (*unreadChar)(void * state, wchar_t ch, Error *error),
-    RetVal (*freeState)(void *state, Error *error),
-    StreamSource **ptr,
-    Error *error) {
-
-  StreamSource *s;
-
-  if (NULL == (s = malloc(sizeof(StreamSource)))) {
-    return memoryError(error, "malloc StreamSource");
-  }
-
-  s->state = state;
-  s->readChar = readChar;
-  s->unreadChar = unreadChar;
-  s->freeState = freeState;
-
-  *ptr = s;
-  return R_SUCCESS;
-}
-
-RetVal tryReadCharFromFILE(void *state, wchar_t* ch, Error *error) {
-
-  FILE *stream = (FILE*)state;
-
-  *ch = fgetwc(stream);
-  if (*ch == WEOF) {
-    if (feof(stream)) {
-      return R_EOF;
-    }
-    else {
-      return ioError(error, "read token from stream");
-    }
-  }
-  return R_SUCCESS;
-}
-
-RetVal tryUnreadCharToFILE(void *state, wchar_t ch, Error *error) {
-
-  FILE *stream = (FILE*)state;
-
-  wint_t result = ungetwc(ch, stream);
-  if (result == WEOF) {
-    return ioError(error, "push character back onto stream");
-  }
-  return R_SUCCESS;
-}
-
-RetVal tryFreeFILE(void *state, Error *error) {
-
-  FILE *stream = (FILE*)state;
-
-  if (stream != NULL && fclose(stream)) {
-    return ioError(error, "closing stream on free");
-  }
-  return R_SUCCESS;
-}
-
-RetVal trySourceMakeFile(FILE *file, StreamSource **s, Error *error) {
-  return trySourceMake(
-      file,
-      tryReadCharFromFILE,
-      tryUnreadCharToFILE,
-      tryFreeFILE,
-      s,
-      error);
-}
-
-RetVal trySourceMakeFilename(char *filename, StreamSource **s, Error *error) {
-
-  FILE *file;
-
-  file = fopen(filename, "r");
-  if (file == NULL) {
-    return ioError(error, "making stream from file");
-  }
-
-  if (trySourceMakeFile(file, s, error) != R_SUCCESS) {
-    if (!fclose(file)) {
-      return ioError(error, "closing file stream");
-    }
-    return R_ERROR;
-  }
-
-  return R_SUCCESS;
-}
-
-typedef struct StringStream {
-  wchar_t* text;
-  uint64_t length;
-  uint64_t next;
-} StringStream;
-
-RetVal tryReadCharFromString(void *state, wchar_t* ch, Error *error) {
-
-  StringStream *stream = (StringStream*)state;
-
-  if (stream->next == stream->length) {
-    return R_EOF;
-  }
-
-  *ch = stream->text[stream->next];
-  stream->next = stream->next + 1;
-  return R_SUCCESS;
-}
-
-RetVal tryUnreadCharToString(void *state, wchar_t ch, Error *error) {
-
-  StringStream *stream = (StringStream*)state;
-
-  if (stream->next > 0) {
-    stream->next = stream->next - 1;
-  }
-
-  return R_SUCCESS;
-}
-
-RetVal tryFreeString(void *state, Error *error) {
-  StringStream *stream = (StringStream*)state;
-  free(stream);
-  return R_SUCCESS;
-}
-
-RetVal trySourceMakeString(wchar_t* text, uint64_t length, StreamSource_t *s, Error *error) {
-
-  StringStream *state;
-
-  if (NULL == (state = malloc(sizeof(StringStream)))) {
-    return memoryError(error, "malloc StringStream");
-  }
-
-  state->text = text;
-  state->length = length;
-  state->next = 0;
-
-  return trySourceMake(
-      (void*)state,
-      tryReadCharFromString,
-      tryUnreadCharToString,
-      tryFreeString,
-      s,
-      error);
-}
-
-RetVal trySourceReadChar(StreamSource *source, wchar_t* ch, Error *error) {
-  return source->readChar(source->state, ch, error);
-}
-
-RetVal trySourceUnreadChar(StreamSource *source, wchar_t ch, Error *error) {
-  return source->unreadChar(source->state, ch, error);
-}
-
-RetVal trySourceFree(StreamSource *s, Error *error) {
-
-  int freeSuccess = R_SUCCESS;
-  if (s->freeState != NULL) {
-    freeSuccess = s->freeState(s->state, error);
-  }
-  free(s);
-
-  if (freeSuccess != R_SUCCESS) {
-    return R_ERROR;
-  }
-
-  return R_SUCCESS;
-}
 
 /*
  * Auto-expanding string buffer implementation.
@@ -382,7 +200,7 @@ bool isNewline(wchar_t ch) {
   return ch == L'\n';
 }
 
-RetVal tryReadString(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
+RetVal tryReadString(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
   if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
     return R_ERROR;
@@ -395,7 +213,7 @@ RetVal tryReadString(StreamSource *source, LexerState *s, wchar_t first, Token *
   wint_t ch;
   do {
 
-    int read = trySourceReadChar(source, &ch, error);
+    int read = tryInputStreamReadChar(source, &ch, error);
     if (read == R_ERROR) {
       return R_ERROR;
     }
@@ -424,7 +242,7 @@ RetVal tryReadString(StreamSource *source, LexerState *s, wchar_t first, Token *
   return R_SUCCESS;
 }
 
-RetVal tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
+RetVal tryReadNumber(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
   if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
     return R_ERROR;
@@ -436,7 +254,7 @@ RetVal tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token *
   wint_t ch;
   do {
 
-    int read = trySourceReadChar(source, &ch, error);
+    int read = tryInputStreamReadChar(source, &ch, error);
     if (read == R_ERROR) {
       return R_ERROR;
     }
@@ -445,7 +263,7 @@ RetVal tryReadNumber(StreamSource *source, LexerState *s, wchar_t first, Token *
       matched = false;
     }
     else if (!iswdigit(ch)) {
-      if (trySourceUnreadChar(source, ch, error) != R_SUCCESS) {
+      if (tryInputStreamUnreadChar(source, ch, error) != R_SUCCESS) {
         return R_ERROR;
       }
       matched = false;
@@ -478,7 +296,7 @@ bool isFalse(wchar_t *text) {
   return wcscmp(text, L"false") == 0;
 }
 
-RetVal tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
+RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
   if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
     return R_ERROR;
@@ -491,7 +309,7 @@ RetVal tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token *
   wint_t ch;
   do {
 
-    int read = trySourceReadChar(source, &ch, error);
+    int read = tryInputStreamReadChar(source, &ch, error);
     if (read == R_ERROR) {
       return R_ERROR;
     }
@@ -500,7 +318,7 @@ RetVal tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token *
       matched = false;
     }
     else if (!iswalnum(ch)) {
-      if (trySourceUnreadChar(source, ch, error) != R_SUCCESS) {
+      if (tryInputStreamUnreadChar(source, ch, error) != R_SUCCESS) {
         return R_ERROR;
       }
       matched = false;
@@ -537,7 +355,7 @@ RetVal tryReadSymbol(StreamSource *source, LexerState *s, wchar_t first, Token *
   return R_SUCCESS;
 }
 
-RetVal tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token **token, Error *error) {
+RetVal tryReadKeyword(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
   if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
     return R_ERROR;
@@ -549,7 +367,7 @@ RetVal tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token 
   wint_t ch;
   do {
 
-    int read = trySourceReadChar(source, &ch, error);
+    int read = tryInputStreamReadChar(source, &ch, error);
     if (read == R_ERROR) {
       return R_ERROR;
     }
@@ -558,7 +376,7 @@ RetVal tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token 
       matched = false;
     }
     else if (!iswalnum(ch)) {
-      if (trySourceUnreadChar(source, ch, error) != R_SUCCESS) {
+      if (tryInputStreamUnreadChar(source, ch, error) != R_SUCCESS) {
         return R_ERROR;
       }
       matched = false;
@@ -583,14 +401,14 @@ RetVal tryReadKeyword(StreamSource *source, LexerState *s, wchar_t first, Token 
   return R_SUCCESS;
 }
 
-RetVal tryTokenRead(StreamSource *source, LexerState *s, Token **token, Error *error) {
+RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *error) {
 
   bufferClear(s->b);
 
   wint_t ch;
 
   while (true) {
-    int read = trySourceReadChar(source, &ch, error);
+    int read = tryInputStreamReadChar(source, &ch, error);
     if (read != R_SUCCESS) {
       return read;
     }
@@ -670,12 +488,12 @@ RetVal tryTokenRead(StreamSource *source, LexerState *s, Token **token, Error *e
  */
 
 typedef struct TokenStream {
-  StreamSource *source;
+  InputStream_t source;
   LexerState *lexer;
   Token* next;
 } TokenStream;
 
-RetVal tryStreamMake(StreamSource *source, TokenStream **ptr, Error *error) {
+RetVal tryStreamMake(InputStream_t source, TokenStream **ptr, Error *error) {
 
   LexerState *l;
   TokenStream *s;
@@ -760,7 +578,7 @@ RetVal tryStreamFree(TokenStream *s, Error *error) {
     return R_SUCCESS;
   }
 
-  int closeError = trySourceFree(s->source, error);
+  int closeError = tryInputStreamFree(s->source, error);
 
   lexerStateFree(s->lexer);
   tokenFree(s->next);

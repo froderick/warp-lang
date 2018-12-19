@@ -5,8 +5,8 @@ int main(void) {
 
   Error e;
 
-  StreamSource_t source;
-  int error = trySourceMakeFile(stdin, &source, &e);
+  InputStream_t source;
+  int error = tryFileInputStreamMake(stdin, &source, &e);
   if (error) {
     printf("whoops 1");
   }

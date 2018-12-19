@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "errors.h"
+#include "utils.h"
 
 typedef enum TokenType {
   T_NONE,
@@ -39,25 +40,9 @@ typedef struct Token {
 
 void tokenFree(Token *t);
 
-typedef struct StreamSource *StreamSource_t;
-
-RetVal trySourceMake(
-    void *state,
-    RetVal (*readChar)(void *state, wchar_t *ch, Error *error),
-    RetVal (*unreadChar)(void * state, wchar_t ch, Error *error),
-    RetVal (*freeState)(void *state, Error *error),
-    StreamSource_t *s,
-    Error *error
-);
-RetVal trySourceFree(StreamSource_t s, Error *error);
-
-// source factories
-RetVal trySourceMakeFile(FILE *file, StreamSource_t *s, Error *error);
-RetVal trySourceMakeString(wchar_t* text, uint64_t length, StreamSource_t *s, Error *error);
-
 typedef struct TokenStream *TokenStream_t;
 
-RetVal tryStreamMake(StreamSource_t source, TokenStream_t *s, Error *error);
+RetVal tryStreamMake(InputStream_t source, TokenStream_t *s, Error *error);
 RetVal tryStreamFree(TokenStream_t s, Error *error);
 
 // stream operations
