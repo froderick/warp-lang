@@ -1,5 +1,5 @@
 #include <stdlib.h>
-#include "reader.h"
+#include "lexer.h"
 
 int main(void) {
 

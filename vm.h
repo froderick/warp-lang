@@ -110,8 +110,8 @@ typedef struct Fn {
   uint64_t numLocals;
   uint64_t numArgs;
 
-  wchar_t *name;
   uint64_t nameLength;
+  wchar_t *name;
 
   uint64_t numInstructions;
   Inst *instructions;

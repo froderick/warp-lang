@@ -7,50 +7,8 @@
 #include <stdbool.h>
 #include "errors.h"
 #include "utils.h"
-
-// TODO: I'm not sure there is any value in exposing tokens in this api at all...
-// consider just pulling this inside the reader, and having read() just take
-// an InputStream...
-
-typedef enum TokenType {
-  T_NONE,
-  T_OPAREN,
-  T_CPAREN,
-  T_NUMBER,
-  T_STRING,
-  T_SYMBOL,
-  T_KEYWORD,
-  T_QUOTE,
-  T_TRUE,
-  T_FALSE,
-  T_NIL
-} TokenType;
-
-typedef struct SourceLocation {
-  bool isSet;
-  uint64_t position;
-  uint64_t lineNumber;
-  uint64_t colNumber;
-  uint64_t length;
-} SourceLocation;
-
-typedef struct Token {
-  TokenType type;
-  const char* typeName;
-  SourceLocation source;
-  wchar_t text[];
-} Token;
-
-void tokenFree(Token *t);
-
-typedef struct TokenStream *TokenStream_t;
-
-RetVal tryStreamMake(InputStream_t source, TokenStream_t *s, Error *error);
-RetVal tryStreamFree(TokenStream_t s, Error *error);
-
-// stream operations
-RetVal tryStreamNext(TokenStream_t s, Token **token, Error *error);
-RetVal tryStreamPeek(TokenStream_t s, Token **token, Error *error);
+#include "source.h"
+#include "lexer.h"
 
 struct Expr;
 
