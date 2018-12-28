@@ -10,6 +10,7 @@ typedef enum ErrorType {
   E_INTERNAL,
   E_LEXER,
   E_SYNTAX,
+  E_RUNTIME,
 } ErrorType;
 
 typedef struct LexerError {
@@ -69,6 +70,7 @@ RetVal ioError(Error *error, char *desc);
 RetVal internalError(Error *error, char *desc);
 RetVal tokenizationError(Error *error, unsigned long position, char *desc);
 RetVal syntaxError(Error *error, unsigned long position, char *desc);
+RetVal runtimeError(Error *error, char *desc);
 
 #define throwMemoryError(error, str, ...) {\
   int len = 64; \
@@ -119,6 +121,17 @@ RetVal syntaxError(Error *error, unsigned long position, char *desc);
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   ret = syntaxError(error, pos, msg); \
+  error->fileName = __FILE__; \
+  error->lineNumber = __LINE__; \
+  error->functionName = __func__; \
+  goto failure; \
+}
+
+#define throwRuntimeError(error, str, ...) {\
+  int len = 64; \
+  char msg[len]; \
+  snprintf(msg, len, str, ##__VA_ARGS__); \
+  ret = runtimeError(error, msg); \
   error->fileName = __FILE__; \
   error->lineNumber = __LINE__; \
   error->functionName = __func__; \

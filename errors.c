@@ -56,3 +56,12 @@ RetVal syntaxError(Error *error, unsigned long position, char *desc) {
   return R_ERROR;
 }
 
+RetVal runtimeError(Error *error, char *desc) {
+
+  error->type = E_RUNTIME;
+  swprintf(error->message, ERROR_MSG_LENGTH, L"vm failure encountered -> %s\n", desc);
+
+  if (DEBUG) { printf("(debug) error: %ls\n", error->message); }
+  return R_ERROR;
+}
+
