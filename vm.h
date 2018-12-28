@@ -105,6 +105,8 @@
  * - the accumulator register
  */
 
+// TODO: how do we represent lists in the virtual machine? are they implemented on-top of arrays/records?
+
 // TODO: is a function reference represented differently from a lambda?
 
 // TODO: there appears to be no meaningful difference between args and locals within the vm, they are all just locals
@@ -113,102 +115,124 @@
 /*
  * What kinds of instructions do we support?
  *
- *
  * load-local  (8), index  (16) | (-> value)
  * store-local (8), index  (16) | (objectref ->)
  * get-field   (8), index  (16) | (objectref -> value)
  * set-field   (8), index  (16) | (objectref, value ->)
  * load-const  (8), val    (64) | (-> value)
+ * load-array  (8)              | (objectref, index -> value)
+ * store-array (8)              | (objectref, index, value ->)
  * invoke      (8)              | (objectref, args... -> ...)
- * ret         (8)              | (->)
- * new         (8), length (16) | (-> objectref)
+ * ret         (8)              | (objectref ->)
+ * new         (8), objlen (16) | (-> objectref)
+ * newarray    (8), objlen (16) | (arraylen -> objectref)
  * cmp         (8)              | (a, b -> 0 | 1)
  * jmp         (8), offset (16) | (->)
  * jmp-if      (8), offset (16) | (value ->)
- *
- *
- *
- *
- * | 8 bits         | 4 bits                      | 64 bits   | 4 bits                    | 64 bits |
- * +----------------+-----------------------------+-----------+-------------------------------------+
- * | move           | from(fn-arg, fn-local,      | from-spec | to(fn-local, param-stack, | to-spec |
- * |                |   fn-captured, accumulator, |           |   accumulator, heap)      |         |
- * |                |   heap, const)              |           |                           |         |
- *
- * | 8 bits         | 4 bits                      | 32 bits     | 32 bits             | 32 bits           | unused = 20 |
- * +----------------+-----------------------------+-------------+---------------------+-------------------+-------------|
- * | move-to-heap   | from(fn-arg, fn-local,      | from(index) | to(object-location) | to(object-offset) |             |
- * |                |   fn-captured, accumulator) |             |                     |                   |             |
- *
- * | 8 bits         | 32 bits               | 32 bits             | 4 bits                    | 32 bits   | unused = 20 |
- * +----------------+-----------------------+---------------------+---------------------------+-----------+-------------|
- * | move-from-heap | from(object-location) | from(object-offset) | to(fn-local, param-stack, | to(index) |             |
- * |                |                       |                     |   accumulator)            |           |             |
- *
- * | 8 bits         | 64 bits               | 4 bits                    | 32 bits   | unused = 20 |
- * +----------------+-----------------------+---------------------------+-----------+-------------|
- * | load-const     | from(value)           | to(fn-local, param-stack, | to(index) |             |
- * |                |                       |   accumulator)            |           |             |
- *
- * | 8 bits         | 32 bits                     | 4 bits                    | 32 bits   | unused = 20 |
- * +----------------+-----------------------------+---------------------------+-----------+-------------|
- * | call           | from(fn-arg, fn-local,      |      | to(fn-local, param-stack, | to(index) |             |
- * |                |   fn-captured, accumulator) |                  |   accumulator)            |           |             |
- *
- * | 8 bits         | 32 bits                     | 4 bits                    | 32 bits   | unused = 20 |
- * +----------------+-----------------------------+---------------------------+-----------+-------------|
- * | ret            | from(fn-arg, fn-local,      |      | to(fn-local, param-stack, | to(index) |             |
- * |                |   fn-captured, accumulator) |                  |   accumulator)            |           |             |
- *
+ * plus        (8)              | (a, b -> c)
  */
 
 #include<stdint.h>
 #include<wchar.h>
+#include <stdbool.h>
+
+#include "errors.h"
 
 typedef enum InstType {
-  I_PUSH_ENV,
-  I_PUSH_CONST,
-  I_PUSH_HEAP,
-  I_DROP,
-  I_POP_ENV,
-  I_CALL,
-  I_CALL_ENV,
-  I_RET,
-  I_JUMP,
-  I_JUMP_IF,
-  I_ALLOC,
-  I_HALT,
-  I_PLUS
+
+  I_LOAD_UINT,   // (8), val    (64) | (-> value)
+  I_LOAD_BOOL,   // (8), val    (8)  | (-> value)
+  I_LOAD_NIL,    // (8)         (8)  | (-> value)
+
+  I_LOAD_LOCAL,  // (8), index  (16) | (-> value)
+  I_STORE_LOCAL, // (8), index  (16) | (objectref ->)
+  I_INVOKE,      // (8)              | (objectref, args... -> ...)
+  I_RET,         // (8)              | (objectref ->)
+  I_CMP,         // (8)              | (a, b -> 0 | 1)
+  I_JMP,         // (8), offset (16) | (->)
+  I_JMP_IF,      // (8), offset (16) | (value ->)
+  I_HALT,        // (8)              | (exitcode ->)
+  I_PLUS,        // (8)              | (a, b -> c)
+  I_DEF_VAR,     // (8)              | (name, value ->)
+  I_LOAD_VAR,    // (8)              | (name -> value)
+
+  // requires garbage collection
+  I_NEW,         // (8), objlen (16) | (-> objectref)
+  I_GET_FIELD,   // (8), index  (16) | (objectref -> value)
+  I_SET_FIELD,   // (8), index  (16) | (objectref, value ->)
+  I_NEW_ARRAY,   // (8), objlen (16) | (arraylen -> objectref)
+  I_LOAD_ARRAY,  // (8)              | (objectref, index -> value)
+  I_STORE_ARRAY, // (8)              | (objectref, index, value ->)
+
 } InstType;
 
-typedef struct Inst {
-  InstType type :  8;
-  uint64_t arg1 : 56;
-  uint64_t arg2 : 64;
-  SourceLocation source;
-} Inst;
+/*
+ * When the vm is asked to evaluate code, it always evaluates it in the context of a specific namespace. The symbols
+ * defined in this namespace form the basis of the evaluation environment. Also part of the environment is
+ * pre-allocated space for the locals the code will introduce. Last, the code will require an operand stack to do
+ * anything useful, so one is pre-allocated based on the stack usage the code requires.
+ *
+ * When the vm evaluates code, it expects that the top-level expression will terminate in a `ret` instruction so it
+ * will know the result of the expression it evaluated. The compiler must detect that a form is a top-level
+ * form and generate this extra instruction as needed.
+ */
+
+typedef struct Code {
+  uint64_t codeLength;          // the number of bytes in this code block
+  uint8_t *code;                // this code block's actual instructions
+} Code;
 
 typedef struct Fn { // this is the runtime definition of a function
   uint64_t nsLength;
   wchar_t *ns;
-
   uint64_t nameLength;
   wchar_t *name;
-
   uint64_t numArgs;
-  uint64_t numLocals;
-  uint64_t numCallParams;
-
-  uint64_t numCaptured;
-  uint64_t *captured;
-
-  uint64_t numInstructions;
-  Inst *instructions;
-
-  SourceLocation source;
+  Code code;
 } Fn;
 
+typedef struct CodeUnit {
+
+  // TODO: constants
+  // TODO: source info
+
+  uint64_t numFns;
+  Fn *fns;
+
+  uint64_t numLocals;           // the number of local bindings this code unit uses
+  uint64_t maxOperandStackSize; // the maximum number of items this code pushes onto the operand stack at one time
+
+} CodeUnit;
+
+typedef struct Value {
+  uint8_t type : 3;
+  uint64_t value : 61
+} Value;
+
+typedef struct VM *VM_t;
+
+RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, Value *result);
+
+
+//F_CONST,
+//F_IF,
+//F_LET,
+//F_DEF,
+//F_ENV_REF,
+//F_VAR_REF,
+//F_FN,     ->
+//F_BUILTIN,
+//F_FN_CALL -> I_INVOKE
+
 #endif //WARP_LANG_VM_H
+
+/*
+ * tryVMEval(vm, code, &result); // the result is a Value, which the caller can then introspect
+ *
+ * load code into VM as temporary zero-argument function within current namespace
+ * invoke function
+ * destroy function
+ */
 
 /*
  * the virtual machine at minimum needs to have a main method that accepts a file with bytecode as input
@@ -241,6 +265,7 @@ typedef struct Fn { // this is the runtime definition of a function
  *
  * *PERHAPS*: I should just do the fucking instruction set and be done with it
  */
+
 
 
 
