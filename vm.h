@@ -100,18 +100,22 @@ typedef struct VM *VM_t;
  *                 offset to dynamically-allocated memory on the heap.
  */
 typedef enum ValueType {
-  VT_NONE,
+  VT_NIL,
   VT_UINT,
   VT_BOOL,
-  VT_NIL,
   VT_CHAR,
-  VT_OBJECT
+  VT_OBJECT,
+  VT_FN,
 } ValueType;
 
 typedef struct Value {
   ValueType type : 4;
-  uint64_t value : 60
+  uint64_t value : 60;
 } Value;
+
+RetVal tryVMMake(VM_t *ptr, Error *error);
+
+void vmFree(VM_t vm);
 
 RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, Value *result, Error *error);
 

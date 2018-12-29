@@ -7,6 +7,7 @@
 #include <errno.h>
 #include "reader.h"
 #include "analyzer.h"
+#include "vm.h"
 
 void assertToken(Token *t,
                  TokenType type, wchar_t *text, unsigned long position, unsigned long length) {
@@ -338,6 +339,45 @@ START_TEST(analyzer) {
   }
 END_TEST
 
+START_TEST(vmBasic) {
+
+    Error error;
+    VM_t vm;
+    Value result;
+
+    ck_assert_int_eq(tryVMMake(&vm, &error), R_SUCCESS);
+
+    CodeUnit unit;
+
+    unit.numConstants = 2;
+    unit.constants = malloc(sizeof(Constant) * unit.numConstants);
+    unit.constants[0].type = CT_INT;
+    unit.constants[0].integer = 100;
+    unit.constants[1].type = CT_INT;
+    unit.constants[1].integer = 2;
+
+    unit.numFunctionDefinitions = 0;
+    unit.functionDefinitions = NULL;
+    unit.code.numLocals = 0;
+    unit.code.maxOperandStackSize = 10;
+
+    uint8_t code[] = {
+        I_LOAD_CONST, 0, 0,
+        I_LOAD_CONST, 0, 1,
+        I_PLUS,
+        I_RET
+    };
+    unit.code.codeLength = sizeof(code);
+    unit.code.code = code;
+
+    ck_assert_int_eq(tryVMEval(vm, &unit, &result, &error), R_SUCCESS);
+    ck_assert_int_eq(result.type, VT_UINT);
+    ck_assert_int_eq(result.value, 102);
+
+    vmFree(vm);
+  }
+END_TEST
+
 Suite * suite(void) {
 
   TCase *tc_core = tcase_create("Core");
@@ -347,6 +387,7 @@ Suite * suite(void) {
   tcase_add_test(tc_core, parser);
   tcase_add_test(tc_core, exprPrn);
   tcase_add_test(tc_core, analyzer);
+//  tcase_add_test(tc_core, vmBasic);
 
   Suite *s = suite_create("lexer");
   suite_add_tcase(s, tc_core);
