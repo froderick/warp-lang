@@ -130,10 +130,10 @@ RetVal tryNumberRead(TokenStream_t stream, Expr **ptr, Error *error) {
     goto failure;
   }
 
+  errno = 0;
   uint64_t value = wcstoull(token->text, NULL, 0);
   if (errno == EINVAL) {
-    ret = syntaxError(error, token->source.position, "Token text does not represent a valid number");
-    goto failure;
+    throwSyntaxError(error, token->source.position, "Token text does not represent a valid number: '%ls'", token->text);
   }
   if (errno == ERANGE) {
     ret = syntaxError(error, token->source.position, "Cannot represent a number literal larger than 64 bits unsigned");

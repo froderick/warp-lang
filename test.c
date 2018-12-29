@@ -387,7 +387,7 @@ Suite * suite(void) {
   tcase_add_test(tc_core, parser);
   tcase_add_test(tc_core, exprPrn);
   tcase_add_test(tc_core, analyzer);
-//  tcase_add_test(tc_core, vmBasic);
+  tcase_add_test(tc_core, vmBasic);
 
   Suite *s = suite_create("lexer");
   suite_add_tcase(s, tc_core);
