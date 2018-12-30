@@ -1,5 +1,32 @@
 #include <stdlib.h>
+#include <string.h>
 #include "vm.h"
+#include "utils.h"
+
+typedef struct VM {
+  // TODO: we don't support vars or define yet
+} VM;
+
+RetVal tryVMMake(VM_t *ptr, Error *error) {
+
+  RetVal ret;
+
+  VM *vm;
+  tryMalloc(vm, sizeof(VM), "VM");
+
+  *ptr = vm;
+  ret = R_SUCCESS;
+  return ret;
+
+  failure:
+  return ret;
+}
+
+void vmFree(VM *vm) {
+  if (vm != NULL) {
+    free(vm);
+  }
+}
 
 typedef struct OpStack {
   Value *stack;
@@ -61,68 +88,67 @@ RetVal tryOpStackPop(OpStack *stack, Value *ptr, Error *error) {
     return ret;
 }
 
+//typedef struct Code {
+//  uint64_t numLocals;           // the number of local bindings this code unit uses
+//  uint64_t maxOperandStackSize; // the maximum number of items this code pushes onto the operand stack at one time
+//  uint64_t codeLength;          // the number of bytes in this code block
+//  uint8_t *code;                // this code block's actual instructions
+//  SourceTable sourceTable;      // this lines up lines of code to generated instruction ranges
+//} Code;
+
+typedef struct Fn {
+
+  // TODO: hold a table of Value references to functions and constants defined internally within this function
+  // this way this function can be hydrated from a CodeUnit once, and have all its inner functions
+  // hydrated once as well.
+
+  // TODO: functions should not have 'inner' functions. The bytecode format should require that all functions definittions
+  // be hoisted to the top level. code that references functions expliclitly by value, and not indirectly, can use
+  // the mechanism below:
+
+  // going from a CodeUnit to a hydrated representation of a function should not result in a code rewrite
+  // you can avoid a rewrite by having the bytecode say "load the value of this function reference", where the
+  // reference is mapped in the header of the Fn to an actual object reference to the function in question. This can
+  // be populated at the time that the Fn is loaded as a value for the first time.
+
+  // TODO: a big part of my confusion has been conflating function loading with function invocation/execution
+
+  // It must be a property of functions that they retain references to the values they explicitly reference
+  // beyond a given function call, otherwise all these values have to be re-hydrated from the CodeUnit every time...
+
+};
+
+// there are three concepts I'd like to separate:
+// 1. the CodeUnit that is generated for a function
+//    - this includes the actual instructions
+//    - this also includes source metadata and constants
+//    - this should live on the heap, and be gc-able
+// 2. the actual value that can be used to invoke that function
+//    - this should really be a singleton
+//    - this should live on the heap, and be gc-able
+//    - this should hold an object reference to its CodeUnit to prevent it from being gc-ed too soon
+// 3. the way this value is discovered by code that wants to invoke it
+//    - a literal function reference, returned as a value from another function call
+//    - a local
+//    - a var
+// and yet...
+// it would be much easier to duplicate the constants into the functions themselves where needed
+// TODO: *so let's do that instead*
+
 typedef struct Frame {
-  FunctionDefinition *functionDefinition;
+//  FunctionDefinition *functionDefinition;
   Value *locals;
   OpStack operandStack;
 } Frame;
 
 typedef struct TopLevelFrame {
-  CodeUnit *codeUnit;
+  uint16_t numConstants;
+  Value *constants;
+  Code code;
+  uint16_t numLocals;
   Value *locals;
   OpStack opStack;
 } TopLevelFrame;
-
-typedef struct VM {
-
-} VM;
-
-
-RetVal tryVMMake(VM_t *ptr, Error *error) {
-
-  RetVal ret;
-
-  VM *vm;
-  tryMalloc(vm, sizeof(VM), "VM");
-
-  *ptr = vm;
-  ret = R_SUCCESS;
-  return ret;
-
-  failure:
-    return ret;
-}
-
-void vmFree(VM *vm) {
-  if (vm != NULL) {
-    free(vm);
-  }
-}
-
-void topLevelFrameFreeContents(TopLevelFrame *topLevel);
-
-RetVal tryTopLevelFrameInitContents(TopLevelFrame *topLevel, CodeUnit *codeUnit, Error *error) {
-  RetVal ret;
-
-  topLevel->codeUnit = codeUnit;
-  tryMalloc(topLevel->locals, sizeof(Value) * codeUnit->code.numLocals, "Value array for locals");
-  throws(tryOpStackInitContents(&topLevel->opStack, codeUnit->code.maxOperandStackSize, error));
-  return R_SUCCESS;
-
-  failure:
-    topLevelFrameFreeContents(topLevel);
-    return ret;
-}
-
-void topLevelFrameFreeContents(TopLevelFrame *topLevel) {
-  if (topLevel != NULL) {
-    if (topLevel->locals != NULL) {
-      free(topLevel->locals);
-      topLevel->locals = NULL;
-    }
-    opStackFreeContents(&topLevel->opStack);
-  }
-}
 
 //typedef struct Code {
 //  uint64_t numLocals;           // the number of local bindings this code unit uses
@@ -132,9 +158,143 @@ void topLevelFrameFreeContents(TopLevelFrame *topLevel) {
 //  SourceTable sourceTable;      // this lines up lines of code to generated instruction ranges
 //} Code;
 
-//typedef struct Fn {
-//  FunctionDefinition *functionDefinition;
-//};
+void sourceTableFreeContents(SourceTable *t) {
+
+  t.fileNameLength = 0;
+
+  if (t.fileName != NULL) {
+    free(t.fileName);
+    t.fileName = NULL;
+  }
+
+  t.numLineNumbers = 0;
+  if (t.lineNumbers != NULL) {
+    free(t.lineNumbers);
+    t.lineNumbers = NULL;
+  }
+}
+
+void codeFreeContents(Code *code) {
+  if (code != NULL) {
+
+    code->numLocals = 0;
+    code->maxOperandStackSize = 0;
+    code->codeLength = 0;
+
+    if (code->code != NULL) {
+      free(code->code);
+      code->code = NULL;
+    }
+
+    if (code->hasSourceTable) {
+      code->hasSourceTable = false;
+      sourceTableFreeContents(&code->sourceTable);
+    }
+  }
+}
+
+RetVal tryCodeDeepCopy(Code *from, Code *to, Error *error) {
+  RetVal ret;
+
+  to->numLocals = from->numLocals;
+  to->maxOperandStackSize = from->maxOperandStackSize;
+  to->codeLength = from->codeLength;
+
+  tryMalloc(to->code, sizeof(uint8_t) * to->codeLength, "Code array");
+  memcpy(to->code, from->code, to->codeLength);
+
+  to->hasSourceTable = from->hasSourceTable;
+
+  if (to->hasSourceTable) {
+    to->sourceTable.fileNameLength = from->sourceTable.fileNameLength;
+    throws(tryCopyText(from->sourceTable.fileName, &to->sourceTable.fileName, to->sourceTable.fileNameLength, error));
+
+    to->sourceTable.numLineNumbers = from->sourceTable.numLineNumbers;
+    tryMalloc(to->sourceTable.lineNumbers, sizeof(LineNumber) * to->sourceTable.numLineNumbers, "LineNumber array");
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    codeFreeContents(to);
+    return ret;
+}
+
+void topLevelFrameFreeContents(TopLevelFrame *topLevel);
+
+RetVal tryTopLevelFrameLoad(VM *vm, TopLevelFrame *topLevel, CodeUnit *codeUnit, Error *error) {
+  RetVal ret;
+
+  // create values of the constants, store them in the topLevel
+
+  topLevel->numConstants = codeUnit->numConstants;
+  tryMalloc(topLevel->constants, sizeof(Value) * topLevel->numConstants, "Value array");
+
+  for (uint16_t i=0; i<topLevel->numConstants; i++) {
+
+    Constant c = codeUnit->constants[i];
+    Value v;
+
+    switch (codeUnit->constants[i].type) {
+      case CT_BOOL:
+        v.type = VT_BOOL;
+        v.value = c.boolean;
+        break;
+      case CT_INT:
+        v.type = VT_UINT;
+        v.value = c.integer;
+        break;
+      case CT_NIL:
+        v.type = VT_NIL;
+        v.value = 0;
+        break;
+      case CT_FN:
+        // TODO: need gc heap memory allocation for this
+        throwRuntimeError(error, "invoke not implemented");
+      case CT_STR:
+        throwRuntimeError(error, "invoke not implemented");
+    }
+
+    topLevel->constants[i] = v;
+  }
+
+  // deep-copy the code into the topLevel
+
+  throws(tryCodeDeepCopy(&codeUnit->code, &topLevel->code, error));
+
+  // allocate frame space for the topLevel
+
+  topLevel->numLocals = codeUnit->code.numLocals;
+  tryMalloc(topLevel->locals, sizeof(Value) * topLevel->numLocals, "Value array for locals");
+  throws(tryOpStackInitContents(&topLevel->opStack, codeUnit->code.maxOperandStackSize, error));
+  return R_SUCCESS;
+
+  failure:
+    topLevelFrameFreeContents(topLevel);
+    return ret;
+}
+
+void topLevelFrameFreeContents(TopLevelFrame *topLevel) {
+
+  if (topLevel != NULL) {
+
+    topLevel->numConstants = 0;
+    if (topLevel->constants != NULL) {
+      free(topLevel->constants);
+      topLevel->constants = NULL;
+    }
+
+    codeFreeContents(&topLevel->code);
+
+    topLevel->numLocals = 0;
+    if (topLevel->locals != NULL) {
+      free(topLevel->locals);
+      topLevel->locals = NULL;
+    }
+
+    opStackFreeContents(&topLevel->opStack);
+  }
+}
 
 RetVal tryTopLevelFrameEval(VM *vm, TopLevelFrame *topLevel, Value *result, Error *error) {
   RetVal ret;
@@ -205,7 +365,7 @@ RetVal tryTopLevelFrameEval(VM *vm, TopLevelFrame *topLevel, Value *result, Erro
 //          throwRuntimeError(error, "cannot invoke this as a function!");
 //        }
 
-        throwRuntimeError(error, "invoke not implementec");
+        throwRuntimeError(error, "invoke not implemented");
       }
       case I_RET: {         // (8)              | (objectref ->)
         // this is the toplevel version where the compiler pretends the toplevel code is returning from a function call

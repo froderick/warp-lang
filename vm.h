@@ -8,6 +8,31 @@
 #include "source.h"
 #include "errors.h"
 
+// This is the basic representation of code that the virtual machine can accept as input for evaluation.
+
+typedef struct LineNumber {
+  uint64_t startInstructionIndex;
+  uint64_t lineNumber;
+} LineNumber;
+
+typedef struct SourceTable {
+  uint64_t fileNameLength;
+  wchar_t *fileName;
+  uint64_t numLineNumbers;
+  LineNumber *lineNumbers;
+} SourceTable;
+
+typedef struct Code {
+  uint16_t numLocals;           // the number of local bindings this code unit uses
+  uint64_t maxOperandStackSize; // the maximum number of items this code pushes onto the operand stack at one time
+  uint64_t codeLength;          // the number of bytes in this code block
+  uint8_t *code;                // this code block's actual instructions
+  bool hasSourceTable;
+  SourceTable sourceTable;      // this lines up lines of code to generated instruction ranges
+} Code;
+
+// There are the instructions a Code object supports.
+
 typedef enum InstType {
 
   I_LOAD_CONST,  // (8), index  (16) | (-> value)
@@ -34,55 +59,44 @@ typedef enum InstType {
 
 } InstType;
 
+// These are the constant values that can be loaded by Code instructions into the opstack for use.
+// These constant values are represented as a part of the CodeUnit that is submitted to the vm for evaluation.
+
 typedef enum ConstantType {
   CT_BOOL,
   CT_INT,
-  CT_NIL
+  CT_NIL,
+  CT_STR,
+  CT_FN,
 } ConstantType;
 
-typedef struct Constant {
-  ConstantType type;
-  union {
-    uint8_t boolean;
-    uint64_t integer;
-    // TODO: strings
-  };
-} Constant;
+typedef struct StringConstant {
+  uint64_t length;
+  wchar_t *value;
+} StringConstant;
 
-typedef struct LineNumber {
-  uint64_t startInstructionIndex;
-  uint64_t lineNumber;
-} LineNumber;
-
-typedef struct SourceTable {
-  uint64_t fileNameLength;
-  wchar_t *fileName;
-  uint64_t numLineNumbers;
-  LineNumber *lineNumbers;
-} SourceTable;
-
-typedef struct Code {
-  uint64_t numLocals;           // the number of local bindings this code unit uses
-  uint64_t maxOperandStackSize; // the maximum number of items this code pushes onto the operand stack at one time
-  uint64_t codeLength;          // the number of bytes in this code block
-  uint8_t *code;                // this code block's actual instructions
-  SourceTable sourceTable;      // this lines up lines of code to generated instruction ranges
-} Code;
-
-typedef struct FunctionDefinition { // this is the runtime definition of a function
+typedef struct FnConstant { // this is the runtime definition of a function
   uint64_t nsLength;
   wchar_t *ns;
   uint64_t nameLength;
   wchar_t *name;
   uint64_t numArgs;
   Code code;
-} FunctionDefinition;
+} FnConstant;
+
+typedef struct Constant {
+  ConstantType type;
+  union {
+    uint8_t boolean;
+    uint64_t integer;
+    StringConstant string;
+    FnConstant function;
+  };
+} Constant;
 
 typedef struct CodeUnit {
-  uint64_t numConstants;
+  uint16_t numConstants;
   Constant *constants;
-  uint64_t numFunctionDefinitions;
-  FunctionDefinition *functionDefinitions;
   Code code;
 } CodeUnit;
 
@@ -103,9 +117,10 @@ typedef enum ValueType {
   VT_NIL,
   VT_UINT,
   VT_BOOL,
-  VT_CHAR,
-  VT_OBJECT,
   VT_FN,
+//  VT_CHAR,
+//  VT_STR,
+//  VT_OBJECT,
 } ValueType;
 
 typedef struct Value {
