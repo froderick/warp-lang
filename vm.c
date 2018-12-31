@@ -3,16 +3,71 @@
 #include "vm.h"
 #include "utils.h"
 
+typedef struct Fn {
+  uint64_t numArgs;
+  uint16_t numConstants;
+  Value *constants;
+  Code code;
+} Fn;
+
+typedef struct GC {
+  uint64_t allocatedFnSpace;
+  uint64_t usedFnSpace;
+  Fn *fns;
+} GC;
+
+void GCInit(GC *gc) {
+  gc->usedFnSpace = 0;
+  gc->allocatedFnSpace = 0;
+  gc->fns = NULL;
+}
+
+RetVal tryAllocateFn(GC *gc, Fn fn, Value *value, Error *error) {
+  RetVal ret;
+
+  if (gc->fns == NULL) {
+    uint16_t len = 16;
+    tryMalloc(gc->fns, len * sizeof(Fn), "Fn array");
+    gc->allocatedFnSpace = len;
+  }
+  else if (gc->usedFnSpace == gc->allocatedFnSpace) {
+    uint64_t newAllocatedLength = gc->allocatedFnSpace * 2;
+
+    Fn* resizedFns = realloc(gc->fns, newAllocatedLength);
+    if (resizedFns == NULL) {
+      ret = memoryError(error, "realloc Fn array");
+      goto failure;
+    }
+
+    gc->allocatedFnSpace = newAllocatedLength;
+    gc->fns = resizedFns;
+  }
+
+  uint64_t index = gc->usedFnSpace;
+  gc->fns[index] = fn;
+  gc->usedFnSpace = index + 1;
+
+  value->type = VT_FN;
+  value->value = index;
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 typedef struct VM {
   // TODO: we don't support vars or define yet
+  GC gc;
 } VM;
 
 RetVal tryVMMake(VM_t *ptr, Error *error) {
-
   RetVal ret;
 
   VM *vm;
   tryMalloc(vm, sizeof(VM), "VM");
+
+  GCInit(&vm->gc);
 
   *ptr = vm;
   ret = R_SUCCESS;
@@ -96,7 +151,7 @@ RetVal tryOpStackPop(OpStack *stack, Value *ptr, Error *error) {
 //  SourceTable sourceTable;      // this lines up lines of code to generated instruction ranges
 //} Code;
 
-typedef struct Fn {
+//typedef struct Fn_wut {
 
   // TODO: hold a table of Value references to functions and constants defined internally within this function
   // this way this function can be hydrated from a CodeUnit once, and have all its inner functions
@@ -116,7 +171,7 @@ typedef struct Fn {
   // It must be a property of functions that they retain references to the values they explicitly reference
   // beyond a given function call, otherwise all these values have to be re-hydrated from the CodeUnit every time...
 
-};
+//};
 
 // there are three concepts I'd like to separate:
 // 1. the CodeUnit that is generated for a function
@@ -160,17 +215,17 @@ typedef struct TopLevelFrame {
 
 void sourceTableFreeContents(SourceTable *t) {
 
-  t.fileNameLength = 0;
+  t->fileNameLength = 0;
 
-  if (t.fileName != NULL) {
-    free(t.fileName);
-    t.fileName = NULL;
+  if (t->fileName != NULL) {
+    free(t->fileName);
+    t->fileName = NULL;
   }
 
-  t.numLineNumbers = 0;
-  if (t.lineNumbers != NULL) {
-    free(t.lineNumbers);
-    t.lineNumbers = NULL;
+  t->numLineNumbers = 0;
+  if (t->lineNumbers != NULL) {
+    free(t->lineNumbers);
+    t->lineNumbers = NULL;
   }
 }
 
@@ -222,20 +277,59 @@ RetVal tryCodeDeepCopy(Code *from, Code *to, Error *error) {
 
 void topLevelFrameFreeContents(TopLevelFrame *topLevel);
 
-RetVal tryTopLevelFrameLoad(VM *vm, TopLevelFrame *topLevel, CodeUnit *codeUnit, Error *error) {
+RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr, Error *error);
+
+void _fnFreeContents(Fn *fn) {
+  if (fn != NULL) {
+    fn->numArgs = 0;
+
+    fn->numConstants = 0;
+    if (fn->constants != NULL) {
+      free(fn->constants);
+      fn->constants = NULL;
+    }
+
+    codeFreeContents(&fn->code);
+  }
+}
+
+RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   RetVal ret;
 
-  // create values of the constants, store them in the topLevel
+  // cleanup on failure
 
-  topLevel->numConstants = codeUnit->numConstants;
-  tryMalloc(topLevel->constants, sizeof(Value) * topLevel->numConstants, "Value array");
+  Fn fn;
+  fn.numArgs = fnConst->numArgs;
 
-  for (uint16_t i=0; i<topLevel->numConstants; i++) {
+  fn.numConstants = fnConst->numConstants;
+  tryMalloc(fn.constants, sizeof(Value) * fn.numConstants, "Value array");
+  throws(tryHydrateConstants(vm, fn.numConstants, fnConst->constants, &fn.constants, error));
 
-    Constant c = codeUnit->constants[i];
+  throws(tryCodeDeepCopy(&fnConst->code, &fn.code, error));
+
+  throws(tryAllocateFn(&vm->gc, fn, value, error));
+
+  return R_SUCCESS;
+
+  failure:
+    _fnFreeContents(&fn);
+    return ret;
+}
+
+RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr, Error *error) {
+  RetVal ret;
+
+  // clean up on failure
+  Value *values;
+
+  tryMalloc(values, sizeof(Value) * numConstants, "Value array");
+
+  for (uint16_t i=0; i<numConstants; i++) {
+
+    Constant c = constants[i];
     Value v;
 
-    switch (codeUnit->constants[i].type) {
+    switch (c.type) {
       case CT_BOOL:
         v.type = VT_BOOL;
         v.value = c.boolean;
@@ -248,21 +342,42 @@ RetVal tryTopLevelFrameLoad(VM *vm, TopLevelFrame *topLevel, CodeUnit *codeUnit,
         v.type = VT_NIL;
         v.value = 0;
         break;
-      case CT_FN:
-        // TODO: need gc heap memory allocation for this
-        throwRuntimeError(error, "invoke not implemented");
+      case CT_FN: {
+        throws(tryFnHydrate(vm, &c.function, &v, error));
+        break;
+      }
       case CT_STR:
         throwRuntimeError(error, "invoke not implemented");
+        break;
     }
 
-    topLevel->constants[i] = v;
+    values[i] = v;
   }
 
-  // deep-copy the code into the topLevel
+  *ptr = values;
+  return R_SUCCESS;
+
+  failure:
+    if (values != NULL) {
+      free(values);
+    }
+    return ret;
+}
+
+RetVal tryTopLevelFrameLoad(VM *vm, TopLevelFrame *topLevel, CodeUnit *codeUnit, Error *error) {
+  RetVal ret;
+
+  // hydrate all constant values referenced by the code
+
+  topLevel->numConstants = codeUnit->numConstants;
+  tryMalloc(topLevel->constants, sizeof(Value) * topLevel->numConstants, "Value array");
+  throws(tryHydrateConstants(vm, codeUnit->numConstants, codeUnit->constants, &topLevel->constants, error));
+
+  // deep-copy the code
 
   throws(tryCodeDeepCopy(&codeUnit->code, &topLevel->code, error));
 
-  // allocate frame space for the topLevel
+  // allocate frame space
 
   topLevel->numLocals = codeUnit->code.numLocals;
   tryMalloc(topLevel->locals, sizeof(Value) * topLevel->numLocals, "Value array for locals");
@@ -275,7 +390,6 @@ RetVal tryTopLevelFrameLoad(VM *vm, TopLevelFrame *topLevel, CodeUnit *codeUnit,
 }
 
 void topLevelFrameFreeContents(TopLevelFrame *topLevel) {
-
   if (topLevel != NULL) {
 
     topLevel->numConstants = 0;
@@ -299,7 +413,7 @@ void topLevelFrameFreeContents(TopLevelFrame *topLevel) {
 RetVal tryTopLevelFrameEval(VM *vm, TopLevelFrame *topLevel, Value *result, Error *error) {
   RetVal ret;
 
-  Code code = topLevel->codeUnit->code;
+  Code code = topLevel->code;
 
   bool returnFound = false;
   uint16_t pc = 0;
@@ -312,27 +426,8 @@ RetVal tryTopLevelFrameEval(VM *vm, TopLevelFrame *topLevel, Value *result, Erro
       case I_LOAD_CONST:  { // (8), index (16) | (-> value)
 
         uint16_t constantIndex = (code.code[pc + 1] << 8) | code.code[pc + 2];
-        Constant constant = topLevel->codeUnit->constants[constantIndex];
-
-        Value v;
-        v.type = VT_NIL;
-        v.value = 0;
-        switch (constant.type) {
-          case CT_BOOL:
-            v.type = VT_BOOL;
-            v.value = constant.boolean;
-            break;
-          case CT_INT:
-            v.type = VT_UINT;
-            v.value = constant.integer;
-            break;
-          case CT_NIL:
-            v.type = VT_NIL;
-            v.value = 0;
-            break;
-        }
-
-        throws(tryOpStackPush(&topLevel->opStack, v, error));
+        Value constant = topLevel->constants[constantIndex];
+        throws(tryOpStackPush(&topLevel->opStack, constant, error));
 
         pc = pc + 3;
         break;
@@ -477,7 +572,7 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
 
   TopLevelFrame *topLevel;
   tryMalloc(topLevel, sizeof(TopLevelFrame), "TopLevelFrame")
-  throws(tryTopLevelFrameInitContents(topLevel, codeUnit, error));
+  throws(tryTopLevelFrameLoad(vm, topLevel, codeUnit, error));
 
   throws(tryTopLevelFrameEval(vm, topLevel, result, error));
 

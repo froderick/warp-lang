@@ -70,17 +70,17 @@ typedef enum ConstantType {
   CT_FN,
 } ConstantType;
 
+typedef struct Constant Constant;
+
 typedef struct StringConstant {
   uint64_t length;
   wchar_t *value;
 } StringConstant;
 
 typedef struct FnConstant { // this is the runtime definition of a function
-  uint64_t nsLength;
-  wchar_t *ns;
-  uint64_t nameLength;
-  wchar_t *name;
   uint64_t numArgs;
+  uint16_t numConstants;
+  Constant *constants;
   Code code;
 } FnConstant;
 
