@@ -347,35 +347,39 @@ START_TEST(vmBasic) {
 
     ck_assert_int_eq(tryVMMake(&vm, &error), R_SUCCESS);
 
-
     uint8_t fnCode[] = {
         I_LOAD_CONST, 0, 0,
-        I_RET
-    };
-
-    uint8_t code[] = {
-        I_LOAD_CONST, 0, 0,
-        I_LOAD_CONST, 0, 1,
+        I_LOAD_LOCAL, 0, 0,
         I_PLUS,
         I_RET
     };
 
+    FnConstant fn;
+    fn.numConstants = 1;
+    fn.constants = malloc(sizeof(Constant) * fn.numConstants);
+    fn.constants[0].type = CT_INT;
+    fn.constants[0].integer = 100;
+    fn.numArgs = 1;
+    fn.code.numLocals = 1;
+    fn.code.maxOperandStackSize = 10;
+    fn.code.codeLength = sizeof(fnCode);
+    fn.code.code = fnCode;
+    fn.code.hasSourceTable = false;
+
+    uint8_t code[] = {
+        I_LOAD_CONST, 0, 0,
+        I_LOAD_CONST, 0, 1,
+        I_INVOKE,
+        I_RET
+    };
+
     CodeUnit unit;
-    unit.numConstants = 3;
+    unit.numConstants = 2;
     unit.constants = malloc(sizeof(Constant) * unit.numConstants);
     unit.constants[0].type = CT_INT;
-    unit.constants[0].integer = 100;
-    unit.constants[1].type = CT_INT;
-    unit.constants[1].integer = 2;
-    unit.constants[2].type = CT_FN;
-    unit.constants[2].function.numConstants = 1;
-    unit.constants[2].function.constants = malloc(sizeof(Constant) * unit.constants[2].function.numConstants);
-    unit.constants[2].function.constants[0].type = CT_INT;
-    unit.constants[2].function.constants[0].integer = 501;
-    unit.constants[2].function.numArgs = 0;
-    unit.constants[2].function.code.codeLength = sizeof(fnCode);
-    unit.constants[2].function.code.code = fnCode;
-    unit.constants[2].function.code.hasSourceTable = false;
+    unit.constants[0].integer = 10;
+    unit.constants[1].type = CT_FN;
+    unit.constants[1].function = fn;
     unit.code.numLocals = 0;
     unit.code.maxOperandStackSize = 10;
     unit.code.codeLength = sizeof(code);
@@ -384,7 +388,7 @@ START_TEST(vmBasic) {
 
     ck_assert_int_eq(tryVMEval(vm, &unit, &result, &error), R_SUCCESS);
     ck_assert_int_eq(result.type, VT_UINT);
-    ck_assert_int_eq(result.value, 102);
+    ck_assert_int_eq(result.value, 110);
 
     vmFree(vm);
   }

@@ -56,6 +56,20 @@ RetVal tryAllocateFn(GC *gc, Fn fn, Value *value, Error *error) {
     return ret;
 }
 
+RetVal tryDerefFn(GC *gc, Value value, Fn *fn, Error *error) {
+  RetVal ret;
+
+  if (gc->usedFnSpace <= value.value) {
+    throwInternalError(error, "fn reference points to fn that does not exist");
+  }
+
+  *fn = gc->fns[value.value];
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 typedef struct VM {
   // TODO: we don't support vars or define yet
   GC gc;
@@ -189,12 +203,6 @@ RetVal tryOpStackPop(OpStack *stack, Value *ptr, Error *error) {
 // and yet...
 // it would be much easier to duplicate the constants into the functions themselves where needed
 // TODO: *so let's do that instead*
-
-typedef struct Frame {
-//  FunctionDefinition *functionDefinition;
-  Value *locals;
-  OpStack operandStack;
-} Frame;
 
 typedef struct TopLevelFrame {
   uint16_t numConstants;
@@ -410,70 +418,128 @@ void topLevelFrameFreeContents(TopLevelFrame *topLevel) {
   }
 }
 
-RetVal tryTopLevelFrameEval(VM *vm, TopLevelFrame *topLevel, Value *result, Error *error) {
+typedef struct Frame Frame;
+
+typedef struct Frame {
+  Frame *parent;
+  uint16_t numConstants; // TODO: make a verifier so we can check these bounds at load time rather than compile time
+  Value *constants;
+  Code code;
+  Value *locals;
+  OpStack *opStack;
+  Value result;
+} Frame;
+
+RetVal tryFrameEval(VM *vm, Frame *frame, Error *error);
+
+RetVal tryInvoke(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
-  Code code = topLevel->code;
+  Value invocable;
+  throws(tryOpStackPop(frame->opStack, &invocable, error));
+
+  if (invocable.type != VT_FN) {
+    throwRuntimeError(error, "cannot invoke this as a function!");
+  }
+
+  Fn fn;
+  throws(tryDerefFn(&vm->gc, invocable, &fn, error));
+
+  // clean up on return
+  Value *locals = NULL;
+  OpStack opStack;
+
+  tryMalloc(locals, sizeof(Value) * fn.code.numLocals, "Value array");
+  tryOpStackInitContents(&opStack, fn.code.maxOperandStackSize, error);
+
+  // pop args and set as locals
+  for (uint16_t i=0; i<fn.numArgs; i++) {
+    Value arg;
+    throws(tryOpStackPop(frame->opStack, &arg, error));
+    locals[i] = arg;
+  }
+
+  Frame child;
+  child.parent = frame;
+  child.numConstants = fn.numConstants;
+  child.constants = fn.constants;
+  child.code = fn.code;
+  child.locals = locals;
+  child.opStack = &opStack;
+  child.result.type = VT_NIL;
+  child.result.value = 0;
+
+  throws(tryFrameEval(vm, &child, error));
+  throws(tryOpStackPush(frame->opStack, child.result, error));
+
+  free(child.locals);
+  opStackFreeContents(&opStack);
+
+  return R_SUCCESS;
+
+  failure:
+    free(child.locals);
+    opStackFreeContents(&opStack);
+    return ret;
+}
+
+RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
+  RetVal ret;
 
   bool returnFound = false;
   uint16_t pc = 0;
 
   while (!returnFound) {
-    uint8_t inst = code.code[pc];
+    uint8_t inst = frame->code.code[pc];
 
     switch (inst) {
 
       case I_LOAD_CONST:  { // (8), index (16) | (-> value)
 
-        uint16_t constantIndex = (code.code[pc + 1] << 8) | code.code[pc + 2];
-        Value constant = topLevel->constants[constantIndex];
-        throws(tryOpStackPush(&topLevel->opStack, constant, error));
+        uint16_t constantIndex = (frame->code.code[pc + 1] << 8) | frame->code.code[pc + 2];
+        Value constant = frame->constants[constantIndex];
+        throws(tryOpStackPush(frame->opStack, constant, error));
 
         pc = pc + 3;
         break;
       }
 
       case I_LOAD_LOCAL:  { // (8), index  (16) | (-> value)
-        uint16_t localIndex = *((uint16_t *)(code.code + pc + 1));
-        Value v = topLevel->locals[localIndex];
-        throws(tryOpStackPush(&topLevel->opStack, v, error));
+        uint16_t localIndex = *((uint16_t *)(frame->code.code + pc + 1));
+        Value v = frame->locals[localIndex];
+        throws(tryOpStackPush(frame->opStack, v, error));
 
         pc = pc + 3;
         break;
       }
 
       case I_STORE_LOCAL: { // (8), index  (16) | (objectref ->)
-        uint16_t localIndex = *((uint16_t *)(code.code + pc + 1));
+        uint16_t localIndex = *((uint16_t *)(frame->code.code + pc + 1));
         Value v;
-        throws(tryOpStackPop(&topLevel->opStack, &v, error));
-        topLevel->locals[localIndex] = v;
+        throws(tryOpStackPop(frame->opStack, &v, error));
+        frame->locals[localIndex] = v;
 
         pc = pc + 3;
         break;
       }
 
       case I_INVOKE: {      // (8)              | (objectref, args... -> ...)
-//        Value invocable;
-//        throws(tryOpStackPop(&topLevel->opStack, &invocable, error));
-//
-//        if (invocable.type != VT_FN) {
-//          throwRuntimeError(error, "cannot invoke this as a function!");
-//        }
-
-        throwRuntimeError(error, "invoke not implemented");
+        throws(tryInvoke(vm, frame, error));
+        pc = pc + 1;
+        break;
       }
       case I_RET: {         // (8)              | (objectref ->)
         // this is the toplevel version where the compiler pretends the toplevel code is returning from a function call
         Value v;
-        throws(tryOpStackPop(&topLevel->opStack, &v, error));
-        *result = v;
+        throws(tryOpStackPop(frame->opStack, &v, error));
+        frame->result = v;
         returnFound = true;
         break;
       }
       case I_CMP: {         // (8)              | (a, b -> 0 | 1)
         Value a, b;
-        throws(tryOpStackPop(&topLevel->opStack, &a, error));
-        throws(tryOpStackPop(&topLevel->opStack, &b, error));
+        throws(tryOpStackPop(frame->opStack, &a, error));
+        throws(tryOpStackPop(frame->opStack, &b, error));
 
         Value c;
         c.type = VT_BOOL;
@@ -484,20 +550,20 @@ RetVal tryTopLevelFrameEval(VM *vm, TopLevelFrame *topLevel, Value *result, Erro
           c.value = true;
         }
 
-        throws(tryOpStackPush(&topLevel->opStack, c, error));
+        throws(tryOpStackPush(frame->opStack, c, error));
 
         pc = pc + 1;
         break;
       }
       case I_JMP: {         // (8), offset (16) | (->)
-        uint16_t newPc = *((uint16_t *)(code.code + pc + 1));
+        uint16_t newPc = *((uint16_t *)(frame->code.code + pc + 1));
         pc = newPc;
         break;
       }
       case I_JMP_IF: {      // (8), offset (16) | (value ->)
 
         Value test;
-        throws(tryOpStackPop(&topLevel->opStack, &test, error));
+        throws(tryOpStackPop(frame->opStack, &test, error));
 
         bool truthy;
         if (test.type == VT_BOOL) {
@@ -514,7 +580,7 @@ RetVal tryTopLevelFrameEval(VM *vm, TopLevelFrame *topLevel, Value *result, Erro
         }
 
         if (truthy) {
-          uint16_t newPc = *((uint16_t *) (code.code + pc + 1));
+          uint16_t newPc = *((uint16_t *) (frame->code.code + pc + 1));
           pc = newPc;
         }
 
@@ -522,8 +588,8 @@ RetVal tryTopLevelFrameEval(VM *vm, TopLevelFrame *topLevel, Value *result, Erro
       }
       case I_PLUS: {        // (8)              | (a, b -> c)
         Value a, b;
-        throws(tryOpStackPop(&topLevel->opStack, &a, error));
-        throws(tryOpStackPop(&topLevel->opStack, &b, error));
+        throws(tryOpStackPop(frame->opStack, &a, error));
+        throws(tryOpStackPop(frame->opStack, &b, error));
 
         if (a.type != VT_UINT || b.type != VT_UINT) {
           throwRuntimeError(error, "can only add two integers");
@@ -533,7 +599,7 @@ RetVal tryTopLevelFrameEval(VM *vm, TopLevelFrame *topLevel, Value *result, Erro
         c.type = VT_UINT;
         c.value = a.value + b.value;
 
-        throws(tryOpStackPush(&topLevel->opStack, c, error));
+        throws(tryOpStackPush(frame->opStack, c, error));
 
         pc = pc + 1;
         break;
@@ -548,18 +614,40 @@ RetVal tryTopLevelFrameEval(VM *vm, TopLevelFrame *topLevel, Value *result, Erro
         throwRuntimeError(error, "load var unimplemented");
       }
 
-      // requires garbage collection
+        // requires garbage collection
       case I_NEW:           // (8), objlen (16) | (-> objectref)
       case I_GET_FIELD:     // (8), index  (16) | (objectref -> value)
       case I_SET_FIELD:     // (8), index  (16) | (objectref, value ->)
       case I_NEW_ARRAY:     // (8), objlen (16) | (arraylen -> objectref)
       case I_LOAD_ARRAY:    // (8)              | (objectref, index -> value)
       case I_STORE_ARRAY:   // (8)              | (objectref, index, value ->)
-        throwRuntimeError(error, "instruction unimplemented");
+      throwRuntimeError(error, "instruction unimplemented");
         break;
     }
   }
 
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryTopLevelFrameEval(VM *vm, TopLevelFrame *topLevel, Value *result, Error *error) {
+  RetVal ret;
+
+  Frame frame;
+  frame.parent = NULL;
+  frame.numConstants = topLevel->numConstants;
+  frame.constants = topLevel->constants;
+  frame.code = topLevel->code;
+  frame.locals = topLevel->locals;
+  frame.opStack = &topLevel->opStack;
+  frame.result.type = VT_NIL;
+  frame.result.value = 0;
+
+  throws(tryFrameEval(vm, &frame, error));
+
+  *result = frame.result;
   return R_SUCCESS;
 
   failure:
