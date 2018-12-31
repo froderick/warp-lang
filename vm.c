@@ -418,7 +418,6 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
         break;
       }
       case I_RET: {         // (8)              | (objectref ->)
-        // this is the toplevel version where the compiler pretends the toplevel code is returning from a function call
         Value v;
         throws(tryOpStackPop(frame->opStack, &v, error));
         frame->result = v;
