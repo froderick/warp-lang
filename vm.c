@@ -157,70 +157,6 @@ RetVal tryOpStackPop(OpStack *stack, Value *ptr, Error *error) {
     return ret;
 }
 
-//typedef struct Code {
-//  uint64_t numLocals;           // the number of local bindings this code unit uses
-//  uint64_t maxOperandStackSize; // the maximum number of items this code pushes onto the operand stack at one time
-//  uint64_t codeLength;          // the number of bytes in this code block
-//  uint8_t *code;                // this code block's actual instructions
-//  SourceTable sourceTable;      // this lines up lines of code to generated instruction ranges
-//} Code;
-
-//typedef struct Fn_wut {
-
-  // TODO: hold a table of Value references to functions and constants defined internally within this function
-  // this way this function can be hydrated from a CodeUnit once, and have all its inner functions
-  // hydrated once as well.
-
-  // TODO: functions should not have 'inner' functions. The bytecode format should require that all functions definittions
-  // be hoisted to the top level. code that references functions expliclitly by value, and not indirectly, can use
-  // the mechanism below:
-
-  // going from a CodeUnit to a hydrated representation of a function should not result in a code rewrite
-  // you can avoid a rewrite by having the bytecode say "load the value of this function reference", where the
-  // reference is mapped in the header of the Fn to an actual object reference to the function in question. This can
-  // be populated at the time that the Fn is loaded as a value for the first time.
-
-  // TODO: a big part of my confusion has been conflating function loading with function invocation/execution
-
-  // It must be a property of functions that they retain references to the values they explicitly reference
-  // beyond a given function call, otherwise all these values have to be re-hydrated from the CodeUnit every time...
-
-//};
-
-// there are three concepts I'd like to separate:
-// 1. the CodeUnit that is generated for a function
-//    - this includes the actual instructions
-//    - this also includes source metadata and constants
-//    - this should live on the heap, and be gc-able
-// 2. the actual value that can be used to invoke that function
-//    - this should really be a singleton
-//    - this should live on the heap, and be gc-able
-//    - this should hold an object reference to its CodeUnit to prevent it from being gc-ed too soon
-// 3. the way this value is discovered by code that wants to invoke it
-//    - a literal function reference, returned as a value from another function call
-//    - a local
-//    - a var
-// and yet...
-// it would be much easier to duplicate the constants into the functions themselves where needed
-// TODO: *so let's do that instead*
-
-typedef struct TopLevelFrame {
-  uint16_t numConstants;
-  Value *constants;
-  Code code;
-  uint16_t numLocals;
-  Value *locals;
-  OpStack opStack;
-} TopLevelFrame;
-
-//typedef struct Code {
-//  uint64_t numLocals;           // the number of local bindings this code unit uses
-//  uint64_t maxOperandStackSize; // the maximum number of items this code pushes onto the operand stack at one time
-//  uint64_t codeLength;          // the number of bytes in this code block
-//  uint8_t *code;                // this code block's actual instructions
-//  SourceTable sourceTable;      // this lines up lines of code to generated instruction ranges
-//} Code;
-
 void sourceTableFreeContents(SourceTable *t) {
 
   t->fileNameLength = 0;
@@ -283,7 +219,6 @@ RetVal tryCodeDeepCopy(Code *from, Code *to, Error *error) {
     return ret;
 }
 
-void topLevelFrameFreeContents(TopLevelFrame *topLevel);
 
 RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr, Error *error);
 
@@ -370,52 +305,6 @@ RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, V
       free(values);
     }
     return ret;
-}
-
-RetVal tryTopLevelFrameLoad(VM *vm, TopLevelFrame *topLevel, CodeUnit *codeUnit, Error *error) {
-  RetVal ret;
-
-  // hydrate all constant values referenced by the code
-
-  topLevel->numConstants = codeUnit->numConstants;
-  tryMalloc(topLevel->constants, sizeof(Value) * topLevel->numConstants, "Value array");
-  throws(tryHydrateConstants(vm, codeUnit->numConstants, codeUnit->constants, &topLevel->constants, error));
-
-  // deep-copy the code
-
-  throws(tryCodeDeepCopy(&codeUnit->code, &topLevel->code, error));
-
-  // allocate frame space
-
-  topLevel->numLocals = codeUnit->code.numLocals;
-  tryMalloc(topLevel->locals, sizeof(Value) * topLevel->numLocals, "Value array for locals");
-  throws(tryOpStackInitContents(&topLevel->opStack, codeUnit->code.maxOperandStackSize, error));
-  return R_SUCCESS;
-
-  failure:
-    topLevelFrameFreeContents(topLevel);
-    return ret;
-}
-
-void topLevelFrameFreeContents(TopLevelFrame *topLevel) {
-  if (topLevel != NULL) {
-
-    topLevel->numConstants = 0;
-    if (topLevel->constants != NULL) {
-      free(topLevel->constants);
-      topLevel->constants = NULL;
-    }
-
-    codeFreeContents(&topLevel->code);
-
-    topLevel->numLocals = 0;
-    if (topLevel->locals != NULL) {
-      free(topLevel->locals);
-      topLevel->locals = NULL;
-    }
-
-    opStackFreeContents(&topLevel->opStack);
-  }
 }
 
 typedef struct Frame Frame;
@@ -632,8 +521,70 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
   return ret;
 }
 
-RetVal tryTopLevelFrameEval(VM *vm, TopLevelFrame *topLevel, Value *result, Error *error) {
+typedef struct TopLevelFrame {
+  uint16_t numConstants;
+  Value *constants;
+  Code code;
+  uint16_t numLocals;
+  Value *locals;
+  OpStack opStack;
+} TopLevelFrame;
+
+void topLevelFrameFreeContents(TopLevelFrame *topLevel);
+
+RetVal tryTopLevelFrameLoad(VM *vm, TopLevelFrame *topLevel, CodeUnit *codeUnit, Error *error) {
   RetVal ret;
+
+  // hydrate all constant values referenced by the code
+
+  topLevel->numConstants = codeUnit->numConstants;
+  tryMalloc(topLevel->constants, sizeof(Value) * topLevel->numConstants, "Value array");
+  throws(tryHydrateConstants(vm, codeUnit->numConstants, codeUnit->constants, &topLevel->constants, error));
+
+  // deep-copy the code
+
+  throws(tryCodeDeepCopy(&codeUnit->code, &topLevel->code, error));
+
+  // allocate frame space
+
+  topLevel->numLocals = codeUnit->code.numLocals;
+  tryMalloc(topLevel->locals, sizeof(Value) * topLevel->numLocals, "Value array for locals");
+  throws(tryOpStackInitContents(&topLevel->opStack, codeUnit->code.maxOperandStackSize, error));
+  return R_SUCCESS;
+
+  failure:
+  topLevelFrameFreeContents(topLevel);
+  return ret;
+}
+
+void topLevelFrameFreeContents(TopLevelFrame *topLevel) {
+  if (topLevel != NULL) {
+
+    topLevel->numConstants = 0;
+    if (topLevel->constants != NULL) {
+      free(topLevel->constants);
+      topLevel->constants = NULL;
+    }
+
+    codeFreeContents(&topLevel->code);
+
+    topLevel->numLocals = 0;
+    if (topLevel->locals != NULL) {
+      free(topLevel->locals);
+      topLevel->locals = NULL;
+    }
+
+    opStackFreeContents(&topLevel->opStack);
+  }
+}
+
+RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
+
+  RetVal ret;
+
+  TopLevelFrame *topLevel;
+  tryMalloc(topLevel, sizeof(TopLevelFrame), "TopLevelFrame")
+  throws(tryTopLevelFrameLoad(vm, topLevel, codeUnit, error));
 
   Frame frame;
   frame.parent = NULL;
@@ -647,26 +598,10 @@ RetVal tryTopLevelFrameEval(VM *vm, TopLevelFrame *topLevel, Value *result, Erro
 
   throws(tryFrameEval(vm, &frame, error));
 
+  topLevelFrameFreeContents(topLevel);
+
   *result = frame.result;
   return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
-RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
-
-  RetVal ret;
-
-  TopLevelFrame *topLevel;
-  tryMalloc(topLevel, sizeof(TopLevelFrame), "TopLevelFrame")
-  throws(tryTopLevelFrameLoad(vm, topLevel, codeUnit, error));
-
-  throws(tryTopLevelFrameEval(vm, topLevel, result, error));
-
-  topLevelFrameFreeContents(topLevel);
-  ret = R_SUCCESS;
-  return ret;
 
   failure:
     if (topLevel != NULL) {
@@ -675,41 +610,45 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
     return ret;
 }
 
+/*
+ * Here begin scratch thoughts that are probably mostly invalid by the time anyone reads them.
+ */
 
+// hold a table of Value references to functions and constants defined internally within this function
+// this way this function can be hydrated from a CodeUnit once, and have all its inner functions
+// hydrated once as well.
 
+// functions should not have 'inner' functions. The bytecode format should require that all functions definittions
+// be hoisted to the top level. code that references functions expliclitly by value, and not indirectly, can use
+// the mechanism below:
 
+// going from a CodeUnit to a hydrated representation of a function should not result in a code rewrite
+// you can avoid a rewrite by having the bytecode say "load the value of this function reference", where the
+// reference is mapped in the header of the Fn to an actual object reference to the function in question. This can
+// be populated at the time that the Fn is loaded as a value for the first time.
 
+// a big part of my confusion has been conflating function loading with function invocation/execution
 
+// It must be a property of functions that they retain references to the values they explicitly reference
+// beyond a given function call, otherwise all these values have to be re-hydrated from the CodeUnit every time...
 
+//};
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+// there are three concepts I'd like to separate:
+// 1. the CodeUnit that is generated for a function
+//    - this includes the actual instructions
+//    - this also includes source metadata and constants
+//    - this should live on the heap, and be gc-able
+// 2. the actual value that can be used to invoke that function
+//    - this should really be a singleton
+//    - this should live on the heap, and be gc-able
+//    - this should hold an object reference to its CodeUnit to prevent it from being gc-ed too soon
+// 3. the way this value is discovered by code that wants to invoke it
+//    - a literal function reference, returned as a value from another function call
+//    - a local
+//    - a var
+// and yet...
+// it would be much easier to duplicate the constants into the functions themselves where needed
 
 //;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; Value Spec ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
