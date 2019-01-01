@@ -11,6 +11,7 @@ typedef enum ErrorType {
   E_LEXER,
   E_SYNTAX,
   E_RUNTIME,
+  E_NONE,
 } ErrorType;
 
 typedef struct LexerError {
@@ -35,6 +36,7 @@ typedef struct Error {
   const char *functionName;
 } Error;
 
+void errorInitContents(Error *error);
 
 /*
  * These are the core return codes:
@@ -73,68 +75,68 @@ RetVal syntaxError(Error *error, unsigned long position, char *desc);
 RetVal runtimeError(Error *error, char *desc);
 
 #define throwMemoryError(error, str, ...) {\
+  error->fileName = __FILE__; \
+  error->lineNumber = __LINE__; \
+  error->functionName = __func__; \
   int len = 64; \
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   ret = memoryError(error, msg); \
-  error->fileName = __FILE__; \
-  error->lineNumber = __LINE__; \
-  error->functionName = __func__; \
   goto failure; \
 }
 
 #define throwIOError(error, str, ...) {\
+  error->fileName = __FILE__; \
+  error->lineNumber = __LINE__; \
+  error->functionName = __func__; \
   int len = 64; \
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   ret = ioError(error, msg); \
-  error->fileName = __FILE__; \
-  error->lineNumber = __LINE__; \
-  error->functionName = __func__; \
   goto failure; \
 }
 
 #define throwInternalError(error, str, ...) {\
+  error->fileName = __FILE__; \
+  error->lineNumber = __LINE__; \
+  error->functionName = __func__; \
   int len = 64; \
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   ret = internalError(error, msg); \
-  error->fileName = __FILE__; \
-  error->lineNumber = __LINE__; \
-  error->functionName = __func__; \
   goto failure; \
 }
 
 #define throwTokenizationError(error, pos, str, ...) {\
+  error->fileName = __FILE__; \
+  error->lineNumber = __LINE__; \
+  error->functionName = __func__; \
   int len = 64; \
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   ret = tokenizationError(error, pos, msg); \
-  error->fileName = __FILE__; \
-  error->lineNumber = __LINE__; \
-  error->functionName = __func__; \
   goto failure; \
 }
 
 #define throwSyntaxError(error, pos, str, ...) {\
+  error->fileName = __FILE__; \
+  error->lineNumber = __LINE__; \
+  error->functionName = __func__; \
   int len = 64; \
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   ret = syntaxError(error, pos, msg); \
-  error->fileName = __FILE__; \
-  error->lineNumber = __LINE__; \
-  error->functionName = __func__; \
   goto failure; \
 }
 
 #define throwRuntimeError(error, str, ...) {\
+  error->fileName = __FILE__; \
+  error->lineNumber = __LINE__; \
+  error->functionName = __func__; \
   int len = 64; \
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   ret = runtimeError(error, msg); \
-  error->fileName = __FILE__; \
-  error->lineNumber = __LINE__; \
-  error->functionName = __func__; \
   goto failure; \
 }
 
@@ -148,10 +150,10 @@ RetVal runtimeError(Error *error, char *desc);
 #define tryMalloc(var, size, desc) {\
   var = malloc(size);\
   if (var == NULL) {\
-    ret = memoryError(error, desc);\
     error->fileName = __FILE__; \
     error->lineNumber = __LINE__; \
     error->functionName = __func__; \
+    ret = memoryError(error, desc);\
     goto failure; \
   }\
 }
