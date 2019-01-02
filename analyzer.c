@@ -127,7 +127,7 @@ RetVal tryAppendVar(VarList *list, Var var, Error* error) {
   else if (list->length == list->allocatedLength) {
     uint64_t newAllocatedLength = list->allocatedLength * 2;
 
-    Var* resizedVars = realloc(list->vars, newAllocatedLength);
+    Var* resizedVars = realloc(list->vars, newAllocatedLength * sizeof(Var));
     if (resizedVars == NULL) {
       ret = memoryError(error, "realloc Var array");
       goto failure;
