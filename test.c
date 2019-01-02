@@ -413,6 +413,32 @@ START_TEST(compilerBasic) {
 
       codeUnitFreeContents(&codeUnit);
     }
+
+    // fn and fn-call
+    {
+      ck_assert_int_eq(tryTestCompile(L"((fn (a b) (builtin :add a b)) 4 5)", &codeUnit, &e), R_SUCCESS);
+
+      ck_assert_int_eq(codeUnit.numConstants, 2);
+      ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[0].integer, 1);
+      ck_assert_int_eq(codeUnit.constants[1].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[1].integer, 2);
+
+      ck_assert_int_eq(codeUnit.code.numLocals, 0);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
+      ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
+
+      uint8_t expectedCode[] = {
+          I_LOAD_CONST, 0, 0,
+          I_LOAD_CONST, 0, 1,
+          I_ADD,
+      };
+
+      ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
+      ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
+
+      codeUnitFreeContents(&codeUnit);
+    }
   }
 END_TEST
 
@@ -499,7 +525,7 @@ int main(int argc, char** argv)
   s = suite();
   sr = srunner_create(s);
 
-  srunner_run_all(sr, CK_NORMAL);
+  srunner_run_all(sr, CK_VERBOSE);
   number_failed = srunner_ntests_failed(sr);
   srunner_free(sr);
   return (number_failed == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
