@@ -70,6 +70,117 @@ RetVal tryDerefFn(GC *gc, Value value, Fn *fn, Error *error) {
     return ret;
 }
 
+void sourceTableInitContents(SourceTable *t) {
+  t->lineNumbers = NULL;
+  t->numLineNumbers = 0;
+  t->fileName = NULL;
+  t->fileNameLength = 0;
+}
+
+void sourceTableFreeContents(SourceTable *t) {
+  t->fileNameLength = 0;
+  if (t->fileName != NULL) {
+    free(t->fileName);
+    t->fileName = NULL;
+  }
+  t->numLineNumbers = 0;
+  if (t->lineNumbers != NULL) {
+    free(t->lineNumbers);
+    t->lineNumbers = NULL;
+  }
+}
+
+void codeInitContents(Code *code) {
+  code->maxOperandStackSize = 0;
+  code->numLocals = 0;
+  code->hasSourceTable = false;
+  code->code = NULL;
+  code->codeLength = 0;
+  sourceTableInitContents(&code->sourceTable);
+}
+
+void codeFreeContents(Code *code) {
+  if (code != NULL) {
+
+    code->numLocals = 0;
+    code->maxOperandStackSize = 0;
+    code->codeLength = 0;
+
+    if (code->code != NULL) {
+      free(code->code);
+      code->code = NULL;
+    }
+
+    if (code->hasSourceTable) {
+      code->hasSourceTable = false;
+      sourceTableFreeContents(&code->sourceTable);
+    }
+  }
+}
+
+void _constantFreeContents(Constant *c);
+
+void constantFnFreeContents(FnConstant *fnConst) {
+  if (fnConst != NULL) {
+    fnConst->numArgs = 0;
+    if (fnConst->constants != NULL) {
+      for (int i = 0; i < fnConst->numConstants; i++) {
+        _constantFreeContents(&fnConst->constants[i]);
+      }
+      fnConst->numConstants = 0;
+      free(fnConst->constants);
+      fnConst->constants = NULL;
+    }
+    codeFreeContents(&fnConst->code);
+  }
+}
+
+void _constantFreeContents(Constant *c) {
+  if (c != NULL) {
+    switch (c->type) {
+      case CT_NONE:
+      case CT_NIL:
+        break;
+      case CT_BOOL:
+        c->boolean = false;
+        break;
+      case CT_INT:
+        c->integer = 0;
+        break;
+      case CT_STR:
+        c->string.length = 0;
+        if (c->string.value != NULL) {
+          free(c->string.value);
+          c->string.value = NULL;
+        }
+        break;
+      case CT_FN:
+        constantFnFreeContents(&c->function);
+        break;
+    }
+  }
+}
+
+void codeUnitInitContents(CodeUnit *codeUnit) {
+  codeUnit->constants = NULL;
+  codeUnit->numConstants = 0;
+  codeInitContents(&codeUnit->code);
+}
+
+void codeUnitFreeContents(CodeUnit *u) {
+  if (u != NULL) {
+    if (u->constants != NULL) {
+      for (int i = 0; i < u->numConstants; i++) {
+        _constantFreeContents(&u->constants[i]);
+      }
+      u->numConstants = 0;
+      free(u->constants);
+      u->constants = NULL;
+    }
+    codeFreeContents(&u->code);
+  }
+}
+
 typedef struct VM {
   // TODO: we don't support vars or define yet
   GC gc;
@@ -155,41 +266,6 @@ RetVal tryOpStackPop(OpStack *stack, Value *ptr, Error *error) {
 
   failure:
     return ret;
-}
-
-void sourceTableFreeContents(SourceTable *t) {
-
-  t->fileNameLength = 0;
-
-  if (t->fileName != NULL) {
-    free(t->fileName);
-    t->fileName = NULL;
-  }
-
-  t->numLineNumbers = 0;
-  if (t->lineNumbers != NULL) {
-    free(t->lineNumbers);
-    t->lineNumbers = NULL;
-  }
-}
-
-void codeFreeContents(Code *code) {
-  if (code != NULL) {
-
-    code->numLocals = 0;
-    code->maxOperandStackSize = 0;
-    code->codeLength = 0;
-
-    if (code->code != NULL) {
-      free(code->code);
-      code->code = NULL;
-    }
-
-    if (code->hasSourceTable) {
-      code->hasSourceTable = false;
-      sourceTableFreeContents(&code->sourceTable);
-    }
-  }
 }
 
 RetVal tryCodeDeepCopy(Code *from, Code *to, Error *error) {
@@ -285,12 +361,14 @@ RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, V
         v.type = VT_NIL;
         v.value = 0;
         break;
-      case CT_FN: {
+      case CT_FN:
         throws(tryFnHydrate(vm, &c.function, &v, error));
         break;
-      }
       case CT_STR:
         throwRuntimeError(error, "invoke not implemented");
+        break;
+      case CT_NONE:
+        throwInternalError(error, "invalid constant");
         break;
     }
 
@@ -474,7 +552,33 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
 
         break;
       }
-      case I_PLUS: {        // (8)              | (a, b -> c)
+      case I_JMP_IF_NOT: {      // (8), offset (16) | (value ->)
+
+        Value test;
+        throws(tryOpStackPop(frame->opStack, &test, error));
+
+        bool truthy;
+        if (test.type == VT_BOOL) {
+          truthy = test.value > 0;
+        }
+        else if (test.type == VT_UINT) {
+          truthy = test.value > 0;
+        }
+        else if (test.type == VT_NIL) {
+          truthy = false;
+        }
+        else {
+          throwRuntimeError(error, "unhandled truth");
+        }
+
+        if (!truthy) {
+          uint16_t newPc = *((uint16_t *) (frame->code.code + pc + 1));
+          pc = newPc;
+        }
+
+        break;
+      }
+      case I_ADD: {        // (8)              | (a, b -> c)
         Value a, b;
         throws(tryOpStackPop(frame->opStack, &a, error));
         throws(tryOpStackPop(frame->opStack, &b, error));

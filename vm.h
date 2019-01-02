@@ -44,8 +44,9 @@ typedef enum InstType {
   I_CMP,         // (8)              | (a, b -> 0 | 1)
   I_JMP,         // (8), offset (16) | (->)
   I_JMP_IF,      // (8), offset (16) | (value ->)
+  I_JMP_IF_NOT,  // (8), offset (16) | (value ->)
   I_HALT,        // (8)              | (exitcode ->)
-  I_PLUS,        // (8)              | (a, b -> c)
+  I_ADD,        // (8)              | (a, b -> c)
   I_DEF_VAR,     // (8)              | (name, value ->)
   I_LOAD_VAR,    // (8)              | (name -> value)
 
@@ -63,6 +64,7 @@ typedef enum InstType {
 // These constant values are represented as a part of the CodeUnit that is submitted to the vm for evaluation.
 
 typedef enum ConstantType {
+  CT_NONE,
   CT_BOOL,
   CT_INT,
   CT_NIL,
@@ -99,6 +101,12 @@ typedef struct CodeUnit {
   Constant *constants;
   Code code;
 } CodeUnit;
+
+void sourceTableInitContents(SourceTable *t);
+void codeInitContents(Code *code);
+void codeUnitInitContents(CodeUnit *codeUnit);
+
+void codeUnitFreeContents(CodeUnit *codeUnit);
 
 typedef struct VM *VM_t;
 

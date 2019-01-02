@@ -143,12 +143,15 @@ typedef struct FormFnCall {
   uint64_t numArgs;
 } FormFnCall;
 
-typedef enum FormBuiltinType {
-  B_NONE
-} FormBuiltinType;
-
+/*
+ * `builtin` is a special form that allows code to invoke compile-target specific functionality.
+ * Analyzer does not interpret builtins, they are handled exclusively by the compiler/code emitter.
+ *
+ * (builtin :add 10 20)
+ */
 typedef struct FormBuiltin {
-  wchar_t* name;
+  wchar_t *name;
+  uint64_t nameLength;
   Form *args;
   uint64_t numArgs;
 } FormBuiltin;

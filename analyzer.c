@@ -680,6 +680,60 @@ void fnFreeContents(FormFn *fn) {
   }
 }
 
+void builtinFreeContents(FormBuiltin *builtin);
+
+RetVal tryBuiltinAnalyze(FormAnalyzer *analyzer, Expr *expr, FormBuiltin *builtin, Error *error) {
+
+  RetVal ret;
+
+  builtin->numArgs = 0;
+  builtin->args = NULL;
+  builtin->name = NULL;
+  builtin->nameLength = 0;
+
+  Expr *name = expr->list.head->next->expr;
+  if (name->type != N_KEYWORD) {
+    throwSyntaxError(error, name->source.position, "the 'builtin' special form requires the first parameter to be a keyword");
+  }
+
+  builtin->nameLength = name->keyword.length;
+  throws(tryCopyText(name->keyword.value, &builtin->name, builtin->nameLength, error));
+
+  builtin->numArgs = expr->list.length - 2;
+  tryMalloc(builtin->args, sizeof(Form) * builtin->numArgs, "Form array");
+
+  ListElement *argExpr = expr->list.head->next->next;
+  for (int i=0; i<builtin->numArgs; i++) {
+    Form *arg = builtin->args + i;
+    throws(tryFormAnalyzeContents(analyzer, argExpr->expr, arg, error));
+    argExpr = argExpr->next;
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    builtinFreeContents(builtin);
+    return ret;
+}
+
+void builtinFreeContents(FormBuiltin *builtin) {
+  if (builtin != NULL) {
+    if (builtin->name != NULL) {
+      free(builtin->name);
+      builtin->name = NULL;
+      builtin->nameLength = 0;
+    }
+    if (builtin->args != NULL) {
+      for (int i=0; i<builtin->numArgs; i++) {
+        formFreeContents(builtin->args+ i);
+      }
+      free(builtin->args);
+      builtin->args = NULL;
+      builtin->numArgs = 0;
+    }
+  }
+}
+
 RetVal tryEnvRefAnalyze(FormAnalyzer *analyzer, Expr *expr, EnvBinding *binding, FormEnvRef *envRef, Error *error) {
 
   envRef->type = binding->type;
@@ -872,6 +926,12 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
           throws(tryFnAnalyze(analyzer, expr, &form->fn, error));
           break;
         }
+
+        if (wcscmp(sym, L"builtin") == 0) {
+          form->type = F_BUILTIN;
+          throws(tryBuiltinAnalyze(analyzer, expr, &form->builtin, error));
+          break;
+        }
       }
 
       // assume fn-callable
@@ -925,16 +985,16 @@ void formFreeContents(Form* form) {
         defFreeContents(&form->def);
         break;
       case F_ENV_REF:
-        // do nothing (FOR NOW)
+        // TODO: do nothing (FOR NOW)
         break;
       case F_VAR_REF:
-        // do nothing (FOR NOW)
+        // TODO: do nothing (FOR NOW)
         break;
       case F_FN:
         fnFreeContents(&form->fn);
         break;
       case F_BUILTIN:
-        // TODO
+        builtinFreeContents(&form->builtin);
         break;
       case F_FN_CALL:
         fnCallFreeContents(&form->fnCall);
@@ -1040,7 +1100,18 @@ RetVal tryFormDeepCopy(Form *from, Form **ptr, Error *error) {
       break;
 
     case F_BUILTIN:
-      // TODO
+      to->builtin.nameLength = from->builtin.nameLength;
+      throws(tryCopyText(from->builtin.name, &to->builtin.name, to->builtin.nameLength, error));
+
+      to->builtin.numArgs = from->builtin.numArgs;
+      tryMalloc(to->builtin.args, sizeof(Form) * to->builtin.numArgs, "Form array");
+
+      for (int i=0; i<to->builtin.numArgs; i++) {
+        Form *fromArg = &from->builtin.args[i];
+        Form *toArg = &to->builtin.args[i];
+        throws(tryFormDeepCopy(fromArg, &toArg, error));
+      }
+
       break;
 
     case F_FN_CALL:

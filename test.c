@@ -7,6 +7,7 @@
 #include <errno.h>
 #include "reader.h"
 #include "analyzer.h"
+#include "compiler.h"
 #include "vm.h"
 
 void assertToken(Token *t,
@@ -23,6 +24,7 @@ START_TEST(basic) {
   wchar_t* text = L"(one :two 345 '\"six\") true false nil";
 
   Error e;
+  errorInitContents(&e);
 
   InputStream_t source;
   ck_assert_int_eq(tryStringInputStreamMake(text, wcslen(text), &source, &e), R_SUCCESS);
@@ -84,6 +86,7 @@ START_TEST(eof_mid_number_token) {
     wchar_t* text = L"12345";
 
     Error e;
+    errorInitContents(&e);
 
     InputStream_t source;
     ck_assert_int_eq(tryStringInputStreamMake(text, wcslen(text), &source, &e), R_SUCCESS);
@@ -109,6 +112,7 @@ START_TEST(errors) {
     wchar_t* text = L":";
 
     Error e;
+    errorInitContents(&e);
 
     InputStream_t source;
     ck_assert_int_eq(tryStringInputStreamMake(text, wcslen(text), &source, &e), R_SUCCESS);
@@ -135,6 +139,7 @@ START_TEST(parser) {
     wchar_t* input = L"\"str\" 102 \n himom :rocks true nil (true false) 'nil";
 
     Error e;
+    errorInitContents(&e);
     InputStream_t source;
     TokenStream_t stream;
     Expr *expr;
@@ -244,6 +249,7 @@ START_TEST(exprPrn)
     FormAnalyzer *analyzer;
     Expr *expr;
 
+    errorInitContents(&e);
     ck_assert_int_eq(tryAnalyzerMake(&analyzer, &e), R_SUCCESS);
 
     // constant
@@ -261,6 +267,7 @@ START_TEST(analyzer) {
     Expr *expr;
     Form *form;
 
+    errorInitContents(&e);
     ck_assert_int_eq(tryAnalyzerMake(&analyzer, &e), R_SUCCESS);
 
     // constant
@@ -339,18 +346,71 @@ START_TEST(analyzer) {
   }
 END_TEST
 
+void printFnConst(FnConstant *fnConst) {
+
+}
+
+void printCodeUnit(CodeUnit *unit) {
+  // TODO: finish me
+  for (int i=0; i<unit->code.codeLength; i++) {
+    printf("%i\n", unit->code.code[i]);
+  }
+}
+
+START_TEST(compilerBasic) {
+
+    Error e;
+    FormAnalyzer *analyzer;
+    Expr *expr;
+    Form *form;
+    CodeUnit codeUnit;
+
+    errorInitContents(&e);
+    ck_assert_int_eq(tryAnalyzerMake(&analyzer, &e), R_SUCCESS);
+
+    // builtin add
+    ck_assert_int_eq(tryParse(L"(builtin :add 1 2)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryCompileTopLevel(form, &codeUnit, &e), R_SUCCESS);
+
+    ck_assert_int_eq(codeUnit.numConstants, 2);
+    ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
+    ck_assert_int_eq(codeUnit.constants[0].integer, 1);
+    ck_assert_int_eq(codeUnit.constants[1].type, CT_INT);
+    ck_assert_int_eq(codeUnit.constants[1].integer, 2);
+
+    ck_assert_int_eq(codeUnit.code.numLocals, 0);
+    ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
+    ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
+
+    uint8_t expectedCode[] = {
+        I_LOAD_CONST, 0, 0,
+        I_LOAD_CONST, 0, 1,
+        I_ADD,
+    };
+
+    ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
+    ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
+
+    exprFree(expr);
+    formFreeContents(form);
+    codeUnitFreeContents(&codeUnit);
+  }
+END_TEST
+
 START_TEST(vmBasic) {
 
     Error error;
     VM_t vm;
     Value result;
 
+    errorInitContents(&error);
     ck_assert_int_eq(tryVMMake(&vm, &error), R_SUCCESS);
 
     uint8_t fnCode[] = {
         I_LOAD_CONST, 0, 0,
         I_LOAD_LOCAL, 0, 0,
-        I_PLUS,
+        I_ADD,
         I_RET
     };
 
@@ -403,6 +463,7 @@ Suite * suite(void) {
   tcase_add_test(tc_core, parser);
   tcase_add_test(tc_core, exprPrn);
   tcase_add_test(tc_core, analyzer);
+  tcase_add_test(tc_core, compilerBasic);
   tcase_add_test(tc_core, vmBasic);
 
   Suite *s = suite_create("lexer");
