@@ -357,44 +357,62 @@ void printCodeUnit(CodeUnit *unit) {
   }
 }
 
+RetVal tryTestCompile(wchar_t *input, CodeUnit *codeUnit, Error *error) {
+
+  RetVal ret;
+
+  FormAnalyzer *analyzer;
+  Expr *expr;
+  Form *form;
+
+  throws(tryAnalyzerMake(&analyzer, error));
+
+  throws(tryParse(input, &expr, error));
+  throws(tryFormAnalyze(analyzer, expr, &form, error));
+  throws(tryCompileTopLevel(form, codeUnit, error));
+
+//  analyzerFree(analyzer); // TODO: this is broken, going away anyway
+  exprFree(expr);
+  formFree(form);
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 START_TEST(compilerBasic) {
 
     Error e;
-    FormAnalyzer *analyzer;
-    Expr *expr;
-    Form *form;
     CodeUnit codeUnit;
 
     errorInitContents(&e);
-    ck_assert_int_eq(tryAnalyzerMake(&analyzer, &e), R_SUCCESS);
 
     // builtin add
-    ck_assert_int_eq(tryParse(L"(builtin :add 1 2)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
-    ck_assert_int_eq(tryCompileTopLevel(form, &codeUnit, &e), R_SUCCESS);
+    {
+      ck_assert_int_eq(tryTestCompile(L"(builtin :add 1 2)", &codeUnit, &e), R_SUCCESS);
 
-    ck_assert_int_eq(codeUnit.numConstants, 2);
-    ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
-    ck_assert_int_eq(codeUnit.constants[0].integer, 1);
-    ck_assert_int_eq(codeUnit.constants[1].type, CT_INT);
-    ck_assert_int_eq(codeUnit.constants[1].integer, 2);
+      ck_assert_int_eq(codeUnit.numConstants, 2);
+      ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[0].integer, 1);
+      ck_assert_int_eq(codeUnit.constants[1].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[1].integer, 2);
 
-    ck_assert_int_eq(codeUnit.code.numLocals, 0);
-    ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
-    ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
+      ck_assert_int_eq(codeUnit.code.numLocals, 0);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
+      ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
-    uint8_t expectedCode[] = {
-        I_LOAD_CONST, 0, 0,
-        I_LOAD_CONST, 0, 1,
-        I_ADD,
-    };
+      uint8_t expectedCode[] = {
+          I_LOAD_CONST, 0, 0,
+          I_LOAD_CONST, 0, 1,
+          I_ADD,
+      };
 
-    ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
-    ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
+      ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
+      ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
 
-    exprFree(expr);
-    formFreeContents(form);
-    codeUnitFreeContents(&codeUnit);
+      codeUnitFreeContents(&codeUnit);
+    }
   }
 END_TEST
 
