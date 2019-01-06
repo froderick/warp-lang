@@ -448,9 +448,9 @@ RetVal tryListRead(TokenStream_t stream, Expr **ptr, Error *error) {
   RetVal ret;
 
   // these get cleaned up on failure
-  Token *oParen, *cParen;
-  Expr *expr;
-  Expr *subexpr;
+  Token *oParen = NULL, *cParen = NULL;
+  Expr *expr = NULL;
+  Expr *subexpr = NULL;
 
   // convenience
 
@@ -471,7 +471,6 @@ RetVal tryListRead(TokenStream_t stream, Expr **ptr, Error *error) {
 
   while (true) {
 
-    Token *cParen;
     ret = tryStreamPeek(stream, &cParen, error);
     if (ret != R_SUCCESS) {
       if (ret == R_EOF) { // eof too soon
@@ -493,6 +492,7 @@ RetVal tryListRead(TokenStream_t stream, Expr **ptr, Error *error) {
       return R_SUCCESS;
     }
     else { // read a new expression and add it to the list
+      cParen = NULL;
 
       ret = tryExprRead(stream, &subexpr, error);
       if (ret != R_SUCCESS) {
@@ -517,7 +517,9 @@ RetVal tryListRead(TokenStream_t stream, Expr **ptr, Error *error) {
     if (subexpr != NULL) {
       exprFree(subexpr);
     }
-    exprFree(expr);
+    if (expr != NULL) {
+      exprFree(expr);
+    }
     return ret;
 }
 
