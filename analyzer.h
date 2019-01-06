@@ -82,6 +82,7 @@ typedef struct LexicalBinding {
   uint64_t nameLength;
   SourceLocation source;
   Form *value;
+  uint16_t index;
 } LexicalBinding;
 
 typedef struct FormLet {

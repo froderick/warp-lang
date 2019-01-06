@@ -310,7 +310,7 @@ RetVal tryCompile(Form *form, Constants *constants, Codes *codes, uint16_t *numL
 
         throws(tryCompile(binding->value, constants, codes, numLocals, numArgs, error));
 
-        uint16_t index = *numLocals;
+        uint16_t index = binding->index;
         uint8_t code[] = { I_STORE_LOCAL, index >> 8, index & 0xFF };
         throws(tryCodeAppend(codes, sizeof(code), code, error));
 
@@ -325,15 +325,8 @@ RetVal tryCompile(Form *form, Constants *constants, Codes *codes, uint16_t *numL
     }
 
     case F_ENV_REF: {
-      if (form->envRef.type == RT_ARG) {
-        // we know that the arguments are always the first locals
+      if (form->envRef.type == RT_ARG || form->envRef.type == RT_LOCAL) {
         uint16_t index = form->envRef.index;
-        uint8_t code[] = { I_LOAD_LOCAL, index >> 8, index & 0xFF };
-        throws(tryCodeAppend(codes, sizeof(code), code, error));
-      }
-      else if (form->envRef.type == RT_LOCAL) {
-        // the rest of the locals come after the arguments
-        uint16_t index = numArgs + form->envRef.index;
         uint8_t code[] = { I_LOAD_LOCAL, index >> 8, index & 0xFF };
         throws(tryCodeAppend(codes, sizeof(code), code, error));
       }

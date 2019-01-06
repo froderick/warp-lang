@@ -127,6 +127,9 @@ RetVal addLexicalBinding(EnvBindingStack *stack, LexicalBinding *b, Error *error
 
   throws(addEnvBinding(stack, e, error));
 
+  // dirty but convenient, technicaly this function 'belongs' to the let impl
+  b->index = e.index;
+
   return R_SUCCESS;
 
   failure:
@@ -851,6 +854,7 @@ void formFree(Form* form) {
 
 // TODO: remove the duplication for init found in tryFormDeepCopy
 // TODO: do we really need the deep copy behavior now?
+// TODO: this is definitely out of date now, fields have changed at least for the lexical bindings
 
 RetVal tryFormDeepCopy(Form *from, Form **ptr, Error *error) {
   RetVal ret;

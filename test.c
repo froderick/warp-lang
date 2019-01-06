@@ -359,15 +359,93 @@ void printFnConst(FnConstant *fnConst) {
 }
 
 void printCodeArray(uint8_t *code, uint16_t codeLength) {
+
   for (int i=0; i<codeLength; i++) {
-    printf("%i: %u\n", i, code[i]);
+    uint8_t inst =code[i];
+
+    const char *name;
+    switch (inst) {
+
+      case I_LOAD_CONST:  // (8), index  (16) | (-> value)
+        name = "I_LOAD_CONST";
+        printf("%i:\t%s\t%u\n", i, name, code[i + 1] << 8 | code[i + 2]);
+        i += 2;
+        break;
+
+      case I_LOAD_LOCAL:  // (8), index  (16) | (-> value)
+        name = "I_LOAD_LOCAL";
+        printf("%i:\t%s\t%u\n", i, name, code[i + 1] << 8 | code[i + 2]);
+        i += 2;
+        break;
+
+      case I_STORE_LOCAL: // (8), index  (16) | (objectref ->)
+        name = "I_STORE_LOCAL";
+        printf("%i:\t%s\t%u\n", i, name, code[i + 1] << 8 | code[i + 2]);
+        i += 2;
+        break;
+
+      case I_INVOKE:      // (8)              | (objectref, args... -> ...)
+        name = "I_INVOKE";
+        printf("%i:\t%s\n", i, name);
+        break;
+
+      case I_RET:         // (8)              | (objectref ->)
+        name = "I_RET";
+        printf("%i:\t%s\n", i, name);
+        break;
+
+      case I_CMP:         // (8)              | (a, b -> 0 | 1)
+        name = "I_CMP";
+        printf("%i:\t%s\n", i, name);
+        break;
+
+      case I_JMP:         // (8), offset (16) | (->)
+        name = "I_JMP";
+        printf("%i:\t%s\t%u\n", i, name, code[i + 1] << 8 | code[i + 2]);
+        i += 2;
+        break;
+
+      case I_JMP_IF:      // (8), offset (16) | (value ->)
+        name = "I_JMP_IF";
+        printf("%i:\t%s\t%u\n", i, name, code[i + 1] << 8 | code[i + 2]);
+        i += 2;
+        break;
+
+      case I_JMP_IF_NOT:  // (8), offset (16) | (value ->)
+        name = "I_JMP_IF_NOT";
+        printf("%i:\t%s\t%u\n", i, name, code[i + 1] << 8 | code[i + 2]);
+        i += 2;
+        break;
+
+      case I_HALT:        // (8)              | (exitcode ->)
+        name = "I_HALT";
+        printf("%i:\t%s\n", i, name);
+        break;
+
+      case I_ADD:        // (8)              | (a, b -> c)
+        name = "I_ADD";
+        printf("%i:\t%s\n", i, name);
+        break;
+
+      case I_DEF_VAR:     // (8)              | (name, value ->)
+        name = "I_DEF_VAR";
+        printf("%i:\t%s\n", i, name);
+        break;
+
+      case I_LOAD_VAR:    // (8)              | (name -> value)
+        name = "I_LOAD_VAR";
+        printf("%i:\t%s\n", i, name);
+        break;
+
+      default:
+        name = "<UNKNOWN>";
+        printf("%i:\t%s/%u\n", i, name, inst);
+    }
   }
 }
 
 void printCodeUnit(CodeUnit *unit) {
-  for (int i=0; i<unit->code.codeLength; i++) {
-    printf("%i: %u\n", i, unit->code.code[i]);
-  }
+  printCodeArray(unit->code.code, unit->code.codeLength);
 }
 
 RetVal tryTestCompile(wchar_t *input, CodeUnit *codeUnit, Error *error) {
