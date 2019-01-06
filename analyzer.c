@@ -247,6 +247,16 @@ void popScope(EnvBindingStack *stack) {
   stack->depth = stack->depth - 1;
 }
 
+uint16_t countBindings(EnvBindingStack *stack) {
+  EnvBindingScope *scope = stack->head;
+  uint16_t numBindings = 0;
+  while (scope != NULL) {
+    numBindings += scope->numBindings;
+    scope = scope->next;
+  }
+  return numBindings;
+}
+
 EnvBinding* findBinding(EnvBindingStack *stack, wchar_t *bindingName) {
   EnvBindingScope *scope = stack->head;
   while (scope != NULL) {
@@ -255,6 +265,7 @@ EnvBinding* findBinding(EnvBindingStack *stack, wchar_t *bindingName) {
         return &scope->bindings[i];
       }
     }
+    scope = scope->next; // TODO: not sure this will work for nested bindings
   }
   return NULL;
 }
@@ -451,11 +462,13 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
   // register the bindings in the environment stack
   throws(tryScopeMake(let->numBindings, &scope, error));
 
+  uint16_t numLocals = countBindings(&analyzer->bindingStack);
+
   for (uint64_t i=0; i<let->numBindings; i++) {
     scope->bindings[i].nameLength = let->bindings[i].nameLength;
     throws(tryCopyText(let->bindings[i].name, &scope->bindings[i].name, scope->bindings[i].nameLength, error));
     scope->bindings[i].type = RT_LOCAL;
-    scope->bindings[i].index = i;
+    scope->bindings[i].index = numLocals + i;
   }
 
   pushScope(&analyzer->bindingStack, scope);
@@ -617,11 +630,13 @@ RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, FormFn *fn, Error *err
   // register the arguments in the environment stack
   throws(tryScopeMake(fn->numArgs, &scope, error));
 
+  uint16_t numLocals = countBindings(&analyzer->bindingStack);
+
   for (uint64_t i=0; i<fn->numArgs; i++) {
     scope->bindings[i].nameLength = fn->args[i].nameLength;
     throws(tryCopyText(fn->args[i].name, &scope->bindings[i].name, scope->bindings[i].nameLength, error));
     scope->bindings[i].type = RT_ARG;
-    scope->bindings[i].index = i;
+    scope->bindings[i].index = numLocals + i;
   }
 
   pushScope(&analyzer->bindingStack, scope);
