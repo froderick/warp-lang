@@ -63,7 +63,7 @@ RetVal syntaxError(Error *error, unsigned long position, char *desc) {
 
   error->type = E_SYNTAX;
   error->lexer.position = position;
-  swprintf(error->message, ERROR_MSG_LENGTH, L"failed to parse token stream -> %s\n", desc);
+  swprintf(error->message, ERROR_MSG_LENGTH, L"invalid syntax encountered -> %s\n", desc);
 
   if (DEBUG) { printError(error); }
   return R_ERROR;

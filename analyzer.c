@@ -9,192 +9,23 @@
  * Core analyzer behavior.
  */
 
-void varFree(Var *var);
 RetVal tryFormDeepCopy(Form *from, Form **to, Error *error);
-
-RetVal tryVarInit(wchar_t *namespace, wchar_t *name, Var *var, Error *error) {
-  RetVal ret;
-
-  var->namespace = NULL;
-  var->name = NULL;
-  var->value = NULL;
-
-  throws(tryCopyText(namespace, &var->namespace, wcslen(namespace), error));
-  throws(tryCopyText(name, &var->name, wcslen(name), error));
-
-  return R_SUCCESS;
-
-  failure:
-    varFree(var);
-    return ret;
-}
-
-void varFreeContents(Var *var) {
-  if (var != NULL) {
-    if (var->namespace != NULL) {
-      free(var->namespace);
-      var->namespace = NULL;
-    }
-    if (var->name != NULL) {
-      free(var->name);
-      var->name = NULL;
-    }
-    if (var->value != NULL) {
-      formFree(var->value);
-      var->value = NULL;
-    }
-  }
-}
-
-void varFree(Var *var) {
-  if (var != NULL) {
-    varFreeContents(var);
-    free(var);
-  }
-}
-
-Var* resolveVar(FormAnalyzer *analyzer, wchar_t *symbolName, uint64_t symbolNameLength) {
-
-  Namespace *ns;
-  wchar_t *searchName;
-  uint64_t searchNameLength;
-
-  // assume unqualified namespace at first
-  ns = analyzer->currentNamespace;
-  searchName = symbolName;
-  searchNameLength = symbolNameLength;
-
-  if (symbolNameLength > 2) { // need at least three characters to qualify a var name with a namespace: ('q/n')
-
-    // attempt to find a qualified namespace
-    wchar_t *slashPtr = wcschr(symbolName, L'/');
-    if (slashPtr != NULL) { // qualified
-      uint64_t nsLen = slashPtr - symbolName;
-
-      for (int i=0; i<analyzer->numNamespaces; i++) {
-
-        Namespace *thisNs = &analyzer->namespaces[i];
-        if (wcsncmp(symbolName, thisNs->name, nsLen) == 0) {
-          ns = thisNs;
-          searchName = slashPtr + 1;
-          searchNameLength = symbolNameLength - (nsLen + 1);
-          break;
-        }
-      }
-    }
-  }
-
-  // find var within namespace
-
-  for (int i=0; i<ns->localVars.length; i++) {
-    if (wcsncmp(searchName, ns->localVars.vars[i].name, searchNameLength) == 0) {
-      return &ns->localVars.vars[i];
-    }
-  }
-
-  return NULL;
-}
-
-void varListInit(VarList *list) {
-  list->length = 0;
-  list->allocatedLength = 0;
-  list->vars = NULL;
-}
-
-void varListFreeContents(VarList *list) {
-  if (list != NULL) {
-    if (list->vars != NULL) {
-      for (int i=0; i<list->length; i++) {
-        varFreeContents(&list->vars[i]);
-      }
-      free(list->vars);
-      list->vars = NULL;
-      list->length = 0;
-      list->allocatedLength = 0;
-    }
-  }
-}
-
-RetVal tryAppendVar(VarList *list, Var var, Error* error) {
-
-  RetVal ret;
-
-  if (list->vars == NULL) {
-    uint64_t len = 16;
-    tryMalloc(list->vars, len * sizeof(Var), "Var array");
-    list->allocatedLength = len;
-  }
-  else if (list->length == list->allocatedLength) {
-    uint64_t newAllocatedLength = list->allocatedLength * 2;
-
-    Var* resizedVars = realloc(list->vars, newAllocatedLength * sizeof(Var));
-    if (resizedVars == NULL) {
-      ret = memoryError(error, "realloc Var array");
-      goto failure;
-    }
-
-    list->allocatedLength = newAllocatedLength;
-    list->vars = resizedVars;
-  }
-
-  list->vars[list->length] = var;
-  list->length = list->length + 1;
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
-RetVal tryDefVar(FormAnalyzer *analyzer, wchar_t *symbolName, uint64_t symbolNameLength, Form *value, Error *error) {
-  RetVal ret;
-
-  // these get cleaned up on failure
-  Var createdVar;
-  Form *copiedValue;
-
-  Var *resolvedVar = resolveVar(analyzer, symbolName, symbolNameLength);
-  if (resolvedVar == NULL) {
-    Namespace *ns = analyzer->currentNamespace;
-    throws(tryVarInit(ns->name, symbolName, &createdVar, error));
-    throws(tryFormDeepCopy(value, &createdVar.value, error));
-    throws(tryAppendVar(&ns->localVars, createdVar, error));
-  }
-  else if (resolvedVar->value == NULL) {
-    throws(tryFormDeepCopy(value, &resolvedVar->value, error));
-  }
-  else {
-    throws(tryFormDeepCopy(value, &copiedValue, error));
-    formFree(resolvedVar->value);
-    resolvedVar->value = copiedValue;
-    copiedValue = NULL; // now part of resolvedVar
-  }
-
-  return R_SUCCESS;
-
-  failure:
-    varFreeContents(&createdVar);
-    if (copiedValue != NULL) {
-      formFree(copiedValue);
-    }
-    return ret;
-}
-
 
 void scopeFree(EnvBindingScope *scope);
 
-RetVal tryScopeMake(uint64_t numBindings, EnvBindingScope **ptr, Error *error) {
+RetVal tryScopeMake(uint64_t allocNumBindings, EnvBindingScope **ptr, Error *error) {
 
   RetVal ret;
 
   EnvBindingScope *scope;
   tryMalloc(scope, sizeof(EnvBindingScope), "EnvBindingScope");
 
-  scope->numBindings = numBindings;
+  scope->allocNumBindings = allocNumBindings;
+  scope->numBindings = 0;
   scope->bindings = NULL;
   scope->next = NULL;
 
-  tryMalloc(scope->bindings, sizeof(EnvBinding) * scope->numBindings, "EnvBinding array");
+  tryMalloc(scope->bindings, sizeof(EnvBinding) * scope->allocNumBindings, "EnvBinding array");
 
   for (int i=0; i<scope->numBindings; i++) {
     EnvBinding *b = scope->bindings + i;
@@ -233,18 +64,29 @@ void scopeFree(EnvBindingScope *scope) {
   }
 }
 
-// TODO: manage the scopes as the analysis is happening
+RetVal tryPushScope(EnvBindingStack *stack, uint16_t allocNumBindings, Error *error) {
+  RetVal ret;
 
-void pushScope(EnvBindingStack *stack, EnvBindingScope *scope) {
+  EnvBindingScope *scope;
+  throws(tryScopeMake(allocNumBindings, &scope, error));
+
   scope->next = stack->head;
   stack->head = scope;
   stack->depth = stack->depth + 1;
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
 }
 
 void popScope(EnvBindingStack *stack) {
+
   EnvBindingScope *scope = stack->head;
   stack->head = scope->next;
   stack->depth = stack->depth - 1;
+
+  scopeFree(scope);
 }
 
 uint16_t countBindings(EnvBindingStack *stack) {
@@ -256,6 +98,58 @@ uint16_t countBindings(EnvBindingStack *stack) {
   }
   return numBindings;
 }
+
+RetVal addEnvBinding(EnvBindingStack *stack, EnvBinding e, Error *error) {
+  RetVal ret;
+
+  EnvBindingScope *scope = stack->head;
+
+  if (scope->numBindings + 1 > scope->allocNumBindings) {
+    throwInternalError(error, "attempted to add more bindings than were allocated");
+  }
+
+  scope->bindings[scope->numBindings] = e;
+  scope->numBindings = scope->numBindings + 1;
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal addLexicalBinding(EnvBindingStack *stack, LexicalBinding *b, Error *error) {
+  RetVal ret;
+
+  EnvBinding e;
+  e.nameLength = b->nameLength;
+  throws(tryCopyText(b->name, &e.name, e.nameLength, error));
+  e.type = RT_LOCAL;
+  e.index = countBindings(stack);
+
+  throws(addEnvBinding(stack, e, error));
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal addArgBinding(EnvBindingStack *stack, FormFnArg *arg, Error *error) {
+  RetVal ret;
+
+  EnvBinding e;
+  e.nameLength = arg->nameLength;
+  throws(tryCopyText(arg->name, &e.name, e.nameLength, error));
+  e.type = RT_ARG;
+  e.index = countBindings(stack);
+
+  throws(addEnvBinding(stack, e, error));
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 
 EnvBinding* findBinding(EnvBindingStack *stack, wchar_t *bindingName) {
   EnvBindingScope *scope = stack->head;
@@ -270,76 +164,19 @@ EnvBinding* findBinding(EnvBindingStack *stack, wchar_t *bindingName) {
   return NULL;
 }
 
-RetVal tryNamespaceMake(wchar_t *name, uint64_t length, Namespace **ptr , Error *error) {
-
-  RetVal ret;
-
-  Namespace *ns;
-  tryMalloc(ns, sizeof(Namespace), "Namespace");
-
-  ns->name = NULL;
-  ns->importedVars = NULL;
-  ns->numImportedVars = 0;
-
-  varListInit(&ns->localVars);
-
-  throws(tryCopyText(name, &ns->name, length, error));
-
-  *ptr = ns;
-  return R_SUCCESS;
-
-  failure:
-  if (ns != NULL) {
-    free(ns);
-  }
-  return ret;
+void envBindingStackInit(EnvBindingStack *bindingStack) {
+  bindingStack->head = NULL;
+  bindingStack->depth = 0;
 }
 
-void namespaceFree(Namespace *ns) {
-  if (ns != NULL) {
-    free(ns->name);
-    free(ns->importedVars);
-    varListFreeContents(&ns->localVars);
-    free(ns);
-  }
-}
-
-RetVal tryAnalyzerMake(FormAnalyzer **ptr, Error *error) {
-
-  RetVal ret;
-
-  FormAnalyzer *analyzer;
-  tryMalloc(analyzer, sizeof(FormAnalyzer), "FormAnalyzer");
-
-  Namespace *userNs;
-  throws(tryNamespaceMake(L"user", wcslen(L"user"), &userNs, error));
-
-  analyzer->currentNamespace = userNs;
-  analyzer->namespaces = userNs;
-  analyzer->numNamespaces = 1;
-  analyzer->bindingStack.head = NULL;
-  analyzer->bindingStack.depth = 0;
-
-  *ptr = analyzer;
-  return R_SUCCESS;
-
-  failure:
-  if (analyzer != NULL) {
-    free(analyzer);
-  }
-  return ret;
-}
-
-void analyzerFree(FormAnalyzer *analyzer) {
-  if (analyzer != NULL) {
-    analyzer->currentNamespace = NULL;
-    if (analyzer->namespaces != NULL) {
-      for (int i=0; i<analyzer->numNamespaces; i++) {
-        namespaceFree(&analyzer->namespaces[i]);
-      }
-      free(analyzer->namespaces);
+void envBindingStackFreeContents(EnvBindingStack *stack) {
+  if (stack != NULL) {
+    while (stack->head != NULL) {
+      EnvBindingScope *next = stack->head->next;
+      scopeFree(stack->head);
+      stack->head = next;
+      stack->depth = stack->depth - 1;
     }
-    free(analyzer);
   }
 }
 
@@ -355,11 +192,11 @@ uint64_t getFormPosition(Form *form) {
  * Analyzers for the different types of forms.
  */
 
-RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Error *error);
+RetVal tryFormAnalyzeContents(EnvBindingStack *bindingStack, Expr* expr, Form *form, Error *error);
 
 void ifFreeContents(FormIf *iff);
 
-RetVal tryIfAnalyze(FormAnalyzer *analyzer, Expr* ifExpr, FormIf *iff, Error *error) {
+RetVal tryIfAnalyze(EnvBindingStack *bindingStack, Expr* ifExpr, FormIf *iff, Error *error) {
 
   iff->test = NULL;
   iff->ifBranch = NULL;
@@ -382,9 +219,9 @@ RetVal tryIfAnalyze(FormAnalyzer *analyzer, Expr* ifExpr, FormIf *iff, Error *er
   Expr *ifBranchExpr = ifExpr->list.head->next->next->expr;
   Expr *elseBranchExpr = ifExpr->list.head->next->next->next->expr;
 
-  throws(tryFormAnalyze(analyzer, testExpr, &iff->test, error));
-  throws(tryFormAnalyze(analyzer, ifBranchExpr, &iff->ifBranch, error));
-  throws(tryFormAnalyze(analyzer, elseBranchExpr, &iff->elseBranch, error));
+  throws(tryFormAnalyze(bindingStack, testExpr, &iff->test, error));
+  throws(tryFormAnalyze(bindingStack, ifBranchExpr, &iff->ifBranch, error));
+  throws(tryFormAnalyze(bindingStack, elseBranchExpr, &iff->elseBranch, error));
 
   return R_SUCCESS;
 
@@ -412,7 +249,13 @@ void ifFreeContents(FormIf *iff) {
 
 void letFreeContents(FormLet *let);
 
-RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error *error) {
+/*
+ * purposes of the environment stack tracking
+ * - determine the value of a binding reference, by matching its name to the nearest binding by that name in the stack
+ * - the value includes the type of the reference (arg or local) as well as the index by which it can be identified
+ */
+
+RetVal tryLetAnalyze(EnvBindingStack *bindingStack, Expr* letExpr, FormLet *let, Error *error) {
 
   let->numBindings = 0;
   let->bindings = NULL;
@@ -422,7 +265,6 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
   RetVal ret;
 
   // things that get cleaned up on failure
-  EnvBindingScope *scope = NULL;
   bool scopePushed = false;
 
   // sanity checking
@@ -442,8 +284,13 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
   let->numBindings = bindingsExpr->list.length / 2;
   tryMalloc(let->bindings, sizeof(LexicalBinding) * let->numBindings, "LexicalBinding array");
 
+  // register the bindings in the environment stack
+  throws(tryPushScope(bindingStack, let->numBindings, error));
+  scopePushed = true;
+
+  // initialize the bindings
   ListElement *bindingElem = bindingsExpr->list.head;
-  for (int i=0; i + 2 < letExpr->list.length; i += 2) {
+  for (int i=0; bindingElem != NULL; i++) {
 
     if (bindingElem->expr->type != N_SYMBOL) {
       throwSyntaxError(error, pos, "only symbols can be bound as names");
@@ -454,25 +301,11 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
     b->source = bindingElem->expr->source;
 
     throws(tryCopyText(bindingElem->expr->symbol.value, &b->name, b->nameLength, error));
-    throws(tryFormAnalyze(analyzer, bindingElem->next->expr, &b->value, error));
+    throws(addLexicalBinding(bindingStack, b, error));
+    throws(tryFormAnalyze(bindingStack, bindingElem->next->expr, &b->value, error));
 
     bindingElem = bindingElem->next->next;
   }
-
-  // register the bindings in the environment stack
-  throws(tryScopeMake(let->numBindings, &scope, error));
-
-  uint16_t numLocals = countBindings(&analyzer->bindingStack);
-
-  for (uint64_t i=0; i<let->numBindings; i++) {
-    scope->bindings[i].nameLength = let->bindings[i].nameLength;
-    throws(tryCopyText(let->bindings[i].name, &scope->bindings[i].name, scope->bindings[i].nameLength, error));
-    scope->bindings[i].type = RT_LOCAL;
-    scope->bindings[i].index = numLocals + i;
-  }
-
-  pushScope(&analyzer->bindingStack, scope);
-  scopePushed = true;
 
   // create the forms within this lexical scope
   let->numForms = letExpr->list.length - 2;
@@ -481,22 +314,18 @@ RetVal tryLetAnalyze(FormAnalyzer *analyzer, Expr* letExpr, FormLet *let, Error 
   Expr *expr = letExpr->list.head->next->next->expr;
   for (int i=0; i<let->numForms; i++) {
     Form *thisForm = let->forms + i;
-    throws(tryFormAnalyzeContents(analyzer, expr, thisForm, error));
+    throws(tryFormAnalyzeContents(bindingStack, expr, thisForm, error));
   }
 
   // discard the registered bindings from the environment stack
-  popScope(&analyzer->bindingStack);
-  scopeFree(scope);
+  popScope(bindingStack);
 
   return R_SUCCESS;
 
   failure:
     letFreeContents(let);
-    if (scope != NULL) {
-      scopeFree(scope);
-    }
     if (scopePushed) {
-      popScope(&analyzer->bindingStack);
+      popScope(bindingStack);
     }
     return ret;
 }
@@ -530,7 +359,7 @@ void letFreeContents(FormLet *let) {
 
 void defFreeContents(FormDef *let);
 
-RetVal tryDefAnalyze(FormAnalyzer *analyzer, Expr* defExpr, FormDef *def, Error *error) {
+RetVal tryDefAnalyze(EnvBindingStack *bindingStack, Expr* defExpr, FormDef *def, Error *error) {
 
   def->name = NULL;
   def->nameLength = 0;
@@ -555,11 +384,11 @@ RetVal tryDefAnalyze(FormAnalyzer *analyzer, Expr* defExpr, FormDef *def, Error 
   throws(tryCopyText(symbol->symbol.value, &def->name, def->nameLength, error));
 
   if (defExpr->list.length == 3) {
-    throws(tryFormAnalyze(analyzer, defExpr->list.head->next->next->expr, &def->value, error));
+    throws(tryFormAnalyze(bindingStack, defExpr->list.head->next->next->expr, &def->value, error));
   }
 
   // update the analyzer state so it knows about this def
-  throws(tryDefVar(analyzer, def->name, def->nameLength, def->value, error));
+  //  throws(tryDefVar(analyzer, def->name, def->nameLength, def->value, error));
 
   return R_SUCCESS;
 
@@ -583,14 +412,14 @@ void defFreeContents(FormDef *def) {
 
 void fnFreeContents(FormFn *fn);
 
-RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, FormFn *fn, Error *error) {
+RetVal tryFnAnalyze(EnvBindingStack *bindingStack, Expr* fnExpr, FormFn *fn, Error *error) {
 
   RetVal ret;
 
-  // things that get cleaned up on failure
-  EnvBindingScope *scope = NULL;
-  bool scopePushed = false;
+  // things that get cleaned up always
+  EnvBindingStack fnBindingStack;
 
+  // things that get cleaned up on failure
   fn->numForms = 0;
   fn->args = NULL;
   fn->numForms = 0;
@@ -627,47 +456,43 @@ RetVal tryFnAnalyze(FormAnalyzer *analyzer, Expr* fnExpr, FormFn *fn, Error *err
     argElem = argElem->next;
   }
 
-  // register the arguments in the environment stack
-  throws(tryScopeMake(fn->numArgs, &scope, error));
-
-  uint16_t numLocals = countBindings(&analyzer->bindingStack);
-
+  // create new binding stack, initialized with the fn args as the first bindings
+  envBindingStackInit(&fnBindingStack);
+  throws(tryPushScope(bindingStack, fn->numArgs, error));
   for (uint64_t i=0; i<fn->numArgs; i++) {
-    scope->bindings[i].nameLength = fn->args[i].nameLength;
-    throws(tryCopyText(fn->args[i].name, &scope->bindings[i].name, scope->bindings[i].nameLength, error));
-    scope->bindings[i].type = RT_ARG;
-    scope->bindings[i].index = numLocals + i;
+    throws(addArgBinding(bindingStack, &fn->args[i], error));
   }
 
-  pushScope(&analyzer->bindingStack, scope);
-  scopePushed = true;
-
-  // create the forms within this lexical scope
+  // create the forms within this fn lexical scope
   fn->numForms = fnExpr->list.length - 2;
   tryMalloc(fn->forms, sizeof(Form) * fn->numForms, "Forms array");
 
   Expr *expr = fnExpr->list.head->next->next->expr;
   for (int i=0; i<fn->numForms; i++) {
     Form *thisForm = fn->forms + i;
-    throws(tryFormAnalyzeContents(analyzer, expr, thisForm, error));
+    throws(tryFormAnalyzeContents(bindingStack, expr, thisForm, error));
   }
 
-  // discard the registered arguments from the environment stack
-  popScope(&analyzer->bindingStack);
-  scopeFree(scope);
+  envBindingStackFreeContents(&fnBindingStack);
 
   return R_SUCCESS;
 
   failure:
     fnFreeContents(fn);
-    if (scope != NULL) {
-      scopeFree(scope);
-    }
-    if (scopePushed) {
-      popScope(&analyzer->bindingStack);
-    }
+    envBindingStackFreeContents(&fnBindingStack);
     return ret;
 }
+
+// TODO: if we aren't doing variable capture yet, then it seems like we should start with a fresh binding stack here
+
+// TODO: there's nothing wrong with both remembering which bindings are arguments, and which are env bindings, but
+// TODO: but also tracking a uniform index for both from the perspective of them both being 'locals'. this would
+// allow us to stop being aware of this in the emitter. *this uniformity would include a single 'addBinding' function
+// that takes a struct which is always the same, regardless of the type of binding being added
+
+// TODO: if we were to do variable capture, the resolution would probably take into account both the 'new' stack
+// TODO: as well as falling back to the 'previous' one
+// this suggests that the binding stack is a parameter value, not a singleton
 
 void fnFreeContents(FormFn *fn) {
   if (fn != NULL) {
@@ -697,7 +522,7 @@ void fnFreeContents(FormFn *fn) {
 
 void builtinFreeContents(FormBuiltin *builtin);
 
-RetVal tryBuiltinAnalyze(FormAnalyzer *analyzer, Expr *expr, FormBuiltin *builtin, Error *error) {
+RetVal tryBuiltinAnalyze(EnvBindingStack *bindingStack, Expr *expr, FormBuiltin *builtin, Error *error) {
 
   RetVal ret;
 
@@ -720,7 +545,7 @@ RetVal tryBuiltinAnalyze(FormAnalyzer *analyzer, Expr *expr, FormBuiltin *builti
   ListElement *argExpr = expr->list.head->next->next;
   for (int i=0; i<builtin->numArgs; i++) {
     Form *arg = builtin->args + i;
-    throws(tryFormAnalyzeContents(analyzer, argExpr->expr, arg, error));
+    throws(tryFormAnalyzeContents(bindingStack, argExpr->expr, arg, error));
     argExpr = argExpr->next;
   }
 
@@ -749,7 +574,7 @@ void builtinFreeContents(FormBuiltin *builtin) {
   }
 }
 
-RetVal tryEnvRefAnalyze(FormAnalyzer *analyzer, Expr *expr, EnvBinding *binding, FormEnvRef *envRef, Error *error) {
+RetVal tryEnvRefAnalyze(EnvBindingStack *bindingStack, Expr *expr, EnvBinding *binding, FormEnvRef *envRef, Error *error) {
 
   envRef->type = binding->type;
   envRef->index = binding->index;
@@ -757,10 +582,8 @@ RetVal tryEnvRefAnalyze(FormAnalyzer *analyzer, Expr *expr, EnvBinding *binding,
   return R_SUCCESS;
 }
 
-RetVal tryVarRefAnalyze(FormAnalyzer *analyzer, Expr *expr, Var *var, FormVarRef *varRef, Error *error) {
-
-  varRef->var = var;
-
+RetVal tryVarRefAnalyze(EnvBindingStack *bindingStack, Expr *expr, FormVarRef *varRef, Error *error) {
+  // TODO
   return R_SUCCESS;
 }
 
@@ -779,10 +602,10 @@ RetVal assertFnCallable(Form *form, Error *error) {
       break;
 
     case F_VAR_REF:
-      if (form->varRef.var->value->type != F_FN) {
-        throwSyntaxError(error, getFormPosition(form),
-                         "var's value does not contain a function: '%ls'", form->varRef.var->name);
-      }
+//      if (form->varRef.var->value->type != F_FN) {
+//        throwSyntaxError(error, getFormPosition(form),
+//                         "var's value does not contain a function: '%ls'", form->varRef.var->name);
+//      }
       break;
 
     case F_CONST:
@@ -804,14 +627,14 @@ RetVal assertFnCallable(Form *form, Error *error) {
 
 void fnCallFreeContents(FormFnCall *fnCall);
 
-RetVal tryFnCallAnalyze(FormAnalyzer *analyzer, Expr *expr, FormFnCall *fnCall, Error *error) {
+RetVal tryFnCallAnalyze(EnvBindingStack *bindingStack, Expr *expr, FormFnCall *fnCall, Error *error) {
 
   RetVal ret;
 
   fnCall->fnCallable = NULL;
   fnCall->args = NULL;
 
-  throws(tryFormAnalyze(analyzer, expr->list.head->expr, &fnCall->fnCallable, error));
+  throws(tryFormAnalyze(bindingStack, expr->list.head->expr, &fnCall->fnCallable, error));
   throws(assertFnCallable(fnCall->fnCallable, error));
 
   fnCall->numArgs = expr->list.length - 1;
@@ -820,7 +643,7 @@ RetVal tryFnCallAnalyze(FormAnalyzer *analyzer, Expr *expr, FormFnCall *fnCall, 
   ListElement *argExpr = expr->list.head->next;
   for (int i=0; i<fnCall->numArgs; i++) {
     Form *arg = fnCall->args + i;
-    throws(tryFormAnalyzeContents(analyzer, argExpr->expr, arg, error));
+    throws(tryFormAnalyzeContents(bindingStack, argExpr->expr, arg, error));
     argExpr = argExpr->next;
   }
 
@@ -865,7 +688,7 @@ void constantFreeContents(Expr *constant) {
   }
 }
 
-RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Error *error) {
+RetVal tryFormAnalyzeContents(EnvBindingStack *bindingStack, Expr* expr, Form *form, Error *error) {
 
   // copy expression source metadata
   form->source = expr->source;
@@ -889,19 +712,18 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
 
       wchar_t *sym = expr->symbol.value;
       EnvBinding *envBinding;
-      Var *var;
 
-      if ((envBinding = findBinding(&analyzer->bindingStack, sym)) != NULL) {
+      if ((envBinding = findBinding(bindingStack, sym)) != NULL) {
         form->type = F_ENV_REF;
-        throws(tryEnvRefAnalyze(analyzer, expr, envBinding, &form->envRef, error));
+        throws(tryEnvRefAnalyze(bindingStack , expr, envBinding, &form->envRef, error));
       }
-      else if ((var = resolveVar(analyzer, sym, expr->symbol.length)) != NULL) {
+      else { // if ((var = resolveVar(analyzer, sym, expr->symbol.length)) != NULL) {
         form->type = F_VAR_REF;
-        throws(tryVarRefAnalyze(analyzer, expr, var, &form->varRef, error));
+        throws(tryVarRefAnalyze(bindingStack, expr, &form->varRef, error));
       }
-      else {
-        throwSyntaxError(error, getExprPosition(expr), "cannot resolve symbol: '%ls'", sym);
-      }
+//      else {
+//        throwSyntaxError(error, getExprPosition(expr), "cannot resolve symbol: '%ls'", sym);
+//      }
       break;
     }
 
@@ -920,38 +742,38 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
 
         if (wcscmp(sym, L"if") == 0) {
           form->type = F_IF;
-          throws(tryIfAnalyze(analyzer, expr, &form->iff, error));
+          throws(tryIfAnalyze(bindingStack, expr, &form->iff, error));
           break;
         }
 
         if (wcscmp(sym, L"let") == 0) {
           form->type = F_LET;
-          throws(tryLetAnalyze(analyzer, expr, &form->let, error));
+          throws(tryLetAnalyze(bindingStack, expr, &form->let, error));
           break;
         }
 
         if (wcscmp(sym, L"def") == 0) {
           form->type = F_DEF;
-          throws(tryDefAnalyze(analyzer, expr, &form->def, error));
+          throws(tryDefAnalyze(bindingStack, expr, &form->def, error));
           break;
         }
 
         if (wcscmp(sym, L"fn") == 0) {
           form->type = F_FN;
-          throws(tryFnAnalyze(analyzer, expr, &form->fn, error));
+          throws(tryFnAnalyze(bindingStack, expr, &form->fn, error));
           break;
         }
 
         if (wcscmp(sym, L"builtin") == 0) {
           form->type = F_BUILTIN;
-          throws(tryBuiltinAnalyze(analyzer, expr, &form->builtin, error));
+          throws(tryBuiltinAnalyze(bindingStack, expr, &form->builtin, error));
           break;
         }
       }
 
       // assume fn-callable
       form->type = F_FN_CALL;
-      throws(tryFnCallAnalyze(analyzer, expr, &form->fnCall, error));
+      throws(tryFnCallAnalyze(bindingStack, expr, &form->fnCall, error));
       break;
     }
 
@@ -966,13 +788,13 @@ RetVal tryFormAnalyzeContents(FormAnalyzer *analyzer, Expr* expr, Form *form, Er
     return ret;
 }
 
-RetVal tryFormAnalyze(FormAnalyzer *analyzer, Expr* expr, Form **ptr, Error *error) {
+RetVal tryFormAnalyze(EnvBindingStack *bindingStack, Expr* expr, Form **ptr, Error *error) {
 
   RetVal ret;
   Form *form;
 
   tryMalloc(form, sizeof(Form), "Form");
-  throws(tryFormAnalyzeContents(analyzer, expr, form, error));
+  throws(tryFormAnalyzeContents(bindingStack, expr, form, error));
 
   *ptr = form;
   return R_SUCCESS;
@@ -1028,6 +850,7 @@ void formFree(Form* form) {
 }
 
 // TODO: remove the duplication for init found in tryFormDeepCopy
+// TODO: do we really need the deep copy behavior now?
 
 RetVal tryFormDeepCopy(Form *from, Form **ptr, Error *error) {
   RetVal ret;
@@ -1086,7 +909,7 @@ RetVal tryFormDeepCopy(Form *from, Form **ptr, Error *error) {
       break;
 
     case F_VAR_REF:
-      to->varRef.var = from->varRef.var; // var references don't get deep copied
+      // TODO
       break;
 
     case F_FN:

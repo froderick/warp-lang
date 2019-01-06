@@ -3,6 +3,277 @@
 #include "vm.h"
 #include "utils.h"
 
+/*
+ * Temporarily stashing the var management code here
+ */
+
+typedef struct Var {
+  wchar_t *namespace;
+  wchar_t *name;
+  Value value;
+} Var;
+
+typedef struct VarList {
+  uint64_t allocatedLength;
+  uint64_t length;
+  Var *vars;
+} VarList;
+
+typedef struct Namespace {
+  wchar_t *name;
+  VarList localVars;
+  Var *importedVars;
+  uint64_t numImportedVars;
+} Namespace;
+
+typedef struct Namespaces {
+  Namespace *namespaces;
+  uint64_t numNamespaces;
+  Namespace *currentNamespace;
+} Namespaces;
+
+void varFree(Var *var);
+
+RetVal tryVarInit(wchar_t *namespace, wchar_t *name, Var *var, Error *error) {
+  RetVal ret;
+
+  var->namespace = NULL;
+  var->name = NULL;
+  var->value.type = VT_NIL;
+  var->value.value = 0;
+
+  throws(tryCopyText(namespace, &var->namespace, wcslen(namespace), error));
+  throws(tryCopyText(name, &var->name, wcslen(name), error));
+
+  return R_SUCCESS;
+
+  failure:
+  varFree(var);
+  return ret;
+}
+
+void varFreeContents(Var *var) {
+  if (var != NULL) {
+    if (var->namespace != NULL) {
+      free(var->namespace);
+      var->namespace = NULL;
+    }
+    if (var->name != NULL) {
+      free(var->name);
+      var->name = NULL;
+    }
+  }
+}
+
+void varFree(Var *var) {
+  if (var != NULL) {
+    varFreeContents(var);
+    free(var);
+  }
+}
+
+Var* resolveVar(Namespaces *analyzer, wchar_t *symbolName, uint64_t symbolNameLength) {
+
+  Namespace *ns;
+  wchar_t *searchName;
+  uint64_t searchNameLength;
+
+  // assume unqualified namespace at first
+  ns = analyzer->currentNamespace;
+  searchName = symbolName;
+  searchNameLength = symbolNameLength;
+
+  if (symbolNameLength > 2) { // need at least three characters to qualify a var name with a namespace: ('q/n')
+
+    // attempt to find a qualified namespace
+    wchar_t *slashPtr = wcschr(symbolName, L'/');
+    if (slashPtr != NULL) { // qualified
+      uint64_t nsLen = slashPtr - symbolName;
+
+      for (int i=0; i<analyzer->numNamespaces; i++) {
+
+        Namespace *thisNs = &analyzer->namespaces[i];
+        if (wcsncmp(symbolName, thisNs->name, nsLen) == 0) {
+          ns = thisNs;
+          searchName = slashPtr + 1;
+          searchNameLength = symbolNameLength - (nsLen + 1);
+          break;
+        }
+      }
+    }
+  }
+
+  // find var within namespace
+
+  for (int i=0; i<ns->localVars.length; i++) {
+    if (wcsncmp(searchName, ns->localVars.vars[i].name, searchNameLength) == 0) {
+      return &ns->localVars.vars[i];
+    }
+  }
+
+  return NULL;
+}
+
+void varListInit(VarList *list) {
+  list->length = 0;
+  list->allocatedLength = 0;
+  list->vars = NULL;
+}
+
+void varListFreeContents(VarList *list) {
+  if (list != NULL) {
+    if (list->vars != NULL) {
+      for (int i=0; i<list->length; i++) {
+        varFreeContents(&list->vars[i]);
+      }
+      free(list->vars);
+      list->vars = NULL;
+      list->length = 0;
+      list->allocatedLength = 0;
+    }
+  }
+}
+
+RetVal tryAppendVar(VarList *list, Var var, Error* error) {
+
+  RetVal ret;
+
+  if (list->vars == NULL) {
+    uint64_t len = 16;
+    tryMalloc(list->vars, len * sizeof(Var), "Var array");
+    list->allocatedLength = len;
+  }
+  else if (list->length == list->allocatedLength) {
+    uint64_t newAllocatedLength = list->allocatedLength * 2;
+
+    Var* resizedVars = realloc(list->vars, newAllocatedLength * sizeof(Var));
+    if (resizedVars == NULL) {
+      ret = memoryError(error, "realloc Var array");
+      goto failure;
+    }
+
+    list->allocatedLength = newAllocatedLength;
+    list->vars = resizedVars;
+  }
+
+  list->vars[list->length] = var;
+  list->length = list->length + 1;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+//RetVal tryDefVar(FormAnalyzer *analyzer, wchar_t *symbolName, uint64_t symbolNameLength, Form *value, Error *error) {
+//  RetVal ret;
+//
+// //   these get cleaned up on failure
+//  Var createdVar;
+//  Form *copiedValue;
+//
+//  Var *resolvedVar = resolveVar(analyzer, symbolName, symbolNameLength);
+//  if (resolvedVar == NULL) {
+//    Namespace *ns = analyzer->currentNamespace;
+//    throws(tryVarInit(ns->name, symbolName, &createdVar, error));
+//    throws(tryFormDeepCopy(value, &createdVar.value, error));
+//    throws(tryAppendVar(&ns->localVars, createdVar, error));
+//  }
+//  else if (resolvedVar->value == NULL) {
+//    throws(tryFormDeepCopy(value, &resolvedVar->value, error));
+//  }
+//  else {
+//    throws(tryFormDeepCopy(value, &copiedValue, error));
+//    formFree(resolvedVar->value);
+//    resolvedVar->value = copiedValue;
+//    copiedValue = NULL; // now part of resolvedVar
+//  }
+//
+//  return R_SUCCESS;
+//
+//  failure:
+//  varFreeContents(&createdVar);
+//  if (copiedValue != NULL) {
+//    formFree(copiedValue);
+//  }
+//  return ret;
+//}
+
+RetVal tryNamespaceMake(wchar_t *name, uint64_t length, Namespace **ptr , Error *error) {
+
+  RetVal ret;
+
+  Namespace *ns;
+  tryMalloc(ns, sizeof(Namespace), "Namespace");
+
+  ns->name = NULL;
+  ns->importedVars = NULL;
+  ns->numImportedVars = 0;
+
+  varListInit(&ns->localVars);
+
+  throws(tryCopyText(name, &ns->name, length, error));
+
+  *ptr = ns;
+  return R_SUCCESS;
+
+  failure:
+  if (ns != NULL) {
+    free(ns);
+  }
+  return ret;
+}
+
+void namespaceFree(Namespace *ns) {
+  if (ns != NULL) {
+    free(ns->name);
+    free(ns->importedVars);
+    varListFreeContents(&ns->localVars);
+    free(ns);
+  }
+}
+
+RetVal tryNamespacesMake(Namespaces **ptr, Error *error) {
+
+  RetVal ret;
+
+  Namespaces *analyzer;
+  tryMalloc(analyzer, sizeof(Namespaces), "FormAnalyzer");
+
+  Namespace *userNs;
+  throws(tryNamespaceMake(L"user", wcslen(L"user"), &userNs, error));
+
+  analyzer->currentNamespace = userNs;
+  analyzer->namespaces = userNs;
+  analyzer->numNamespaces = 1;
+
+  *ptr = analyzer;
+  return R_SUCCESS;
+
+  failure:
+  if (analyzer != NULL) {
+    free(analyzer);
+  }
+  return ret;
+}
+
+void analyzerFree(Namespaces *analyzer) {
+  if (analyzer != NULL) {
+    analyzer->currentNamespace = NULL;
+    if (analyzer->namespaces != NULL) {
+      for (int i=0; i<analyzer->numNamespaces; i++) {
+        namespaceFree(&analyzer->namespaces[i]);
+      }
+      free(analyzer->namespaces);
+    }
+    free(analyzer);
+  }
+}
+
+/*
+ * gc/runtime implementation
+ */
+
 typedef struct Fn {
   uint64_t numArgs;
   uint16_t numConstants;

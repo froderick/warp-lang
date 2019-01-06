@@ -70,7 +70,6 @@
  */
 
 typedef struct Form Form;
-typedef struct Var Var;
 
 typedef struct FormIf {
   Form *test;
@@ -116,7 +115,7 @@ typedef struct FormEnvRef {
 } FormEnvRef;
 
 typedef struct FormVarRef {
-  Var *var; // TODO: make this just the symbol name, no Var reference here... this needs to get moved into the compiler/vm
+  // TODO: make this just the symbol name, no Var reference here... this needs to get moved into the compiler/vm
 } FormVarRef;
 
 typedef struct FormFnArg {
@@ -186,25 +185,6 @@ typedef struct Form {
   SourceLocation source;
 } Form;
 
-typedef struct Var {
-  wchar_t *namespace;
-  wchar_t *name;
-  Form *value;
-} Var;
-
-typedef struct VarList {
-  uint64_t allocatedLength;
-  uint64_t length;
-  Var *vars;
-} VarList;
-
-typedef struct Namespace {
-  wchar_t *name;
-  VarList localVars;
-  Var *importedVars;
-  uint64_t numImportedVars;
-} Namespace;
-
 typedef struct EnvBinding {
   wchar_t *name;
   uint64_t nameLength;
@@ -214,6 +194,7 @@ typedef struct EnvBinding {
 
 typedef struct EnvBindingScope {
   uint64_t numBindings;
+  uint64_t allocNumBindings;
   EnvBinding *bindings;
   struct EnvBindingScope *next;
 } EnvBindingScope;
@@ -223,17 +204,10 @@ typedef struct EnvBindingStack {
   EnvBindingScope *head;
 } EnvBindingStack;
 
-typedef struct FormAnalyzer {
-  Namespace *namespaces;
-  uint64_t numNamespaces;
-  Namespace *currentNamespace;
-  EnvBindingStack bindingStack;
-} FormAnalyzer;
+void envBindingStackInit(EnvBindingStack *bindingStack);
+void envBindingStackFreeContents(EnvBindingStack *bindingStack);
 
-RetVal tryAnalyzerMake(FormAnalyzer **ptr, Error *error);
-void analyzerFree(FormAnalyzer *analyzer);
-
-RetVal tryFormAnalyze(FormAnalyzer *analyzer, Expr* expr, Form **form, Error *error);
+RetVal tryFormAnalyze(EnvBindingStack *bindingStack, Expr* expr, Form **form, Error *error);
 void formFreeContents(Form* expr);
 void formFree(Form* expr);
 

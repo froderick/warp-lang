@@ -246,11 +246,9 @@ START_TEST(exprPrn)
   {
 
     Error e;
-    FormAnalyzer *analyzer;
     Expr *expr;
 
     errorInitContents(&e);
-    ck_assert_int_eq(tryAnalyzerMake(&analyzer, &e), R_SUCCESS);
 
     // constant
     ck_assert_int_eq(tryParse(L"(himom () '(one :two 102 nil true false) \"str\")", &expr, &e), R_SUCCESS);
@@ -263,37 +261,37 @@ END_TEST
 START_TEST(analyzer) {
 
     Error e;
-    FormAnalyzer *analyzer;
+    EnvBindingStack bindingStack;
     Expr *expr;
     Form *form;
 
     errorInitContents(&e);
-    ck_assert_int_eq(tryAnalyzerMake(&analyzer, &e), R_SUCCESS);
+    envBindingStackInit(&bindingStack);
 
     // constant
     ck_assert_int_eq(tryParse(L"\"str\"", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_CONST);
     formFree(form);
 
     // if
     ck_assert_int_eq(tryParse(L"(if true 10 20)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_IF);
     formFree(form);
 
     // let
     ck_assert_int_eq(tryParse(L"(let (a nil) true)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_LET);
     formFree(form);
 
     // env-ref
     ck_assert_int_eq(tryParse(L"(let (a nil) a)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_LET);
     ck_assert_int_eq(form->let.forms[0].type, F_ENV_REF);
@@ -303,21 +301,21 @@ START_TEST(analyzer) {
 
     // def
     ck_assert_int_eq(tryParse(L"(def money 100)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_DEF);
     formFree(form);
 
     // var-ref
     ck_assert_int_eq(tryParse(L"money", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_VAR_REF);
     formFree(form);
 
     // fn with args
     ck_assert_int_eq(tryParse(L"(fn (a b c) a)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_FN);
     ck_assert_int_eq(form->fn.forms[0].type, F_ENV_REF);
@@ -327,17 +325,16 @@ START_TEST(analyzer) {
 
     // fn-call
     ck_assert_int_eq(tryParse(L"(def barf (fn () 100))", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_DEF);
     formFree(form);
 
     ck_assert_int_eq(tryParse(L"(barf)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(analyzer, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_FN_CALL);
     ck_assert_int_eq(form->fnCall.fnCallable->type , F_VAR_REF);
-    ck_assert_int_eq(form->fnCall.fnCallable->varRef.var->value->type, F_FN);
     formFree(form);
 
 // TODO:
@@ -377,17 +374,17 @@ RetVal tryTestCompile(wchar_t *input, CodeUnit *codeUnit, Error *error) {
 
   RetVal ret;
 
-  FormAnalyzer *analyzer;
+  EnvBindingStack bindingStack;
   Expr *expr;
   Form *form;
 
-  throws(tryAnalyzerMake(&analyzer, error));
+  envBindingStackInit(&bindingStack);
 
   throws(tryParse(input, &expr, error));
-  throws(tryFormAnalyze(analyzer, expr, &form, error));
+  throws(tryFormAnalyze(&bindingStack, expr, &form, error));
   throws(tryCompileTopLevel(form, codeUnit, error));
 
-//  analyzerFree(analyzer); // TODO: this is broken, going away anyway
+  envBindingStackFreeContents(&bindingStack);
   exprFree(expr);
   formFree(form);
 
@@ -497,6 +494,42 @@ START_TEST(compilerBasic) {
           I_LOAD_CONST, 0, 0,
           I_STORE_LOCAL, 0, 0,
           I_LOAD_LOCAL, 0, 0,
+      };
+
+//      printCodeUnit(&codeUnit);
+//      printf("-------------\n");
+//      printCodeArray(expectedCode, sizeof(expectedCode));
+
+      ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
+      ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
+
+      codeUnitFreeContents(&codeUnit);
+    }
+
+    // let (nested)
+    {
+      ck_assert_int_eq(tryTestCompile(L"(let (x 12 "
+                                       "      y (let (z 100) z)) "
+                                       "  y)", &codeUnit, &e), R_SUCCESS);
+
+      ck_assert_int_eq(codeUnit.numConstants, 2);
+      ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[0].integer, 12);
+      ck_assert_int_eq(codeUnit.constants[1].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[1].integer, 100);
+
+      ck_assert_int_eq(codeUnit.code.numLocals, 3);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
+      ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
+
+      uint8_t expectedCode[] = {
+          I_LOAD_CONST, 0, 0,
+          I_STORE_LOCAL, 0, 0,
+          I_LOAD_CONST, 0, 1,
+          I_STORE_LOCAL, 0, 2,
+          I_LOAD_LOCAL, 0, 2,
+          I_STORE_LOCAL, 0, 1,
+          I_LOAD_LOCAL, 0, 1,
       };
 
 //      printCodeUnit(&codeUnit);
