@@ -87,9 +87,9 @@ typedef struct LexicalBinding {
 
 typedef struct FormLet {
   LexicalBinding *bindings;
-  uint64_t numBindings;
+  uint16_t numBindings;
   Form *forms;
-  uint64_t numForms;
+  uint16_t numForms;
 } FormLet;
 
 typedef struct FormDef {
@@ -127,9 +127,9 @@ typedef struct FormFnArg {
 
 typedef struct FormFn {
   FormFnArg *args;
-  uint64_t numArgs;
+  uint16_t numArgs;
   Form *forms;
-  uint64_t numForms;
+  uint16_t numForms;
 
   // TODO: things to consider implementing in the analysis phase
   uint64_t numLocals;
