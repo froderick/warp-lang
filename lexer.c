@@ -465,10 +465,7 @@ RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *e
 
     // invalid token
   else {
-    int len = 32;
-    char msg[len];
-    snprintf(msg, len, "unrecognized token '%lc'\n", ch);
-    ret = tokenizationError(error, s->position, "keyword token type cannot be empty");
+    throwTokenizationError(error, s->position, "unexpected character '%lc'\n", ch);
   }
 
   // if we created a token, increment the lexer position
@@ -478,6 +475,9 @@ RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *e
   }
 
   return ret;
+
+  failure:
+    return ret;
 }
 
 /*
