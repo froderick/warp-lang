@@ -619,6 +619,40 @@ START_TEST(compilerBasic) {
 
       codeUnitFreeContents(&codeUnit);
     }
+
+    // let fn and call
+    {
+      ck_assert_int_eq(tryTestCompile(L"(let (x (fn (y) (builtin :add y 50)))"
+                                       "  (x 100))", &codeUnit, &e), R_SUCCESS);
+
+      ck_assert_int_eq(codeUnit.numConstants, 2);
+      ck_assert_int_eq(codeUnit.constants[0].type, CT_FN);
+      ck_assert_int_eq(codeUnit.constants[1].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[1].integer, 100);
+
+      ck_assert_int_eq(codeUnit.code.numLocals, 1);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
+      ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
+
+      uint8_t expectedCode[] = {
+          I_LOAD_CONST,  0, 0,
+          I_STORE_LOCAL, 0, 0,
+          I_LOAD_LOCAL,  0, 0,
+          I_LOAD_CONST,  0, 1,
+          I_INVOKE,
+      };
+
+//      printCodeUnit(&codeUnit);
+//      printf("-------------\n");
+//      printCodeArray(expectedCode, sizeof(expectedCode));
+
+      ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
+      ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
+
+      codeUnitFreeContents(&codeUnit);
+    }
+
+    // TODO: nested let + rebind in sub-let
   }
 END_TEST
 

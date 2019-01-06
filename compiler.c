@@ -350,7 +350,7 @@ RetVal tryCompile(Form *form, Constants *constants, Codes *codes, uint16_t *numL
         throws(tryCodeAppend(codes, sizeof(addCode), addCode, error));
       }
       else {
-        throwRuntimeError(error, "unsupported fnCallable");
+        throwRuntimeError(error, "unsupported builtin '%ls'", builtin->name);
       }
 
       break;
