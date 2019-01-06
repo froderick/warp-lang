@@ -120,6 +120,13 @@ void codeFreeContents(Code *code) {
 
 void _constantFreeContents(Constant *c);
 
+void constantFnInitContents(FnConstant *fnConst) {
+  fnConst->numArgs = 0;
+  fnConst->numConstants = 0;
+  fnConst->constants = NULL;
+  codeInitContents(&fnConst->code);
+}
+
 void constantFnFreeContents(FnConstant *fnConst) {
   if (fnConst != NULL) {
     fnConst->numArgs = 0;

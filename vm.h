@@ -108,6 +108,8 @@ void codeUnitInitContents(CodeUnit *codeUnit);
 
 void codeUnitFreeContents(CodeUnit *codeUnit);
 
+void constantFnInitContents(FnConstant *fnConst);
+
 typedef struct VM *VM_t;
 
 /*

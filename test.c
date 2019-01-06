@@ -348,6 +348,17 @@ END_TEST
 
 void printFnConst(FnConstant *fnConst) {
 
+//      printf("-------------\n");
+//
+//      for (int i=0; i<sizeof(fnCode); i++) {
+//        printf("%i: %u\n", i, fnCode[i]);
+//      }
+//
+//      printf("-------------\n");
+
+//  for (int i=0; i<fn.code.codeLength; i++) {
+//    printf("%i: %u\n", i, fn.code.code[i]);
+//  }
 }
 
 void printCodeUnit(CodeUnit *unit) {
@@ -418,24 +429,49 @@ START_TEST(compilerBasic) {
     {
       ck_assert_int_eq(tryTestCompile(L"((fn (a b) (builtin :add a b)) 4 5)", &codeUnit, &e), R_SUCCESS);
 
-      ck_assert_int_eq(codeUnit.numConstants, 2);
-      ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
-      ck_assert_int_eq(codeUnit.constants[0].integer, 1);
+      // verify fn
+
+      ck_assert_int_eq(codeUnit.constants[0].type, CT_FN);
+
+      FnConstant fn = codeUnit.constants[0].function;
+      ck_assert_int_eq(fn.numArgs, 2);
+      ck_assert_int_eq(fn.numConstants, 0);
+      ck_assert_int_eq(fn.code.numLocals, 0);
+      ck_assert_int_eq(fn.code.maxOperandStackSize, 100);
+      ck_assert_int_eq(fn.code.hasSourceTable, false);
+
+      uint8_t fnCode[] = {
+          I_LOAD_LOCAL, 0, 0,
+          I_LOAD_LOCAL, 0, 1,
+          I_ADD,
+          I_RET,
+      };
+
+      ck_assert_int_eq(fn.code.codeLength, sizeof(fnCode));
+      ck_assert_mem_eq(fnCode, fn.code.code, fn.code.codeLength);
+
+      // verify fnCall
+
+      ck_assert_int_eq(codeUnit.numConstants, 3);
       ck_assert_int_eq(codeUnit.constants[1].type, CT_INT);
-      ck_assert_int_eq(codeUnit.constants[1].integer, 2);
+      ck_assert_int_eq(codeUnit.constants[1].integer, 4);
+      ck_assert_int_eq(codeUnit.constants[2].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[2].integer, 5);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 0);
       ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
-      uint8_t expectedCode[] = {
+      uint8_t fnCallCode[] = {
           I_LOAD_CONST, 0, 0,
           I_LOAD_CONST, 0, 1,
-          I_ADD,
+          I_LOAD_CONST, 0, 2,
+          I_INVOKE,
       };
 
-      ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
-      ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
+      ck_assert_int_eq(codeUnit.code.codeLength, sizeof(fnCallCode));
+      ck_assert_mem_eq(fnCallCode, codeUnit.code.code, codeUnit.code.codeLength);
+
 
       codeUnitFreeContents(&codeUnit);
     }

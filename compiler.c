@@ -214,18 +214,56 @@ RetVal tryCompileIf(Form *form, Constants *constants, Codes *codes, Error *error
 // TODO: perhaps we need an initial pass before compilation to identify constants, and references to constants
 // so that we can avoid encoding the same constants repeatedly where they are referenced more than once
 
-
-RetVal tryCompileFn(Form *form, FnConstant *fnConstant, Error *error) {
+RetVal tryCompileFn(Form *form, Constants *constants, Codes *codes, Error *error) {
   RetVal ret;
+
+  // clean up on failure
+  Constants fnConstants;
+  Codes fnCodes;
+
+  constantsInitContents(&fnConstants);
+  codesInitContents(&fnCodes);
+
+  for (uint16_t i=0; i<form->fn.numForms; i++) {
+    throws(tryCompile(&form->fn.forms[i], &fnConstants, &fnCodes, error));
+  }
+
+  uint8_t retCode[] = { I_RET };
+  throws(tryCodeAppend(&fnCodes, sizeof(retCode), retCode, error));
+
+  FnConstant fnConst;
+  constantFnInitContents(&fnConst);
+
+  fnConst.numArgs = form->fn.numArgs;
+  fnConst.numConstants = fnConstants.numUsed;
+  fnConst.constants = fnConstants.constants;
+  fnConst.code.numLocals = 0; // TODO: fix this when we support them
+  fnConst.code.maxOperandStackSize = 100; // TODO: need to compute this
+  fnConst.code.codeLength = fnCodes.numUsed;
+  fnConst.code.code = fnCodes.codes;
+  fnConst.code.hasSourceTable = false;
+
+  Constant c;
+  c.type = CT_FN;
+  c.function = fnConst;
+  throws(tryAppendConstant(constants, c, error));
+
+  uint16_t index = constants->numUsed - 1;
+  uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
+  throws(tryCodeAppend(codes, sizeof(code), code, error));
 
   return R_SUCCESS;
 
   failure:
+    constantsFreeContents(&fnConstants);
+    codesFreeContents(&fnCodes);
     return ret;
 }
 
 RetVal tryCompile(Form *form, Constants *constants, Codes *codes, Error *error) {
   RetVal ret;
+
+//  printf("tryCompile(): %i\n", form->type);
 
   switch (form->type) {
 
@@ -239,10 +277,6 @@ RetVal tryCompile(Form *form, Constants *constants, Codes *codes, Error *error) 
       c.type = CT_INT;
       c.integer = form->constant->number.value;
       throws(tryAppendConstant(constants, c, error));
-
-      // emit code
-      // but what for? we don't know what should happen to this constant
-      // we could just assume that we put it on the opstack
 
       uint16_t index = constants->numUsed - 1;
       uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
@@ -259,10 +293,22 @@ RetVal tryCompile(Form *form, Constants *constants, Codes *codes, Error *error) 
     case F_NONE:
     case F_LET:
     case F_DEF:
-    case F_ENV_REF:
     case F_VAR_REF:
-    case F_FN: {
-      throwRuntimeError(error, "unsupported");
+    {
+      throwRuntimeError(error, "unsupported"); // TODO: we should throw compiler errors, not vm errors
+      break;
+    }
+
+    case F_ENV_REF: {
+      if (form->envRef.type == RT_ARG) {
+        // we know that the arguments are always the first locals, so we can cheat for now
+        uint16_t index = form->envRef.index;
+        uint8_t code[] = { I_LOAD_LOCAL, index >> 8, index & 0xFF };
+        throws(tryCodeAppend(codes, sizeof(code), code, error));
+      }
+      else {
+        throwRuntimeError(error, "unsupported");
+      }
       break;
     }
 
@@ -286,8 +332,21 @@ RetVal tryCompile(Form *form, Constants *constants, Codes *codes, Error *error) 
       break;
     }
 
+    case F_FN: {
+      throws(tryCompileFn(form, constants, codes, error));
+      break;
+    }
+
     case F_FN_CALL: {
-      throwRuntimeError(error, "unsupported fnCallable");
+
+      throws(tryCompile(form->fnCall.fnCallable, constants, codes, error));
+      for (uint16_t i = 0; i<form->fnCall.numArgs; i++) {
+        throws(tryCompile(&form->fnCall.args[i], constants, codes, error));
+      }
+
+      uint8_t code[] = { I_INVOKE };
+      throws(tryCodeAppend(codes, sizeof(code), code, error));
+
       break;
     }
   }
