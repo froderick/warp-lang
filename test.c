@@ -361,10 +361,15 @@ void printFnConst(FnConstant *fnConst) {
 //  }
 }
 
+void printCodeArray(uint8_t *code, uint16_t codeLength) {
+  for (int i=0; i<codeLength; i++) {
+    printf("%i: %u\n", i, code[i]);
+  }
+}
+
 void printCodeUnit(CodeUnit *unit) {
-  // TODO: finish me
   for (int i=0; i<unit->code.codeLength; i++) {
-    printf("%i\n", unit->code.code[i]);
+    printf("%i: %u\n", i, unit->code.code[i]);
   }
 }
 
@@ -436,7 +441,7 @@ START_TEST(compilerBasic) {
       FnConstant fn = codeUnit.constants[0].function;
       ck_assert_int_eq(fn.numArgs, 2);
       ck_assert_int_eq(fn.numConstants, 0);
-      ck_assert_int_eq(fn.code.numLocals, 0);
+      ck_assert_int_eq(fn.code.numLocals, 2);
       ck_assert_int_eq(fn.code.maxOperandStackSize, 100);
       ck_assert_int_eq(fn.code.hasSourceTable, false);
 
@@ -472,6 +477,34 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(fnCallCode));
       ck_assert_mem_eq(fnCallCode, codeUnit.code.code, codeUnit.code.codeLength);
 
+
+      codeUnitFreeContents(&codeUnit);
+    }
+
+    // let
+    {
+      ck_assert_int_eq(tryTestCompile(L"(let (x 12) x)", &codeUnit, &e), R_SUCCESS);
+
+      ck_assert_int_eq(codeUnit.numConstants, 1);
+      ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[0].integer, 12);
+
+      ck_assert_int_eq(codeUnit.code.numLocals, 1);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
+      ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
+
+      uint8_t expectedCode[] = {
+          I_LOAD_CONST, 0, 0,
+          I_STORE_LOCAL, 0, 0,
+          I_LOAD_LOCAL, 0, 0,
+      };
+
+//      printCodeUnit(&codeUnit);
+//      printf("-------------\n");
+//      printCodeArray(expectedCode, sizeof(expectedCode));
+
+      ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
+      ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
 
       codeUnitFreeContents(&codeUnit);
     }
