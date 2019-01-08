@@ -116,7 +116,26 @@ typedef struct FormEnvRef {
 } FormEnvRef;
 
 typedef struct FormVarRef {
+  uint64_t nameLength;
+  wchar_t *name;
   // TODO: make this just the symbol name, no Var reference here... this needs to get moved into the compiler/vm
+
+  /*
+   * Here's a question: how does the compiler know how to identify a var?
+   *
+   * We can store the var name as a constant. But the VarRef needs to have the constant index for it.
+   *
+   * Is it important that N references to the same var in the same compilation unit all reference the exact same
+   * constant index when loading the var value? We already do this for locals and arguments.
+   *
+   * We could, during analysis, give each distinct var its own index id, and then made each var reference use that
+   * index id, Then, during compilation we could add those as constants. We'd have to either insert these constants
+   * first before adding others
+   *
+   * // TODO: no, this should just be the name
+   * // we can compute distinct values here in the compiler. it can keep track of the strings it has seen, and
+   * // note which ones have been given a constant index
+   */
 } FormVarRef;
 
 typedef struct FormFnArg {

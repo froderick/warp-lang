@@ -78,3 +78,12 @@ RetVal runtimeError(Error *error, char *desc) {
   return R_ERROR;
 }
 
+RetVal compilerError(Error *error, char *desc) {
+
+  error->type = E_RUNTIME;
+  swprintf(error->message, ERROR_MSG_LENGTH, L"compiler error encountered -> %s\n", desc);
+
+  if (DEBUG) { printError(error); }
+  return R_ERROR;
+}
+

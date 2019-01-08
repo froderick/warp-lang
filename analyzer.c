@@ -586,8 +586,19 @@ RetVal tryEnvRefAnalyze(EnvBindingStack *bindingStack, Expr *expr, EnvBinding *b
 }
 
 RetVal tryVarRefAnalyze(EnvBindingStack *bindingStack, Expr *expr, FormVarRef *varRef, Error *error) {
-  // TODO
+  RetVal ret;
+
+  if (expr->type != N_SYMBOL) {
+    throwSyntaxError(error, getExprPosition(expr), "var refs must be symbols: '%i'", expr->type);
+  }
+
+  varRef->nameLength = expr->symbol.length;
+  throws(tryCopyText(expr->symbol.value, &varRef->name, varRef->nameLength, error));
+
   return R_SUCCESS;
+
+  failure:
+    return ret;
 }
 
 RetVal assertFnCallable(Form *form, Error *error) {

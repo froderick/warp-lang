@@ -128,9 +128,15 @@ void codesClear(Codes *codes) {
 
 // compiler behavior that emits constants and code
 
-RetVal tryCompile(Form *form, Constants *constants, Codes *codes, uint16_t *numLocals, uint16_t numArgs, Error *error);
+typedef struct Output {
+  Constants *constants;
+  Codes *codes;
+  uint16_t *numLocals;
+} Output;
 
-RetVal tryCompileIf(Form *form, Constants *constants, Codes *codes, uint16_t *numLocals, uint16_t numArgs, Error *error) {
+RetVal tryCompile(Form *form, Output output, Error *error);
+
+RetVal tryCompileIf(Form *form, Output output, Error *error) {
   RetVal ret;
 
   Codes ifBranch, elseBranch;
@@ -139,10 +145,14 @@ RetVal tryCompileIf(Form *form, Constants *constants, Codes *codes, uint16_t *nu
   codesInitContents(&elseBranch);
 
   // emit the test in the main code space
-  throws(tryCompile(form->iff.test, constants, codes, numLocals, numArgs, error));
+  throws(tryCompile(form->iff.test, output, error));
 
   // emit ifBranch form in temporary code space
-  throws(tryCompile(form->iff.ifBranch, constants, &ifBranch, numLocals, numArgs, error));
+  {
+    Output ifOutput = output;
+    ifOutput.codes = &ifBranch;
+    throws(tryCompile(form->iff.ifBranch, ifOutput, error));
+  }
 
   if (form->iff.elseBranch == NULL) {
 
@@ -154,14 +164,14 @@ RetVal tryCompileIf(Form *form, Constants *constants, Codes *codes, uint16_t *nu
     // $END_ADDR
 
     // compute the conditional code, lengths and offsets
-    uint16_t nextCodeAddr = codes->numUsed;
+    uint16_t nextCodeAddr = output.codes->numUsed;
     uint16_t ifBranchLength = ifBranch.numUsed;
     uint16_t jumpToEndAddr = nextCodeAddr + ifBranchLength;
     uint8_t jumpToEndCode[] = { I_JMP_IF_NOT, jumpToEndAddr >> 8, jumpToEndAddr & 0xFF };
 
     // emit the code for real
-    throws(tryCodeAppend(codes, sizeof(jumpToEndCode), jumpToEndCode, error));
-    throws(tryCodeAppendContents(&ifBranch, codes, error));
+    throws(tryCodeAppend(output.codes, sizeof(jumpToEndCode), jumpToEndCode, error));
+    throws(tryCodeAppendContents(&ifBranch, output.codes, error));
   }
   else {
 
@@ -178,10 +188,14 @@ RetVal tryCompileIf(Form *form, Constants *constants, Codes *codes, uint16_t *nu
     // $END_ADDR
 
     // emit elseBranch form in temporary code space
-    throws(tryCompile(form->iff.elseBranch, constants, &elseBranch, numLocals, numArgs, error));
+    {
+      Output elseOutput = output;
+      elseOutput.codes = &elseBranch;
+      throws(tryCompile(form->iff.elseBranch, elseOutput, error));
+    }
 
     // compute the conditional code, lengths and offsets
-    uint16_t nextCodeAddr = codes->numUsed;
+    uint16_t nextCodeAddr = output.codes->numUsed;
     uint16_t jumpToElseCodeLength = 3;
     uint16_t ifBranchLength = ifBranch.numUsed;
     uint16_t jumpToEndCodeLength = 3;
@@ -194,10 +208,10 @@ RetVal tryCompileIf(Form *form, Constants *constants, Codes *codes, uint16_t *nu
     uint8_t jumpToEndCode[] = {I_JMP, jumpToEndAddr >> 8, jumpToEndAddr & 0xFF};
 
     // emit the code for real
-    throws(tryCodeAppend(codes, sizeof(jumpToElseCode), jumpToElseCode, error));
-    throws(tryCodeAppendContents(&ifBranch, codes, error));
-    throws(tryCodeAppend(codes, sizeof(jumpToEndCode), jumpToEndCode, error));
-    throws(tryCodeAppendContents(&elseBranch, codes, error));
+    throws(tryCodeAppend(output.codes, sizeof(jumpToElseCode), jumpToElseCode, error));
+    throws(tryCodeAppendContents(&ifBranch, output.codes, error));
+    throws(tryCodeAppend(output.codes, sizeof(jumpToEndCode), jumpToEndCode, error));
+    throws(tryCodeAppendContents(&elseBranch, output.codes, error));
   }
 
   codesFreeContents(&ifBranch);
@@ -214,7 +228,7 @@ RetVal tryCompileIf(Form *form, Constants *constants, Codes *codes, uint16_t *nu
 // TODO: perhaps we need an initial pass before compilation to identify constants, and references to constants
 // so that we can avoid encoding the same constants repeatedly where they are referenced more than once
 
-RetVal tryCompileFn(Form *form, Constants *constants, Codes *codes, uint16_t *numLocals, uint16_t numArgs, Error *error) {
+RetVal tryCompileFn(Form *form, Output output, Error *error) {
   RetVal ret;
 
   // clean up on failure
@@ -225,10 +239,16 @@ RetVal tryCompileFn(Form *form, Constants *constants, Codes *codes, uint16_t *nu
   codesInitContents(&fnCodes);
 
   uint16_t fnNumLocals = form->fn.numArgs; // the first n locals are always the first n args
-  uint16_t fnNumArgs = form->fn.numArgs;
 
-  for (uint16_t i=0; i<form->fn.numForms; i++) {
-    throws(tryCompile(&form->fn.forms[i], &fnConstants, &fnCodes, &fnNumLocals, fnNumArgs, error));
+  {
+    Output fnOutput;
+    fnOutput.constants = &fnConstants;
+    fnOutput.codes = &fnCodes;
+    fnOutput.numLocals = &fnNumLocals;
+
+    for (uint16_t i = 0; i < form->fn.numForms; i++) {
+      throws(tryCompile(&form->fn.forms[i], fnOutput, error));
+    }
   }
 
   uint8_t retCode[] = { I_RET };
@@ -249,11 +269,11 @@ RetVal tryCompileFn(Form *form, Constants *constants, Codes *codes, uint16_t *nu
   Constant c;
   c.type = CT_FN;
   c.function = fnConst;
-  throws(tryAppendConstant(constants, c, error));
+  throws(tryAppendConstant(output.constants, c, error));
 
-  uint16_t index = constants->numUsed - 1;
+  uint16_t index = output.constants->numUsed - 1;
   uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-  throws(tryCodeAppend(codes, sizeof(code), code, error));
+  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
 
   return R_SUCCESS;
 
@@ -263,115 +283,231 @@ RetVal tryCompileFn(Form *form, Constants *constants, Codes *codes, uint16_t *nu
     return ret;
 }
 
-RetVal tryCompile(Form *form, Constants *constants, Codes *codes, uint16_t *numLocals, uint16_t numArgs, Error *error) {
+typedef struct Text {
+  uint64_t length;
+  wchar_t *value;
+} Text;
+
+RetVal varRefConstantGetIndex(Text name, Output output, uint16_t *index, Error *error) {
   RetVal ret;
 
-//  printf("tryCompile(): %i\n", form->type);
+  // look for already-defined var ref constant
+  for (uint16_t i=0; i<output.constants->numUsed; i++) {
+    Constant *c = &output.constants->constants[i];
+    if (c->type == CT_VAR_REF && wcscmp(c->varRef.name, name.value) == 0) {
+      *index = i;
+      return R_SUCCESS;
+    }
+  }
+
+  // create or reuse var ref constant
+  Constant c;
+  c.type = CT_STR;
+  c.varRef.nameLength = name.length;
+  throws(tryCopyText(name.value, &c.varRef.name, c.varRef.nameLength, error));
+  throws(tryAppendConstant(output.constants, c, error));
+  *index = output.constants->numUsed - 1;
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryCompileConst(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  if (form->constant->type != N_NUMBER) {
+    throwCompilerError(error, "unsupported");
+  }
+
+  Constant c;
+  c.type = CT_INT;
+  c.integer = form->constant->number.value;
+  throws(tryAppendConstant(output.constants, c, error));
+
+  uint16_t index = output.constants->numUsed - 1;
+  uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
+
+  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryCompileDef(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  throws(tryCompile(form->def.value, output, error));
+
+  Text name;
+  name.length = form->def.nameLength;
+  name.value = form->def.name;
+
+  uint16_t index;
+  throws(varRefConstantGetIndex(name, output, &index, error));
+
+  uint8_t code[] = { I_DEF_VAR, index >> 8, index & 0xFF };
+  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryCompileVarRef(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  Text name;
+  name.length = form->def.nameLength;
+  name.value = form->def.name;
+
+  uint16_t index;
+  throws(varRefConstantGetIndex(name, output, &index, error));
+
+  uint8_t code[] = { I_LOAD_VAR, index >> 8, index & 0xFF };
+  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryCompileLet(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  // 'let's add locals to the current frame
+
+  for (uint16_t i=0; i<form->let.numBindings; i++) {
+    LexicalBinding *binding = &form->let.bindings[i];
+
+    throws(tryCompile(binding->value, output, error));
+
+    uint16_t index = binding->index;
+    uint8_t code[] = { I_STORE_LOCAL, index >> 8, index & 0xFF };
+    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+
+    *output.numLocals = *output.numLocals + 1;
+  }
+
+  for (uint16_t i = 0; i<form->let.numForms; i++) {
+    throws(tryCompile(&form->let.forms[i], output, error));
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryCompileEnvRef(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  if (form->envRef.type == RT_ARG || form->envRef.type == RT_LOCAL) {
+    uint16_t index = form->envRef.index;
+    uint8_t code[] = { I_LOAD_LOCAL, index >> 8, index & 0xFF };
+    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+  }
+  else {
+    throwCompilerError(error, "unsupported");
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  FormBuiltin *builtin = &form->builtin;
+
+  if (wcscmp(builtin->name, L"add") == 0) {
+    form->type = F_BUILTIN;
+
+    for (int i=0; i < form->builtin.numArgs; i++) {
+      throws(tryCompile(&form->builtin.args[i], output, error));
+    }
+
+    uint8_t addCode[] = { I_ADD};
+    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+  }
+  else {
+    throwCompilerError(error, "unsupported builtin '%ls'", builtin->name);
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  throws(tryCompile(form->fnCall.fnCallable, output, error));
+  for (uint16_t i = 0; i<form->fnCall.numArgs; i++) {
+    throws(tryCompile(&form->fnCall.args[i], output, error));
+  }
+
+  uint8_t code[] = { I_INVOKE };
+  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryCompile(Form *form, Output output, Error *error) {
+  RetVal ret;
 
   switch (form->type) {
 
-    case F_CONST: {
-
-      if (form->constant->type != N_NUMBER) {
-        throwRuntimeError(error, "unsupported");
-      }
-
-      Constant c;
-      c.type = CT_INT;
-      c.integer = form->constant->number.value;
-      throws(tryAppendConstant(constants, c, error));
-
-      uint16_t index = constants->numUsed - 1;
-      uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-
-      throws(tryCodeAppend(codes, sizeof(code), code, error));
-
+    case F_CONST:
+      throws(tryCompileConst(form, output, error));
       break;
-    }
 
     case F_IF:
-      throws(tryCompileIf(form, constants, codes, numLocals, numArgs, error));
+      throws(tryCompileIf(form, output, error));
+      break;
+
+    case F_DEF:
+      throws(tryCompileDef(form, output, error));
+      break;
+
+    case F_VAR_REF:
+      throws(tryCompileVarRef(form, output, error));
+      break;
+
+    case F_LET:
+      throws(tryCompileLet(form, output, error));
+      break;
+
+    case F_ENV_REF:
+      throws(tryCompileEnvRef(form, output, error));
+      break;
+
+    case F_BUILTIN:
+      throws(tryCompileBuiltin(form, output, error));
+      break;
+
+    case F_FN:
+      throws(tryCompileFn(form, output, error));
+      break;
+
+    case F_FN_CALL:
+      throws(tryCompileFnCall(form, output, error));
       break;
 
     case F_NONE:
-    case F_DEF:
-    case F_VAR_REF:
-    {
-      throwRuntimeError(error, "unsupported"); // TODO: we should throw compiler errors, not vm errors
+      throwCompilerError(error, "unsupported");
       break;
-    }
-
-    case F_LET: {
-
-      // 'let's add locals to the current frame
-
-      for (uint16_t i=0; i<form->let.numBindings; i++) {
-        LexicalBinding *binding = &form->let.bindings[i];
-
-        throws(tryCompile(binding->value, constants, codes, numLocals, numArgs, error));
-
-        uint16_t index = binding->index;
-        uint8_t code[] = { I_STORE_LOCAL, index >> 8, index & 0xFF };
-        throws(tryCodeAppend(codes, sizeof(code), code, error));
-
-        *numLocals = *numLocals + 1;
-      }
-
-      for (uint16_t i = 0; i<form->let.numForms; i++) {
-        throws(tryCompile(&form->let.forms[i], constants, codes, numLocals, numArgs, error));
-      }
-
-      break;
-    }
-
-    case F_ENV_REF: {
-      if (form->envRef.type == RT_ARG || form->envRef.type == RT_LOCAL) {
-        uint16_t index = form->envRef.index;
-        uint8_t code[] = { I_LOAD_LOCAL, index >> 8, index & 0xFF };
-        throws(tryCodeAppend(codes, sizeof(code), code, error));
-      }
-      else {
-        throwRuntimeError(error, "unsupported");
-      }
-      break;
-    }
-
-    case F_BUILTIN: {
-      FormBuiltin *builtin = &form->builtin;
-
-      if (wcscmp(builtin->name, L"add") == 0) {
-        form->type = F_BUILTIN;
-
-        for (int i=0; i < form->builtin.numArgs; i++) {
-          throws(tryCompile(&form->builtin.args[i], constants, codes, numLocals, numArgs, error));
-        }
-
-        uint8_t addCode[] = { I_ADD};
-        throws(tryCodeAppend(codes, sizeof(addCode), addCode, error));
-      }
-      else {
-        throwRuntimeError(error, "unsupported builtin '%ls'", builtin->name);
-      }
-
-      break;
-    }
-
-    case F_FN:
-      throws(tryCompileFn(form, constants, codes, numLocals, numArgs, error));
-      break;
-
-    case F_FN_CALL: {
-
-      throws(tryCompile(form->fnCall.fnCallable, constants, codes, numLocals, numArgs, error));
-      for (uint16_t i = 0; i<form->fnCall.numArgs; i++) {
-        throws(tryCompile(&form->fnCall.args[i], constants, codes, numLocals, numArgs, error));
-      }
-
-      uint8_t code[] = { I_INVOKE };
-      throws(tryCodeAppend(codes, sizeof(code), code, error));
-
-      break;
-    }
   }
 
   return R_SUCCESS;
@@ -394,9 +530,15 @@ RetVal tryCompileTopLevel(Form *form, CodeUnit *codeUnit, Error *error) {
   // TODO: this was where I left off, the tryCompile needs to provide more information to fill out the Code object
 
   uint16_t numLocals = 0;
-  uint16_t numArgs = 0;
 
-  throws(tryCompile(form, &constants, &codes, &numLocals, numArgs, error));
+  {
+    Output output;
+    output.constants = &constants;
+    output.codes = &codes;
+    output.numLocals = &numLocals;
+
+    throws(tryCompile(form, output, error));
+  }
 
   codeUnit->code.numLocals = numLocals;
   codeUnit->numConstants = constants.numUsed;

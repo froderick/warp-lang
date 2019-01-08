@@ -70,6 +70,7 @@ typedef enum ConstantType {
   CT_NIL,
   CT_STR,
   CT_FN,
+  CT_VAR_REF,
 } ConstantType;
 
 typedef struct Constant Constant;
@@ -86,6 +87,11 @@ typedef struct FnConstant { // this is the runtime definition of a function
   Code code;
 } FnConstant;
 
+typedef struct VarRefConstant {
+  uint64_t nameLength;
+  wchar_t *name;
+} VarRefConstant;
+
 typedef struct Constant {
   ConstantType type;
   union {
@@ -93,6 +99,7 @@ typedef struct Constant {
     uint64_t integer;
     StringConstant string;
     FnConstant function;
+    VarRefConstant varRef;
   };
 } Constant;
 

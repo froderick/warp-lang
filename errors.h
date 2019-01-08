@@ -73,6 +73,7 @@ RetVal internalError(Error *error, char *desc);
 RetVal tokenizationError(Error *error, unsigned long position, char *desc);
 RetVal syntaxError(Error *error, unsigned long position, char *desc);
 RetVal runtimeError(Error *error, char *desc);
+RetVal compilerError(Error *error, char *desc);
 
 #define throwMemoryError(error, str, ...) {\
   error->fileName = __FILE__; \
@@ -126,6 +127,17 @@ RetVal runtimeError(Error *error, char *desc);
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   ret = syntaxError(error, pos, msg); \
+  goto failure; \
+}
+
+#define throwCompilerError(error, str, ...) {\
+  error->fileName = __FILE__; \
+  error->lineNumber = __LINE__; \
+  error->functionName = __func__; \
+  int len = 64; \
+  char msg[len]; \
+  snprintf(msg, len, str, ##__VA_ARGS__); \
+  ret = compilerError(error, msg); \
   goto failure; \
 }
 
