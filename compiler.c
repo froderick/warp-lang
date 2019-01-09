@@ -302,7 +302,7 @@ RetVal varRefConstantGetIndex(Text name, Output output, uint16_t *index, Error *
 
   // create or reuse var ref constant
   Constant c;
-  c.type = CT_STR;
+  c.type = CT_VAR_REF;
   c.varRef.nameLength = name.length;
   throws(tryCopyText(name.value, &c.varRef.name, c.varRef.nameLength, error));
   throws(tryAppendConstant(output.constants, c, error));
@@ -362,8 +362,8 @@ RetVal tryCompileVarRef(Form *form, Output output, Error *error) {
   RetVal ret;
 
   Text name;
-  name.length = form->def.nameLength;
-  name.value = form->def.name;
+  name.length = form->varRef.nameLength;
+  name.value = form->varRef.name;
 
   uint16_t index;
   throws(varRefConstantGetIndex(name, output, &index, error));
@@ -395,7 +395,8 @@ RetVal tryCompileLet(Form *form, Output output, Error *error) {
   }
 
   for (uint16_t i = 0; i<form->let.numForms; i++) {
-    throws(tryCompile(&form->let.forms[i], output, error));
+    Form *f = &form->let.forms[i];
+    throws(tryCompile(f, output, error));
   }
 
   return R_SUCCESS;

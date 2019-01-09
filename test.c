@@ -358,6 +358,15 @@ void printFnConst(FnConstant *fnConst) {
 //  }
 }
 
+void printInst(int *i, const char* name) {
+  printf("%i:\t%s\n", *i, name);
+}
+
+void printInstAndIndex(int *i, const char* name, uint8_t *code) {
+  printf("%i:\t%s\t%u\n", *i, name, code[*i + 1] << 8 | code[*i + 2]);
+  *i = *i + 2;
+}
+
 void printCodeArray(uint8_t *code, uint16_t codeLength) {
 
   for (int i=0; i<codeLength; i++) {
@@ -368,73 +377,67 @@ void printCodeArray(uint8_t *code, uint16_t codeLength) {
 
       case I_LOAD_CONST:  // (8), index  (16) | (-> value)
         name = "I_LOAD_CONST";
-        printf("%i:\t%s\t%u\n", i, name, code[i + 1] << 8 | code[i + 2]);
-        i += 2;
+        printInstAndIndex(&i, name, code);
         break;
 
       case I_LOAD_LOCAL:  // (8), index  (16) | (-> value)
         name = "I_LOAD_LOCAL";
-        printf("%i:\t%s\t%u\n", i, name, code[i + 1] << 8 | code[i + 2]);
-        i += 2;
+        printInstAndIndex(&i, name, code);
         break;
 
       case I_STORE_LOCAL: // (8), index  (16) | (objectref ->)
         name = "I_STORE_LOCAL";
-        printf("%i:\t%s\t%u\n", i, name, code[i + 1] << 8 | code[i + 2]);
-        i += 2;
+        printInstAndIndex(&i, name, code);
         break;
 
       case I_INVOKE:      // (8)              | (objectref, args... -> ...)
         name = "I_INVOKE";
-        printf("%i:\t%s\n", i, name);
+        printInst(&i, name);
         break;
 
       case I_RET:         // (8)              | (objectref ->)
         name = "I_RET";
-        printf("%i:\t%s\n", i, name);
+        printInst(&i, name);
         break;
 
       case I_CMP:         // (8)              | (a, b -> 0 | 1)
         name = "I_CMP";
-        printf("%i:\t%s\n", i, name);
+        printInst(&i, name);
         break;
 
       case I_JMP:         // (8), offset (16) | (->)
         name = "I_JMP";
-        printf("%i:\t%s\t%u\n", i, name, code[i + 1] << 8 | code[i + 2]);
-        i += 2;
+        printInstAndIndex(&i, name, code);
         break;
 
       case I_JMP_IF:      // (8), offset (16) | (value ->)
         name = "I_JMP_IF";
-        printf("%i:\t%s\t%u\n", i, name, code[i + 1] << 8 | code[i + 2]);
-        i += 2;
+        printInstAndIndex(&i, name, code);
         break;
 
       case I_JMP_IF_NOT:  // (8), offset (16) | (value ->)
         name = "I_JMP_IF_NOT";
-        printf("%i:\t%s\t%u\n", i, name, code[i + 1] << 8 | code[i + 2]);
-        i += 2;
+        printInstAndIndex(&i, name, code);
         break;
 
       case I_HALT:        // (8)              | (exitcode ->)
         name = "I_HALT";
-        printf("%i:\t%s\n", i, name);
+        printInst(&i, name);
         break;
 
       case I_ADD:        // (8)              | (a, b -> c)
         name = "I_ADD";
-        printf("%i:\t%s\n", i, name);
+        printInst(&i, name);
         break;
 
       case I_DEF_VAR:     // (8)              | (name, value ->)
         name = "I_DEF_VAR";
-        printf("%i:\t%s\n", i, name);
+        printInstAndIndex(&i, name, code);
         break;
 
       case I_LOAD_VAR:    // (8)              | (name -> value)
         name = "I_LOAD_VAR";
-        printf("%i:\t%s\n", i, name);
+        printInstAndIndex(&i, name, code);
         break;
 
       default:
@@ -639,6 +642,43 @@ START_TEST(compilerBasic) {
           I_STORE_LOCAL, 0, 0,
           I_LOAD_LOCAL,  0, 0,
           I_LOAD_CONST,  0, 1,
+          I_INVOKE,
+      };
+
+//      printCodeUnit(&codeUnit);
+//      printf("-------------\n");
+//      printCodeArray(expectedCode, sizeof(expectedCode));
+
+      ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
+      ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
+
+      codeUnitFreeContents(&codeUnit);
+    }
+
+    // define, var-ref
+    {
+      ck_assert_int_eq(tryTestCompile(L"(let ()"
+                                       "  (def x 100)"
+                                       "  (builtin :add x 50))", &codeUnit, &e), R_SUCCESS);
+
+      ck_assert_int_eq(codeUnit.numConstants, 3);
+      ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[0].integer, 100);
+      ck_assert_int_eq(codeUnit.constants[1].type, CT_VAR_REF);
+      ck_assert_int_eq(codeUnit.constants[1].varRef.nameLength, 1);
+      ck_assert_int_eq(wcscmp(codeUnit.constants[1].varRef.name, L"x"), 0);
+      ck_assert_int_eq(codeUnit.constants[2].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[2].integer, 50);
+
+      ck_assert_int_eq(codeUnit.code.numLocals, 0);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
+      ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
+
+      uint8_t expectedCode[] = {
+          I_LOAD_CONST,  0, 0,
+          I_DEF_VAR,     0, 1,
+          I_LOAD_VAR,    0, 1,
+          I_LOAD_CONST,  0, 2,
           I_INVOKE,
       };
 
