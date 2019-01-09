@@ -314,10 +314,11 @@ RetVal tryLetAnalyze(EnvBindingStack *bindingStack, Expr* letExpr, FormLet *let,
   let->numForms = letExpr->list.length - 2;
   tryMalloc(let->forms, sizeof(Form) * let->numForms, "Forms array");
 
-  Expr *expr = letExpr->list.head->next->next->expr;
+  ListElement *exprElem = letExpr->list.head->next->next;
   for (int i=0; i<let->numForms; i++) {
     Form *thisForm = let->forms + i;
-    throws(tryFormAnalyzeContents(bindingStack, expr, thisForm, error));
+    throws(tryFormAnalyzeContents(bindingStack, exprElem->expr, thisForm, error));
+    exprElem = exprElem->next;
   }
 
   // discard the registered bindings from the environment stack
