@@ -45,9 +45,9 @@ typedef enum InstType {
   I_JMP,         // (8), offset (16) | (->)
   I_JMP_IF,      // (8), offset (16) | (value ->)
   I_JMP_IF_NOT,  // (8), offset (16) | (value ->)
-  I_ADD,        // (8)              | (a, b -> c)
-  I_DEF_VAR,     // (8)              | (name, value ->)
-  I_LOAD_VAR,    // (8)              | (name -> value)
+  I_ADD,         // (8)              | (a, b -> c)
+  I_DEF_VAR,     // (8), offset (16) | (name, value ->)
+  I_LOAD_VAR,    // (8), offset (16) | (name -> value)
 
   // requires garbage collection
   I_NEW,         // (8), objlen (16) | (-> objectref)

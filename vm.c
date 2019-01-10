@@ -163,13 +163,17 @@ typedef struct Namespaces {
 
 void varFree(Var *var);
 
-RetVal tryVarInit(wchar_t *namespace, wchar_t *name, Var *var, Error *error) {
-  RetVal ret;
-
+void varInitContents(Var *var) {
   var->namespace = NULL;
   var->name = NULL;
   var->value.type = VT_NIL;
   var->value.value = 0;
+}
+
+RetVal tryVarInit(wchar_t *namespace, wchar_t *name, Var *var, Error *error) {
+  RetVal ret;
+
+  varInitContents(var);
 
   throws(tryCopyText(namespace, &var->namespace, wcslen(namespace), error));
   throws(tryCopyText(name, &var->name, wcslen(name), error));
@@ -294,39 +298,30 @@ RetVal tryAppendVar(VarList *list, Var var, Error* error) {
   return ret;
 }
 
-//RetVal tryDefVar(FormAnalyzer *analyzer, wchar_t *symbolName, uint64_t symbolNameLength, Form *value, Error *error) {
-//  RetVal ret;
-//
-// //   these get cleaned up on failure
-//  Var createdVar;
-//  Form *copiedValue;
-//
-//  Var *resolvedVar = resolveVar(analyzer, symbolName, symbolNameLength);
-//  if (resolvedVar == NULL) {
-//    Namespace *ns = analyzer->currentNamespace;
-//    throws(tryVarInit(ns->name, symbolName, &createdVar, error));
-//    throws(tryFormDeepCopy(value, &createdVar.value, error));
-//    throws(tryAppendVar(&ns->localVars, createdVar, error));
-//  }
-//  else if (resolvedVar->value == NULL) {
-//    throws(tryFormDeepCopy(value, &resolvedVar->value, error));
-//  }
-//  else {
-//    throws(tryFormDeepCopy(value, &copiedValue, error));
-//    formFree(resolvedVar->value);
-//    resolvedVar->value = copiedValue;
-//    copiedValue = NULL; // now part of resolvedVar
-//  }
-//
-//  return R_SUCCESS;
-//
-//  failure:
-//  varFreeContents(&createdVar);
-//  if (copiedValue != NULL) {
-//    formFree(copiedValue);
-//  }
-//  return ret;
-//}
+RetVal tryDefVar(Namespaces *namespaces, wchar_t *symbolName, uint64_t symbolNameLength, Value value, Error *error) {
+  RetVal ret;
+
+ // gets cleaned up on failure
+  Var createdVar;
+
+  varInitContents(&createdVar);
+
+  Var *resolvedVar = resolveVar(namespaces, symbolName, symbolNameLength);
+  if (resolvedVar == NULL) {
+    Namespace *ns = namespaces->currentNamespace;
+    throws(tryVarInit(ns->name, symbolName, &createdVar, error));
+    throws(tryAppendVar(&ns->localVars, createdVar, error));
+  }
+  else {
+    resolvedVar->value = value;
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    varFreeContents(&createdVar);
+    return ret;
+}
 
 RetVal tryNamespaceMake(wchar_t *name, uint64_t length, Namespace **ptr , Error *error) {
 
@@ -362,40 +357,32 @@ void namespaceFree(Namespace *ns) {
   }
 }
 
-RetVal tryNamespacesMake(Namespaces **ptr, Error *error) {
+RetVal tryNamespacesInitContents(Namespaces *namespaces, Error *error) {
 
   RetVal ret;
-
-  Namespaces *analyzer;
-  tryMalloc(analyzer, sizeof(Namespaces), "FormAnalyzer");
 
   Namespace *userNs;
   throws(tryNamespaceMake(L"user", wcslen(L"user"), &userNs, error));
 
-  analyzer->currentNamespace = userNs;
-  analyzer->namespaces = userNs;
-  analyzer->numNamespaces = 1;
+  namespaces->currentNamespace = userNs;
+  namespaces->namespaces = userNs;
+  namespaces->numNamespaces = 1;
 
-  *ptr = analyzer;
   return R_SUCCESS;
 
   failure:
-  if (analyzer != NULL) {
-    free(analyzer);
-  }
-  return ret;
+    return ret;
 }
 
-void analyzerFree(Namespaces *analyzer) {
-  if (analyzer != NULL) {
-    analyzer->currentNamespace = NULL;
-    if (analyzer->namespaces != NULL) {
-      for (int i=0; i<analyzer->numNamespaces; i++) {
-        namespaceFree(&analyzer->namespaces[i]);
+void namespacesFreeContents(Namespaces *namespaces) {
+  if (namespaces != NULL) {
+    namespaces->currentNamespace = NULL;
+    if (namespaces->namespaces != NULL) {
+      for (int i=0; i<namespaces->numNamespaces; i++) {
+        namespaceFree(&namespaces->namespaces[i]);
       }
-      free(analyzer->namespaces);
+      free(namespaces->namespaces);
     }
-    free(analyzer);
   }
 }
 
@@ -535,8 +522,8 @@ RetVal tryDerefString(GC *gc, Value value, String *str, Error *error) {
 }
 
 typedef struct VM {
-  // TODO: we don't support vars or define yet
   GC gc;
+  Namespaces namespaces;
 } VM;
 
 RetVal tryVMMake(VM_t *ptr, Error *error) {
@@ -546,6 +533,8 @@ RetVal tryVMMake(VM_t *ptr, Error *error) {
   tryMalloc(vm, sizeof(VM), "VM");
 
   GCInit(&vm->gc);
+
+  throws(tryNamespacesInitContents(&vm->namespaces, error));
 
   *ptr = vm;
   ret = R_SUCCESS;
@@ -981,22 +970,42 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
         pc = pc + 1;
         break;
       }
-      case I_DEF_VAR: {     // (8)  offset (16)  | (value ->)
+      case I_DEF_VAR: {     // (8), offset (16)  | (value ->)
 
         Value value;
         throws(tryOpStackPop(frame->opStack, &value, error));
 
         uint16_t constantIndex = (frame->code.code[pc + 1] << 8) | frame->code.code[pc + 2];
-        Value varConst = frame->constants[constantIndex];
-//        constant.
+        Value varName = frame->constants[constantIndex];
 
-        // resolveVar();
+        String str;
+        throws(tryDerefString(&vm->gc, varName, &str, error));
+        throws(tryDefVar(&vm->namespaces, str.value, str.length, value, error));
 
         pc = pc + 3;
         break;
       }
-      case I_LOAD_VAR: {    // (8)              | (name -> value)
-        throwRuntimeError(error, "load var unimplemented");
+      case I_LOAD_VAR: {    // (8), offset 16  | (-> value)
+
+        Value value;
+        throws(tryOpStackPop(frame->opStack, &value, error));
+
+        uint16_t constantIndex = (frame->code.code[pc + 1] << 8) | frame->code.code[pc + 2];
+        Value varName = frame->constants[constantIndex];
+
+        String str;
+        throws(tryDerefString(&vm->gc, varName, &str, error));
+
+        Var *var = resolveVar(&vm->namespaces, str.value, str.length);
+
+        if (var == NULL) {
+          throwRuntimeError(error, "no such var found: '%ls/%ls'", var->namespace, var->name);
+        }
+        else {
+          throws(tryOpStackPush(frame->opStack, var->value, error));
+        }
+
+        pc = pc + 3;
       }
 
         // requires garbage collection
