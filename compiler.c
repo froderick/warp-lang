@@ -451,12 +451,16 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
 RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
   RetVal ret;
 
-  throws(tryCompile(form->fnCall.fnCallable, output, error));
+  // push the arguments in evaluation (left-to-right) order
   for (uint16_t i = 0; i<form->fnCall.numArgs; i++) {
     throws(tryCompile(&form->fnCall.args[i], output, error));
   }
 
-  uint8_t code[] = { I_INVOKE };
+  // push the callable
+  throws(tryCompile(form->fnCall.fnCallable, output, error));
+
+  // invoke
+  uint8_t code[] = { I_INVOKE_DYN };
   throws(tryCodeAppend(output.codes, sizeof(code), code, error));
 
   return R_SUCCESS;

@@ -39,13 +39,12 @@ typedef enum InstType {
 
   I_LOAD_LOCAL,  // (8), index  (16) | (-> value)
   I_STORE_LOCAL, // (8), index  (16) | (objectref ->)
-  I_INVOKE,      // (8)              | (objectref, args... -> ...)
+  I_INVOKE_DYN,  // (8)              | (numargs, arg1, arg0..., objectref -> ...)
   I_RET,         // (8)              | (objectref ->)
   I_CMP,         // (8)              | (a, b -> 0 | 1)
   I_JMP,         // (8), offset (16) | (->)
   I_JMP_IF,      // (8), offset (16) | (value ->)
   I_JMP_IF_NOT,  // (8), offset (16) | (value ->)
-  I_HALT,        // (8)              | (exitcode ->)
   I_ADD,        // (8)              | (a, b -> c)
   I_DEF_VAR,     // (8)              | (name, value ->)
   I_LOAD_VAR,    // (8)              | (name -> value)
@@ -136,7 +135,7 @@ typedef enum ValueType {
   VT_BOOL,
   VT_FN,
 //  VT_CHAR,
-//  VT_STR,
+  VT_STR,
 //  VT_OBJECT,
 } ValueType;
 

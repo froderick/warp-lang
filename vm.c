@@ -4,6 +4,135 @@
 #include "utils.h"
 
 /*
+ * CodeUnit init/free functions
+ */
+
+void sourceTableInitContents(SourceTable *t) {
+  t->lineNumbers = NULL;
+  t->numLineNumbers = 0;
+  t->fileName = NULL;
+  t->fileNameLength = 0;
+}
+
+void sourceTableFreeContents(SourceTable *t) {
+  t->fileNameLength = 0;
+  if (t->fileName != NULL) {
+    free(t->fileName);
+    t->fileName = NULL;
+  }
+  t->numLineNumbers = 0;
+  if (t->lineNumbers != NULL) {
+    free(t->lineNumbers);
+    t->lineNumbers = NULL;
+  }
+}
+
+void codeInitContents(Code *code) {
+  code->maxOperandStackSize = 0;
+  code->numLocals = 0;
+  code->hasSourceTable = false;
+  code->code = NULL;
+  code->codeLength = 0;
+  sourceTableInitContents(&code->sourceTable);
+}
+
+void codeFreeContents(Code *code) {
+  if (code != NULL) {
+
+    code->numLocals = 0;
+    code->maxOperandStackSize = 0;
+    code->codeLength = 0;
+
+    if (code->code != NULL) {
+      free(code->code);
+      code->code = NULL;
+    }
+
+    if (code->hasSourceTable) {
+      code->hasSourceTable = false;
+      sourceTableFreeContents(&code->sourceTable);
+    }
+  }
+}
+
+void _constantFreeContents(Constant *c);
+
+void constantFnInitContents(FnConstant *fnConst) {
+  fnConst->numArgs = 0;
+  fnConst->numConstants = 0;
+  fnConst->constants = NULL;
+  codeInitContents(&fnConst->code);
+}
+
+void constantFnFreeContents(FnConstant *fnConst) {
+  if (fnConst != NULL) {
+    fnConst->numArgs = 0;
+    if (fnConst->constants != NULL) {
+      for (int i = 0; i < fnConst->numConstants; i++) {
+        _constantFreeContents(&fnConst->constants[i]);
+      }
+      fnConst->numConstants = 0;
+      free(fnConst->constants);
+      fnConst->constants = NULL;
+    }
+    codeFreeContents(&fnConst->code);
+  }
+}
+
+void _constantFreeContents(Constant *c) {
+  if (c != NULL) {
+    switch (c->type) {
+      case CT_NONE:
+      case CT_NIL:
+        break;
+      case CT_BOOL:
+        c->boolean = false;
+        break;
+      case CT_INT:
+        c->integer = 0;
+        break;
+      case CT_VAR_REF:
+        c->varRef.nameLength = 0;
+        if (c->varRef.name != NULL) {
+          free(c->varRef.name);
+          c->varRef.name = NULL;
+        }
+        break;
+      case CT_STR:
+        c->string.length = 0;
+        if (c->string.value != NULL) {
+          free(c->string.value);
+          c->string.value = NULL;
+        }
+        break;
+      case CT_FN:
+        constantFnFreeContents(&c->function);
+        break;
+    }
+  }
+}
+
+void codeUnitInitContents(CodeUnit *codeUnit) {
+  codeUnit->constants = NULL;
+  codeUnit->numConstants = 0;
+  codeInitContents(&codeUnit->code);
+}
+
+void codeUnitFreeContents(CodeUnit *u) {
+  if (u != NULL) {
+    if (u->constants != NULL) {
+      for (int i = 0; i < u->numConstants; i++) {
+        _constantFreeContents(&u->constants[i]);
+      }
+      u->numConstants = 0;
+      free(u->constants);
+      u->constants = NULL;
+    }
+    codeFreeContents(&u->code);
+  }
+}
+
+/*
  * Temporarily stashing the var management code here
  */
 
@@ -275,22 +404,38 @@ void analyzerFree(Namespaces *analyzer) {
  */
 
 typedef struct Fn {
-  uint64_t numArgs;
+  uint16_t numArgs;
   uint16_t numConstants;
   Value *constants;
   Code code;
 } Fn;
 
+typedef struct String {
+  uint64_t length;
+  wchar_t *value;
+} String;
+
 typedef struct GC {
+
   uint64_t allocatedFnSpace;
   uint64_t usedFnSpace;
   Fn *fns;
+
+  uint64_t allocatedStringSpace;
+  uint64_t usedStringSpace;
+  String *strings;
+
 } GC;
 
 void GCInit(GC *gc) {
+
   gc->usedFnSpace = 0;
   gc->allocatedFnSpace = 0;
   gc->fns = NULL;
+
+  gc->allocatedStringSpace = 0;
+  gc->usedStringSpace = 0;
+  gc->strings = NULL;
 }
 
 RetVal tryAllocateFn(GC *gc, Fn fn, Value *value, Error *error) {
@@ -341,122 +486,52 @@ RetVal tryDerefFn(GC *gc, Value value, Fn *fn, Error *error) {
     return ret;
 }
 
-void sourceTableInitContents(SourceTable *t) {
-  t->lineNumbers = NULL;
-  t->numLineNumbers = 0;
-  t->fileName = NULL;
-  t->fileNameLength = 0;
-}
+RetVal tryAllocateString(GC *gc, String str, Value *value, Error *error) {
+  RetVal ret;
 
-void sourceTableFreeContents(SourceTable *t) {
-  t->fileNameLength = 0;
-  if (t->fileName != NULL) {
-    free(t->fileName);
-    t->fileName = NULL;
+  if (gc->strings == NULL) {
+    uint16_t len = 16;
+    tryMalloc(gc->strings, len * sizeof(String), "String array");
+    gc->allocatedStringSpace = len;
   }
-  t->numLineNumbers = 0;
-  if (t->lineNumbers != NULL) {
-    free(t->lineNumbers);
-    t->lineNumbers = NULL;
-  }
-}
+  else if (gc->usedStringSpace == gc->allocatedStringSpace) {
+    uint64_t newAllocatedLength = gc->allocatedStringSpace * 2;
 
-void codeInitContents(Code *code) {
-  code->maxOperandStackSize = 0;
-  code->numLocals = 0;
-  code->hasSourceTable = false;
-  code->code = NULL;
-  code->codeLength = 0;
-  sourceTableInitContents(&code->sourceTable);
-}
-
-void codeFreeContents(Code *code) {
-  if (code != NULL) {
-
-    code->numLocals = 0;
-    code->maxOperandStackSize = 0;
-    code->codeLength = 0;
-
-    if (code->code != NULL) {
-      free(code->code);
-      code->code = NULL;
+    String* resizedStrings = realloc(gc->strings, newAllocatedLength);
+    if (resizedStrings == NULL) {
+      ret = memoryError(error, "realloc String array");
+      goto failure;
     }
 
-    if (code->hasSourceTable) {
-      code->hasSourceTable = false;
-      sourceTableFreeContents(&code->sourceTable);
-    }
+    gc->allocatedStringSpace = newAllocatedLength;
+    gc->strings = resizedStrings;
   }
+
+  uint64_t index = gc->usedStringSpace;
+  gc->strings[index] = str;
+  gc->usedStringSpace = index + 1;
+
+  value->type = VT_STR;
+  value->value = index;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
 }
 
-void _constantFreeContents(Constant *c);
+RetVal tryDerefString(GC *gc, Value value, String *str, Error *error) {
+  RetVal ret;
 
-void constantFnInitContents(FnConstant *fnConst) {
-  fnConst->numArgs = 0;
-  fnConst->numConstants = 0;
-  fnConst->constants = NULL;
-  codeInitContents(&fnConst->code);
-}
-
-void constantFnFreeContents(FnConstant *fnConst) {
-  if (fnConst != NULL) {
-    fnConst->numArgs = 0;
-    if (fnConst->constants != NULL) {
-      for (int i = 0; i < fnConst->numConstants; i++) {
-        _constantFreeContents(&fnConst->constants[i]);
-      }
-      fnConst->numConstants = 0;
-      free(fnConst->constants);
-      fnConst->constants = NULL;
-    }
-    codeFreeContents(&fnConst->code);
+  if (gc->usedStringSpace <= value.value) {
+    throwInternalError(error, "str reference points to str that does not exist");
   }
-}
 
-void _constantFreeContents(Constant *c) {
-  if (c != NULL) {
-    switch (c->type) {
-      case CT_NONE:
-      case CT_NIL:
-        break;
-      case CT_BOOL:
-        c->boolean = false;
-        break;
-      case CT_INT:
-        c->integer = 0;
-        break;
-      case CT_STR:
-        c->string.length = 0;
-        if (c->string.value != NULL) {
-          free(c->string.value);
-          c->string.value = NULL;
-        }
-        break;
-      case CT_FN:
-        constantFnFreeContents(&c->function);
-        break;
-    }
-  }
-}
+  *str = gc->strings[value.value];
+  return R_SUCCESS;
 
-void codeUnitInitContents(CodeUnit *codeUnit) {
-  codeUnit->constants = NULL;
-  codeUnit->numConstants = 0;
-  codeInitContents(&codeUnit->code);
-}
-
-void codeUnitFreeContents(CodeUnit *u) {
-  if (u != NULL) {
-    if (u->constants != NULL) {
-      for (int i = 0; i < u->numConstants; i++) {
-        _constantFreeContents(&u->constants[i]);
-      }
-      u->numConstants = 0;
-      free(u->constants);
-      u->constants = NULL;
-    }
-    codeFreeContents(&u->code);
-  }
+  failure:
+  return ret;
 }
 
 typedef struct VM {
@@ -613,6 +688,34 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
     return ret;
 }
 
+RetVal tryStringHydrate(VM *vm, StringConstant strConst, Value *value, Error *error) {
+  RetVal ret;
+
+  String str;
+  str.length = strConst.length;
+  throws(tryCopyText(strConst.value, &str.value, str.length, error));
+  throws(tryAllocateString(&vm->gc, str, value, error));
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryVarRefHydrate(VM *vm, VarRefConstant varRefConst, Value *value, Error *error) {
+  RetVal ret;
+
+  String str;
+  str.length = varRefConst.nameLength;
+  throws(tryCopyText(varRefConst.name, &str.value, str.length, error));
+  throws(tryAllocateString(&vm->gc, str, value, error));
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr, Error *error) {
   RetVal ret;
 
@@ -642,8 +745,11 @@ RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, V
       case CT_FN:
         throws(tryFnHydrate(vm, &c.function, &v, error));
         break;
+      case CT_VAR_REF:
+        throws(tryVarRefHydrate(vm, c.varRef, &v, error));
+        break;
       case CT_STR:
-        throwRuntimeError(error, "invoke not implemented");
+        throws(tryStringHydrate(vm, c.string, &v, error));
         break;
       case CT_NONE:
         throwInternalError(error, "invalid constant");
@@ -697,11 +803,12 @@ RetVal tryInvoke(VM *vm, Frame *frame, Error *error) {
   tryMalloc(locals, sizeof(Value) * fn.code.numLocals, "Value array");
   tryOpStackInitContents(&opStack, fn.code.maxOperandStackSize, error);
 
-  // pop args and set as locals
+  // pop args and set as locals, reversing the order
   for (uint16_t i=0; i<fn.numArgs; i++) {
     Value arg;
     throws(tryOpStackPop(frame->opStack, &arg, error));
-    locals[i] = arg;
+    uint16_t idx = fn.numArgs - (uint16_t)1 - i;
+    locals[idx] = arg;
   }
 
   Frame child;
@@ -768,7 +875,7 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
         break;
       }
 
-      case I_INVOKE: {      // (8)              | (objectref, args... -> ...)
+      case I_INVOKE_DYN: {      // (8)              | (objectref, args... -> ...)
         throws(tryInvoke(vm, frame, error));
         pc = pc + 1;
         break;
@@ -874,11 +981,19 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
         pc = pc + 1;
         break;
       }
-      case I_HALT: {        // (8)              | (exitcode ->)
-        throwRuntimeError(error, "halt unimplemented");
-      }
-      case I_DEF_VAR: {     // (8)              | (name, value ->)
-        throwRuntimeError(error, "def var unimplemented");
+      case I_DEF_VAR: {     // (8)  offset (16)  | (value ->)
+
+        Value value;
+        throws(tryOpStackPop(frame->opStack, &value, error));
+
+        uint16_t constantIndex = (frame->code.code[pc + 1] << 8) | frame->code.code[pc + 2];
+        Value varConst = frame->constants[constantIndex];
+//        constant.
+
+        // resolveVar();
+
+        pc = pc + 3;
+        break;
       }
       case I_LOAD_VAR: {    // (8)              | (name -> value)
         throwRuntimeError(error, "load var unimplemented");
@@ -1100,7 +1215,7 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
 //F_VAR_REF, -> I_LOAD_VAR
 //F_FN,     -> defined fns
 //F_BUILTIN,
-//F_FN_CALL -> I_INVOKE
+//F_FN_CALL -> I_INVOKE_DYN
 
 /*
  * tryVMEval(vm, code, &result); // the result is a Value, which the caller can then introspect

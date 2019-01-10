@@ -390,8 +390,8 @@ void printCodeArray(uint8_t *code, uint16_t codeLength) {
         printInstAndIndex(&i, name, code);
         break;
 
-      case I_INVOKE:      // (8)              | (objectref, args... -> ...)
-        name = "I_INVOKE";
+      case I_INVOKE_DYN:      // (8)              | (objectref, args... -> ...)
+        name = "I_INVOKE_DYN";
         printInst(&i, name);
         break;
 
@@ -418,11 +418,6 @@ void printCodeArray(uint8_t *code, uint16_t codeLength) {
       case I_JMP_IF_NOT:  // (8), offset (16) | (value ->)
         name = "I_JMP_IF_NOT";
         printInstAndIndex(&i, name, code);
-        break;
-
-      case I_HALT:        // (8)              | (exitcode ->)
-        name = "I_HALT";
-        printInst(&i, name);
         break;
 
       case I_ADD:        // (8)              | (a, b -> c)
@@ -514,9 +509,7 @@ START_TEST(compilerBasic) {
 
       // verify fn
 
-      ck_assert_int_eq(codeUnit.constants[0].type, CT_FN);
-
-      FnConstant fn = codeUnit.constants[0].function;
+      FnConstant fn = codeUnit.constants[2].function;
       ck_assert_int_eq(fn.numArgs, 2);
       ck_assert_int_eq(fn.numConstants, 0);
       ck_assert_int_eq(fn.code.numLocals, 2);
@@ -536,10 +529,10 @@ START_TEST(compilerBasic) {
       // verify fnCall
 
       ck_assert_int_eq(codeUnit.numConstants, 3);
+      ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[0].integer, 4);
       ck_assert_int_eq(codeUnit.constants[1].type, CT_INT);
-      ck_assert_int_eq(codeUnit.constants[1].integer, 4);
-      ck_assert_int_eq(codeUnit.constants[2].type, CT_INT);
-      ck_assert_int_eq(codeUnit.constants[2].integer, 5);
+      ck_assert_int_eq(codeUnit.constants[1].integer, 5);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 0);
       ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
@@ -549,7 +542,7 @@ START_TEST(compilerBasic) {
           I_LOAD_CONST, 0, 0,
           I_LOAD_CONST, 0, 1,
           I_LOAD_CONST, 0, 2,
-          I_INVOKE,
+          I_INVOKE_DYN,
       };
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(fnCallCode));
@@ -640,9 +633,9 @@ START_TEST(compilerBasic) {
       uint8_t expectedCode[] = {
           I_LOAD_CONST,  0, 0,
           I_STORE_LOCAL, 0, 0,
-          I_LOAD_LOCAL,  0, 0,
           I_LOAD_CONST,  0, 1,
-          I_INVOKE,
+          I_LOAD_LOCAL,  0, 0,
+          I_INVOKE_DYN,
       };
 
 //      printCodeUnit(&codeUnit);
@@ -679,7 +672,7 @@ START_TEST(compilerBasic) {
           I_DEF_VAR,     0, 1,
           I_LOAD_VAR,    0, 1,
           I_LOAD_CONST,  0, 2,
-          I_INVOKE,
+          I_ADD,
       };
 
 //      printCodeUnit(&codeUnit);
@@ -727,7 +720,7 @@ START_TEST(vmBasic) {
     uint8_t code[] = {
         I_LOAD_CONST, 0, 0,
         I_LOAD_CONST, 0, 1,
-        I_INVOKE,
+        I_INVOKE_DYN,
         I_RET
     };
 
