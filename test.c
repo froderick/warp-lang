@@ -655,6 +655,18 @@ START_TEST(repl) {
     // (def + (fn (a b) (builtin :add a b)))
     // (+ 1 2)
     // > 3
+    //
+    // (if 1 2 3)
+    // > 2
+    // (if 0 2 3)
+    // > 3
+    //
+    // (def + (fn (a b) (builtin :add a b)))
+    // (let (a 100) (+ a 20))
+    // > 120
+    //
+    // (let (x (fn (a b) (builtin :add a b))) (x 1 2))
+    // > 3
 
   }
 END_TEST
