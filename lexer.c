@@ -295,6 +295,22 @@ bool isFalse(wchar_t *text) {
   return wcscmp(text, L"false") == 0;
 }
 
+bool isSymbolStart(wchar_t ch) {
+  return iswalpha(ch)
+         || ch == L'+'
+         || ch == L'-'
+         || ch == L'!'
+         || ch == L'*';
+}
+
+bool isSymbolContinue(wchar_t ch) {
+  return iswalnum(ch)
+         || ch == L'+'
+         || ch == L'-'
+         || ch == L'!'
+         || ch == L'*';
+}
+
 RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
   if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
@@ -305,7 +321,7 @@ RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token *
   // on EOF, stop reading and return R_SUCCESS
 
   bool matched;
-  wint_t ch;
+  wchar_t ch;
   do {
 
     int read = tryInputStreamReadChar(source, &ch, error);
@@ -316,7 +332,7 @@ RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token *
     if (read == R_EOF) {
       matched = false;
     }
-    else if (!iswalnum(ch)) {
+    else if (!isSymbolContinue(ch)) {
       if (tryInputStreamUnreadChar(source, ch, error) != R_SUCCESS) {
         return R_ERROR;
       }
@@ -453,7 +469,7 @@ RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *e
   else if (iswdigit(ch)) {
     ret = tryReadNumber(source, s, ch, token, error);
   }
-  else if (iswalpha(ch)) {
+  else if (isSymbolStart(ch)) {
     ret = tryReadSymbol(source, s, ch, token, error);
   }
   else if (ch == L':') {

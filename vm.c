@@ -133,6 +133,129 @@ void codeUnitFreeContents(CodeUnit *u) {
 }
 
 /*
+ * A convenient way to print generated code
+ */
+
+void printInst(int *i, const char* name) {
+  printf("%i:\t%s\n", *i, name);
+}
+
+void printInstAndIndex(int *i, const char* name, uint8_t *code) {
+  printf("%i:\t%s\t%u\n", *i, name, code[*i + 1] << 8 | code[*i + 2]);
+  *i = *i + 2;
+}
+
+const char* getInstName(uint8_t inst) {
+  switch (inst) {
+    case I_LOAD_CONST:
+      return "I_LOAD_CONST";
+    case I_LOAD_LOCAL:
+      return "I_LOAD_LOCAL";
+    case I_STORE_LOCAL:
+      return "I_STORE_LOCAL";
+    case I_INVOKE_DYN:
+      return "I_INVOKE_DYN";
+    case I_RET:
+      return "I_RET";
+    case I_CMP:
+      return "I_CMP";
+    case I_JMP:
+      return "I_JMP";
+    case I_JMP_IF:
+      return "I_JMP_IF";
+    case I_JMP_IF_NOT:
+      return "I_JMP_IF_NOT";
+    case I_ADD:
+      return "I_ADD";
+    case I_DEF_VAR:
+      return "I_DEF_VAR";
+    case I_LOAD_VAR:
+      return "I_LOAD_VAR";
+    default:
+      return "<UNKNOWN>";
+  }
+}
+
+void printCodeArray(uint8_t *code, uint16_t codeLength) {
+
+  for (int i=0; i<codeLength; i++) {
+    uint8_t inst =code[i];
+
+    const char *name;
+    switch (inst) {
+
+      case I_LOAD_CONST:  // (8), index  (16) | (-> value)
+        name = "I_LOAD_CONST";
+        printInstAndIndex(&i, name, code);
+        break;
+
+      case I_LOAD_LOCAL:  // (8), index  (16) | (-> value)
+        name = "I_LOAD_LOCAL";
+        printInstAndIndex(&i, name, code);
+        break;
+
+      case I_STORE_LOCAL: // (8), index  (16) | (objectref ->)
+        name = "I_STORE_LOCAL";
+        printInstAndIndex(&i, name, code);
+        break;
+
+      case I_INVOKE_DYN:      // (8)              | (objectref, args... -> ...)
+        name = "I_INVOKE_DYN";
+        printInst(&i, name);
+        break;
+
+      case I_RET:         // (8)              | (objectref ->)
+        name = "I_RET";
+        printInst(&i, name);
+        break;
+
+      case I_CMP:         // (8)              | (a, b -> 0 | 1)
+        name = "I_CMP";
+        printInst(&i, name);
+        break;
+
+      case I_JMP:         // (8), offset (16) | (->)
+        name = "I_JMP";
+        printInstAndIndex(&i, name, code);
+        break;
+
+      case I_JMP_IF:      // (8), offset (16) | (value ->)
+        name = "I_JMP_IF";
+        printInstAndIndex(&i, name, code);
+        break;
+
+      case I_JMP_IF_NOT:  // (8), offset (16) | (value ->)
+        name = "I_JMP_IF_NOT";
+        printInstAndIndex(&i, name, code);
+        break;
+
+      case I_ADD:        // (8)              | (a, b -> c)
+        name = "I_ADD";
+        printInst(&i, name);
+        break;
+
+      case I_DEF_VAR:     // (8), offset (16) | (name, value ->)
+        name = "I_DEF_VAR";
+        printInstAndIndex(&i, name, code);
+        break;
+
+      case I_LOAD_VAR:    // (8), offset (16) | (name -> value)
+        name = "I_LOAD_VAR";
+        printInstAndIndex(&i, name, code);
+        break;
+
+      default:
+        name = "<UNKNOWN>";
+        printf("%i:\t%s/%u\n", i, name, inst);
+    }
+  }
+}
+
+void printCodeUnit(CodeUnit *unit) {
+  printCodeArray(unit->code.code, unit->code.codeLength);
+}
+
+/*
  * Temporarily stashing the var management code here
  */
 
@@ -170,13 +293,14 @@ void varInitContents(Var *var) {
   var->value.value = 0;
 }
 
-RetVal tryVarInit(wchar_t *namespace, wchar_t *name, Var *var, Error *error) {
+RetVal tryVarInit(wchar_t *namespace, wchar_t *name, Value value, Var *var, Error *error) {
   RetVal ret;
 
   varInitContents(var);
 
   throws(tryCopyText(namespace, &var->namespace, wcslen(namespace), error));
   throws(tryCopyText(name, &var->name, wcslen(name), error));
+  var->value = value;
 
   return R_SUCCESS;
 
@@ -205,7 +329,7 @@ void varFree(Var *var) {
   }
 }
 
-Var* resolveVar(Namespaces *analyzer, wchar_t *symbolName, uint64_t symbolNameLength) {
+bool resolveVar(Namespaces *analyzer, wchar_t *symbolName, uint64_t symbolNameLength, Var **var) {
 
   Namespace *ns;
   wchar_t *searchName;
@@ -240,11 +364,12 @@ Var* resolveVar(Namespaces *analyzer, wchar_t *symbolName, uint64_t symbolNameLe
 
   for (int i=0; i<ns->localVars.length; i++) {
     if (wcsncmp(searchName, ns->localVars.vars[i].name, searchNameLength) == 0) {
-      return &ns->localVars.vars[i];
+      *var = &ns->localVars.vars[i];
+      return true;
     }
   }
 
-  return NULL;
+  return false;
 }
 
 void varListInit(VarList *list) {
@@ -303,13 +428,12 @@ RetVal tryDefVar(Namespaces *namespaces, wchar_t *symbolName, uint64_t symbolNam
 
  // gets cleaned up on failure
   Var createdVar;
-
   varInitContents(&createdVar);
 
-  Var *resolvedVar = resolveVar(namespaces, symbolName, symbolNameLength);
-  if (resolvedVar == NULL) {
+  Var *resolvedVar = NULL;
+  if (!resolveVar(namespaces, symbolName, symbolNameLength, &resolvedVar)) {
     Namespace *ns = namespaces->currentNamespace;
-    throws(tryVarInit(ns->name, symbolName, &createdVar, error));
+    throws(tryVarInit(ns->name, symbolName, value, &createdVar, error));
     throws(tryAppendVar(&ns->localVars, createdVar, error));
   }
   else {
@@ -348,12 +472,11 @@ RetVal tryNamespaceMake(wchar_t *name, uint64_t length, Namespace **ptr , Error 
   return ret;
 }
 
-void namespaceFree(Namespace *ns) {
+void namespaceFreeContents(Namespace *ns) {
   if (ns != NULL) {
     free(ns->name);
     free(ns->importedVars);
     varListFreeContents(&ns->localVars);
-    free(ns);
   }
 }
 
@@ -379,7 +502,7 @@ void namespacesFreeContents(Namespaces *namespaces) {
     namespaces->currentNamespace = NULL;
     if (namespaces->namespaces != NULL) {
       for (int i=0; i<namespaces->numNamespaces; i++) {
-        namespaceFree(&namespaces->namespaces[i]);
+        namespaceFreeContents(&namespaces->namespaces[i]);
       }
       free(namespaces->namespaces);
     }
@@ -423,6 +546,28 @@ void GCInit(GC *gc) {
   gc->allocatedStringSpace = 0;
   gc->usedStringSpace = 0;
   gc->strings = NULL;
+}
+
+void _fnFreeContents(Fn *fn);
+void _stringFreeContents(String *str);
+
+void GCFreeContents(GC *gc) {
+  if (gc != NULL) {
+
+    for (uint64_t i=0; i<gc->usedFnSpace; i++) {
+      _fnFreeContents(&gc->fns[i]);
+    }
+    free(gc->fns);
+    gc->usedFnSpace = 0;
+    gc->allocatedFnSpace = 0;
+
+    for (uint64_t i=0; i<gc->usedStringSpace; i++) {
+      _stringFreeContents(&gc->strings[i]);
+    }
+    free(gc->strings);
+    gc->usedStringSpace = 0;
+    gc->allocatedStringSpace = 0;
+  }
 }
 
 RetVal tryAllocateFn(GC *gc, Fn fn, Value *value, Error *error) {
@@ -526,35 +671,60 @@ typedef struct VM {
   Namespaces namespaces;
 } VM;
 
-RetVal tryVMMake(VM_t *ptr, Error *error) {
+RetVal tryVMInitContents(VM *vm , Error *error) {
   RetVal ret;
-
-  VM *vm;
-  tryMalloc(vm, sizeof(VM), "VM");
 
   GCInit(&vm->gc);
 
   throws(tryNamespacesInitContents(&vm->namespaces, error));
 
-  *ptr = vm;
   ret = R_SUCCESS;
   return ret;
 
   failure:
+    return ret;
+}
+
+void vmFreeContents(VM *vm) {
+  if (vm != NULL) {
+    GCFreeContents(&vm->gc);
+    namespacesFreeContents(&vm->namespaces);
+  }
+}
+
+RetVal tryVMMake(VM **ptr , Error *error) {
+  RetVal ret;
+
+  tryMalloc(*ptr, sizeof(VM), "VM malloc");
+  throws(tryVMInitContents(*ptr, error));
+
+  ret = R_SUCCESS;
   return ret;
+
+  failure:
+    return ret;
 }
 
 void vmFree(VM *vm) {
   if (vm != NULL) {
+    vmFreeContents(vm);
     free(vm);
   }
 }
+
 
 typedef struct OpStack {
   Value *stack;
   uint64_t maxDepth;
   uint64_t usedDepth;
 } OpStack;
+
+
+void opStackInitContents(OpStack *stack) {
+  stack->usedDepth = 0;
+  stack->maxDepth = 0;
+  stack->stack = NULL;
+}
 
 RetVal tryOpStackInitContents(OpStack *stack, uint64_t maxDepth, Error *error) {
   RetVal ret;
@@ -675,6 +845,16 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   failure:
     _fnFreeContents(&fn);
     return ret;
+}
+
+void _stringFreeContents(String *str) {
+  if (str != NULL) {
+    if (str->value != NULL) {
+      free(str->value);
+      str->value = NULL;
+    }
+    str->length = 0;
+  }
 }
 
 RetVal tryStringHydrate(VM *vm, StringConstant strConst, Value *value, Error *error) {
@@ -824,6 +1004,10 @@ RetVal tryInvoke(VM *vm, Frame *frame, Error *error) {
     return ret;
 }
 
+uint16_t readIndex(uint8_t *code, uint16_t pc) {
+  return (code[pc + 1] << 8) | code[pc + 2];
+}
+
 RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
@@ -836,8 +1020,7 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
     switch (inst) {
 
       case I_LOAD_CONST:  { // (8), index (16) | (-> value)
-
-        uint16_t constantIndex = (frame->code.code[pc + 1] << 8) | frame->code.code[pc + 2];
+        uint16_t constantIndex = readIndex(frame->code.code, pc);
         Value constant = frame->constants[constantIndex];
         throws(tryOpStackPush(frame->opStack, constant, error));
 
@@ -846,7 +1029,7 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
       }
 
       case I_LOAD_LOCAL:  { // (8), index  (16) | (-> value)
-        uint16_t localIndex = *((uint16_t *)(frame->code.code + pc + 1));
+        uint16_t localIndex = readIndex(frame->code.code, pc);
         Value v = frame->locals[localIndex];
         throws(tryOpStackPush(frame->opStack, v, error));
 
@@ -855,7 +1038,7 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
       }
 
       case I_STORE_LOCAL: { // (8), index  (16) | (objectref ->)
-        uint16_t localIndex = *((uint16_t *)(frame->code.code + pc + 1));
+        uint16_t localIndex = readIndex(frame->code.code, pc);
         Value v;
         throws(tryOpStackPop(frame->opStack, &v, error));
         frame->locals[localIndex] = v;
@@ -896,7 +1079,7 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
         break;
       }
       case I_JMP: {         // (8), offset (16) | (->)
-        uint16_t newPc = *((uint16_t *)(frame->code.code + pc + 1));
+        uint16_t newPc = readIndex(frame->code.code, pc);
         pc = newPc;
         break;
       }
@@ -920,7 +1103,7 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
         }
 
         if (truthy) {
-          uint16_t newPc = *((uint16_t *) (frame->code.code + pc + 1));
+          uint16_t newPc = readIndex(frame->code.code, pc);
           pc = newPc;
         }
 
@@ -946,7 +1129,7 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
         }
 
         if (!truthy) {
-          uint16_t newPc = *((uint16_t *) (frame->code.code + pc + 1));
+          uint16_t newPc = readIndex(frame->code.code, pc);
           pc = newPc;
         }
 
@@ -975,37 +1158,40 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
         Value value;
         throws(tryOpStackPop(frame->opStack, &value, error));
 
-        uint16_t constantIndex = (frame->code.code[pc + 1] << 8) | frame->code.code[pc + 2];
+        uint16_t constantIndex = readIndex(frame->code.code, pc);
         Value varName = frame->constants[constantIndex];
 
         String str;
         throws(tryDerefString(&vm->gc, varName, &str, error));
         throws(tryDefVar(&vm->namespaces, str.value, str.length, value, error));
 
+        // define always returns nil
+        Value result;
+        result.type = VT_NIL;
+        result.value = 0;
+        throws(tryOpStackPush(frame->opStack, result, error));
+
         pc = pc + 3;
         break;
       }
       case I_LOAD_VAR: {    // (8), offset 16  | (-> value)
 
-        Value value;
-        throws(tryOpStackPop(frame->opStack, &value, error));
-
-        uint16_t constantIndex = (frame->code.code[pc + 1] << 8) | frame->code.code[pc + 2];
+        uint16_t constantIndex = readIndex(frame->code.code, pc);
         Value varName = frame->constants[constantIndex];
 
         String str;
         throws(tryDerefString(&vm->gc, varName, &str, error));
 
-        Var *var = resolveVar(&vm->namespaces, str.value, str.length);
-
-        if (var == NULL) {
-          throwRuntimeError(error, "no such var found: '%ls/%ls'", var->namespace, var->name);
+        Var *var;
+        if (!resolveVar(&vm->namespaces, str.value, str.length, &var)) {
+          throwRuntimeError(error, "no such var found: '%ls'", str.value);
         }
         else {
           throws(tryOpStackPush(frame->opStack, var->value, error));
         }
 
         pc = pc + 3;
+        break;
       }
 
         // requires garbage collection
@@ -1015,7 +1201,7 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
       case I_NEW_ARRAY:     // (8), objlen (16) | (arraylen -> objectref)
       case I_LOAD_ARRAY:    // (8)              | (objectref, index -> value)
       case I_STORE_ARRAY:   // (8)              | (objectref, index, value ->)
-      throwRuntimeError(error, "instruction unimplemented");
+      throwRuntimeError(error, "instruction unimplemented: %s (%u)", getInstName(inst), inst);
         break;
     }
   }
@@ -1034,6 +1220,15 @@ typedef struct TopLevelFrame {
   Value *locals;
   OpStack opStack;
 } TopLevelFrame;
+
+void topLevelFrameInit(TopLevelFrame *frame) {
+  frame->numConstants = 0;
+  frame->constants = NULL;
+  codeInitContents(&frame->code);
+  frame->numLocals = 0;
+  frame->locals = NULL;
+  opStackInitContents(&frame->opStack);
+}
 
 void topLevelFrameFreeContents(TopLevelFrame *topLevel);
 
@@ -1087,31 +1282,66 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
 
   RetVal ret;
 
-  TopLevelFrame *topLevel;
-  tryMalloc(topLevel, sizeof(TopLevelFrame), "TopLevelFrame")
-  throws(tryTopLevelFrameLoad(vm, topLevel, codeUnit, error));
+  // clean me up on exit
+  TopLevelFrame topLevel;
+  topLevelFrameInit(&topLevel);
+
+  throws(tryTopLevelFrameLoad(vm, &topLevel, codeUnit, error));
 
   Frame frame;
   frame.parent = NULL;
-  frame.numConstants = topLevel->numConstants;
-  frame.constants = topLevel->constants;
-  frame.code = topLevel->code;
-  frame.locals = topLevel->locals;
-  frame.opStack = &topLevel->opStack;
+  frame.numConstants = topLevel.numConstants;
+  frame.constants = topLevel.constants;
+  frame.code = topLevel.code;
+  frame.locals = topLevel.locals;
+  frame.opStack = &topLevel.opStack;
   frame.result.type = VT_NIL;
   frame.result.value = 0;
 
   throws(tryFrameEval(vm, &frame, error));
 
-  topLevelFrameFreeContents(topLevel);
+  topLevelFrameFreeContents(&topLevel);
 
   *result = frame.result;
   return R_SUCCESS;
 
   failure:
-    if (topLevel != NULL) {
-      topLevelFrameFreeContents(topLevel);
+    topLevelFrameFreeContents(&topLevel);
+    return ret;
+}
+
+RetVal tryVMPrn(VM_t vm, Value result, Error *error) {
+  RetVal ret;
+
+  switch (result.type) {
+    case VT_NIL:
+      printf("nil");
+      break;
+    case VT_UINT:
+      printf("%llu", result.value);
+      break;
+    case VT_BOOL:
+      if (result.value == 0) {
+        printf("false");
+      }
+      else {
+        printf("true");
+      }
+      break;
+    case VT_FN:
+      printf("<function>");
+      break;
+    case VT_STR: {
+      String str;
+      throws(tryDerefString(&vm->gc, result, &str, error));
+      printf("\"%ls\"", str.value);
+      break;
     }
+  }
+
+  return R_SUCCESS;
+
+  failure:
     return ret;
 }
 

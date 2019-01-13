@@ -23,5 +23,9 @@ target_compile_options(tests PRIVATE -g)
 add_executable(lexer-repl lexer-repl.c)
 target_link_libraries(lexer-repl errors compiler)
 
+add_executable(repl repl.c)
+target_link_libraries(repl errors compiler)
+target_compile_options(repl PRIVATE -g)
+
 enable_testing()
 add_test(tests tests)

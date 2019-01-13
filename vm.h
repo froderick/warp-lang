@@ -59,6 +59,8 @@ typedef enum InstType {
 
 } InstType;
 
+void printCodeArray(uint8_t *code, uint16_t codeLength);
+
 // These are the constant values that can be loaded by Code instructions into the opstack for use.
 // These constant values are represented as a part of the CodeUnit that is submitted to the vm for evaluation.
 
@@ -108,6 +110,8 @@ typedef struct CodeUnit {
   Code code;
 } CodeUnit;
 
+void printCodeUnit(CodeUnit *unit);
+
 void sourceTableInitContents(SourceTable *t);
 void codeInitContents(Code *code);
 void codeUnitInitContents(CodeUnit *codeUnit);
@@ -144,11 +148,15 @@ typedef struct Value {
   uint64_t value : 60;
 } Value;
 
-RetVal tryVMMake(VM_t *ptr, Error *error);
-
+RetVal tryVMInitContents(VM_t vm, Error *error);
+void vmFreeContents(VM_t vm);
+RetVal tryVMMake(VM_t *ptr , Error *error);
 void vmFree(VM_t vm);
 
 RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, Value *result, Error *error);
+
+// need a prn-str that takes vm and a value, so the repl can 'print'
+RetVal tryVMPrn(VM_t vm, Value result, Error *error);
 
 #endif //WARP_LANG_VM_H
 

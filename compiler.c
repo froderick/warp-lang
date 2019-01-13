@@ -543,6 +543,9 @@ RetVal tryCompileTopLevel(Form *form, CodeUnit *codeUnit, Error *error) {
     output.numLocals = &numLocals;
 
     throws(tryCompile(form, output, error));
+
+    uint8_t code[] = { I_RET };
+    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
   }
 
   codeUnit->code.numLocals = numLocals;

@@ -343,109 +343,6 @@ START_TEST(analyzer) {
   }
 END_TEST
 
-void printFnConst(FnConstant *fnConst) {
-
-//      printf("-------------\n");
-//
-//      for (int i=0; i<sizeof(fnCode); i++) {
-//        printf("%i: %u\n", i, fnCode[i]);
-//      }
-//
-//      printf("-------------\n");
-
-//  for (int i=0; i<fn.code.codeLength; i++) {
-//    printf("%i: %u\n", i, fn.code.code[i]);
-//  }
-}
-
-void printInst(int *i, const char* name) {
-  printf("%i:\t%s\n", *i, name);
-}
-
-void printInstAndIndex(int *i, const char* name, uint8_t *code) {
-  printf("%i:\t%s\t%u\n", *i, name, code[*i + 1] << 8 | code[*i + 2]);
-  *i = *i + 2;
-}
-
-void printCodeArray(uint8_t *code, uint16_t codeLength) {
-
-  for (int i=0; i<codeLength; i++) {
-    uint8_t inst =code[i];
-
-    const char *name;
-    switch (inst) {
-
-      case I_LOAD_CONST:  // (8), index  (16) | (-> value)
-        name = "I_LOAD_CONST";
-        printInstAndIndex(&i, name, code);
-        break;
-
-      case I_LOAD_LOCAL:  // (8), index  (16) | (-> value)
-        name = "I_LOAD_LOCAL";
-        printInstAndIndex(&i, name, code);
-        break;
-
-      case I_STORE_LOCAL: // (8), index  (16) | (objectref ->)
-        name = "I_STORE_LOCAL";
-        printInstAndIndex(&i, name, code);
-        break;
-
-      case I_INVOKE_DYN:      // (8)              | (objectref, args... -> ...)
-        name = "I_INVOKE_DYN";
-        printInst(&i, name);
-        break;
-
-      case I_RET:         // (8)              | (objectref ->)
-        name = "I_RET";
-        printInst(&i, name);
-        break;
-
-      case I_CMP:         // (8)              | (a, b -> 0 | 1)
-        name = "I_CMP";
-        printInst(&i, name);
-        break;
-
-      case I_JMP:         // (8), offset (16) | (->)
-        name = "I_JMP";
-        printInstAndIndex(&i, name, code);
-        break;
-
-      case I_JMP_IF:      // (8), offset (16) | (value ->)
-        name = "I_JMP_IF";
-        printInstAndIndex(&i, name, code);
-        break;
-
-      case I_JMP_IF_NOT:  // (8), offset (16) | (value ->)
-        name = "I_JMP_IF_NOT";
-        printInstAndIndex(&i, name, code);
-        break;
-
-      case I_ADD:        // (8)              | (a, b -> c)
-        name = "I_ADD";
-        printInst(&i, name);
-        break;
-
-      case I_DEF_VAR:     // (8)              | (name, value ->)
-        name = "I_DEF_VAR";
-        printInstAndIndex(&i, name, code);
-        break;
-
-      case I_LOAD_VAR:    // (8)              | (name -> value)
-        name = "I_LOAD_VAR";
-        printInstAndIndex(&i, name, code);
-        break;
-
-      default:
-        name = "<UNKNOWN>";
-        printf("%i:\t%s/%u\n", i, name, inst);
-    }
-  }
-}
-
-void printCodeUnit(CodeUnit *unit) {
-  printCodeArray(unit->code.code, unit->code.codeLength);
-}
-
 RetVal tryTestCompile(wchar_t *input, CodeUnit *codeUnit, Error *error) {
 
   RetVal ret;
@@ -495,6 +392,7 @@ START_TEST(compilerBasic) {
           I_LOAD_CONST, 0, 0,
           I_LOAD_CONST, 0, 1,
           I_ADD,
+          I_RET,
       };
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
@@ -543,6 +441,7 @@ START_TEST(compilerBasic) {
           I_LOAD_CONST, 0, 1,
           I_LOAD_CONST, 0, 2,
           I_INVOKE_DYN,
+          I_RET,
       };
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(fnCallCode));
@@ -568,6 +467,7 @@ START_TEST(compilerBasic) {
           I_LOAD_CONST, 0, 0,
           I_STORE_LOCAL, 0, 0,
           I_LOAD_LOCAL, 0, 0,
+          I_RET,
       };
 
 //      printCodeUnit(&codeUnit);
@@ -604,6 +504,7 @@ START_TEST(compilerBasic) {
           I_LOAD_LOCAL, 0, 2,
           I_STORE_LOCAL, 0, 1,
           I_LOAD_LOCAL, 0, 1,
+          I_RET,
       };
 
 //      printCodeUnit(&codeUnit);
@@ -636,6 +537,7 @@ START_TEST(compilerBasic) {
           I_LOAD_CONST,  0, 1,
           I_LOAD_LOCAL,  0, 0,
           I_INVOKE_DYN,
+          I_RET,
       };
 
 //      printCodeUnit(&codeUnit);
@@ -673,6 +575,7 @@ START_TEST(compilerBasic) {
           I_LOAD_VAR,    0, 1,
           I_LOAD_CONST,  0, 2,
           I_ADD,
+          I_RET,
       };
 
 //      printCodeUnit(&codeUnit);
@@ -745,6 +648,17 @@ START_TEST(vmBasic) {
   }
 END_TEST
 
+START_TEST(repl) {
+
+    // TODO: make these tests...
+    //
+    // (def + (fn (a b) (builtin :add a b)))
+    // (+ 1 2)
+    // > 3
+
+  }
+END_TEST
+
 Suite * suite(void) {
 
   TCase *tc_core = tcase_create("Core");
@@ -756,6 +670,7 @@ Suite * suite(void) {
   tcase_add_test(tc_core, analyzer);
   tcase_add_test(tc_core, compilerBasic);
   tcase_add_test(tc_core, vmBasic);
+  tcase_add_test(tc_core, repl);
 
   Suite *s = suite_create("lexer");
   suite_add_tcase(s, tc_core);
