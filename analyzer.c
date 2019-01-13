@@ -416,7 +416,7 @@ void defFreeContents(FormDef *def) {
 
 void fnFreeContents(FormFn *fn);
 
-RetVal tryFnAnalyze(EnvBindingStack *bindingStack, Expr* fnExpr, FormFn *fn, Error *error) {
+RetVal tryFnAnalyze(EnvBindingStack *parentBindingStack, Expr* fnExpr, FormFn *fn, Error *error) {
 
   RetVal ret;
 
@@ -462,9 +462,9 @@ RetVal tryFnAnalyze(EnvBindingStack *bindingStack, Expr* fnExpr, FormFn *fn, Err
 
   // create new binding stack, initialized with the fn args as the first bindings
   envBindingStackInit(&fnBindingStack);
-  throws(tryPushScope(bindingStack, fn->numArgs, error));
+  throws(tryPushScope(&fnBindingStack, fn->numArgs, error));
   for (uint64_t i=0; i<fn->numArgs; i++) {
-    throws(addArgBinding(bindingStack, &fn->args[i], error));
+    throws(addArgBinding(&fnBindingStack, &fn->args[i], error));
   }
 
   // create the forms within this fn lexical scope
@@ -474,7 +474,7 @@ RetVal tryFnAnalyze(EnvBindingStack *bindingStack, Expr* fnExpr, FormFn *fn, Err
   Expr *expr = fnExpr->list.head->next->next->expr;
   for (int i=0; i<fn->numForms; i++) {
     Form *thisForm = fn->forms + i;
-    throws(tryFormAnalyzeContents(bindingStack, expr, thisForm, error));
+    throws(tryFormAnalyzeContents(&fnBindingStack, expr, thisForm, error));
   }
 
   envBindingStackFreeContents(&fnBindingStack);
