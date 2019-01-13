@@ -58,7 +58,12 @@ int main(void) {
     printCodeUnit(&unit);
 
     Value result;
-    throws(tryVMEval(vm, &unit, &result, &error));
+    ret = tryVMEval(vm, &unit, &result, &error);
+
+    if (ret != R_SUCCESS) {
+      printf("> encountered eval error\n\n");
+      continue;
+    }
 
     printf("> ");
     throws(tryVMPrn(vm, result, &error));
