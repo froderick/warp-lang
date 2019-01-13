@@ -667,6 +667,11 @@ START_TEST(repl) {
     //
     // (let (x (fn (a b) (builtin :add a b))) (x 1 2))
     // > 3
+    //
+    // (builtin :compare 1 2)
+    // > false
+    // (builtin :compare 2 2)
+    // > true
 
   }
 END_TEST

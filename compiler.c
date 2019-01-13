@@ -438,6 +438,16 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     uint8_t addCode[] = { I_ADD};
     throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
   }
+  else if (wcscmp(builtin->name, L"compare") == 0) {
+    form->type = F_BUILTIN;
+
+    for (int i=0; i < form->builtin.numArgs; i++) {
+      throws(tryCompile(&form->builtin.args[i], output, error));
+    }
+
+    uint8_t addCode[] = { I_CMP };
+    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+  }
   else {
     throwCompilerError(error, "unsupported builtin '%ls'", builtin->name);
   }
