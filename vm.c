@@ -251,7 +251,31 @@ void printCodeArray(uint8_t *code, uint16_t codeLength) {
   }
 }
 
+void printFnConstant(FnConstant fnConst) {
+
+  for (uint16_t i=0; i<fnConst.numConstants; i++) {
+    Constant c = fnConst.constants[i];
+    if (c.type == CT_FN) {
+      printf("constant fn within constant fn %u:\n", i);
+      printFnConstant(c.function);
+    }
+  }
+
+  printf("fn const code:\n");
+  printCodeArray(fnConst.code.code, fnConst.code.codeLength);
+}
+
 void printCodeUnit(CodeUnit *unit) {
+
+  for (uint16_t i=0; i<unit->numConstants; i++) {
+    Constant c = unit->constants[i];
+    if (c.type == CT_FN) {
+      printf("constant fn %u:\n", i);
+      printFnConstant(c.function);
+    }
+  }
+
+  printf("code:\n");
   printCodeArray(unit->code.code, unit->code.codeLength);
 }
 
@@ -1106,7 +1130,9 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
           uint16_t newPc = readIndex(frame->code.code, pc);
           pc = newPc;
         }
-
+        else {
+          pc = pc + 3;
+        }
         break;
       }
       case I_JMP_IF_NOT: {      // (8), offset (16) | (value ->)
@@ -1131,6 +1157,9 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
         if (!truthy) {
           uint16_t newPc = readIndex(frame->code.code, pc);
           pc = newPc;
+        }
+        else {
+          pc = pc + 3;
         }
 
         break;
