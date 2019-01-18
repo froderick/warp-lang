@@ -1,6 +1,6 @@
 #include "compiler.h"
 
-RetVal tryCompileRepl(TokenStream_t stream, CodeUnit *codeUnit, Error *error) {
+RetVal tryReplCompile(TokenStream_t stream, CodeUnit *codeUnit, Error *error) {
 
   RetVal ret;
 
@@ -14,14 +14,50 @@ RetVal tryCompileRepl(TokenStream_t stream, CodeUnit *codeUnit, Error *error) {
   throws(tryFormAnalyze(&bindingStack, expr, &form, error));
   throws(tryCompileTopLevel(form, codeUnit, error));
 
-  envBindingStackFreeContents(&bindingStack);
-  exprFree(expr);
-  formFree(form);
+  ret = R_SUCCESS;
+  goto finally;
+
+  failure:
+    goto finally;
+
+  finally:
+    envBindingStackFreeContents(&bindingStack);
+    exprFree(expr);
+    formFree(form);
+    return ret;
+}
+
+RetVal tryReplEval(wchar_t *inputText, wchar_t *outputText, Error *error) {
+  RetVal ret;
+
+  CodeUnit unit;
+  InputStream_t source;
+  TokenStream_t stream;
+  VM_t vm;
+  Value result;
+
+  codeUnitInitContents(&unit);
+
+  throws(tryStringInputStreamMake(inputText, wcslen(inputText), &source, error));
+  throws(tryStreamMake(source, &stream, error));
+
+  throws(tryReplCompile(stream, &unit, error));
+  throws(tryVMMake(&vm, error));
+  throws(tryVMEval(vm, &unit, &result, error));
+
+  throws(tryVMPrn(vm, result, error));
+
+  tryInputStreamFree(source, error);
+  vmFreeContents(vm);
+  codeUnitFreeContents(&unit);
 
   return R_SUCCESS;
 
   failure:
-  return ret;
+    tryStreamFree(stream, error); // frees input stream also
+    vmFreeContents(vm);
+    codeUnitFreeContents(&unit);
+    return ret;
 }
 
 int main(void) {
@@ -45,7 +81,7 @@ int main(void) {
     errorInitContents(&error);
     codeUnitInitContents(&unit);
 
-    ret = tryCompileRepl(stream, &unit, &error);
+    ret = tryReplCompile(stream, &unit, &error);
     if (ret == R_EOF) {
       break;
     }

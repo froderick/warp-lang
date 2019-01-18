@@ -345,7 +345,7 @@ RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *e
 
   stringBufferClear(s->b);
 
-  wint_t ch;
+  wchar_t ch;
 
   while (true) {
     int read = tryInputStreamReadChar(source, &ch, error);
