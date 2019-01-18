@@ -9,6 +9,7 @@
 #include "analyzer.h"
 #include "compiler.h"
 #include "vm.h"
+#include "repl.h"
 
 void assertToken(Token *t,
                  TokenType type, wchar_t *text, unsigned long position, unsigned long length) {
@@ -648,30 +649,44 @@ START_TEST(vmBasic) {
   }
 END_TEST
 
+#define assertEval(inputText, expectedOutputText) {\
+  Error error; \
+  wchar_t *result; \
+  errorInitContents(&error); \
+  result = NULL; \
+  ck_assert_int_eq(tryReplEval(inputText, &result, &error), R_SUCCESS); \
+  if (wcscmp(expectedOutputText, result) != 0) { \
+    ck_abort_msg("got '%ls', expected '%ls'", result, expectedOutputText); \
+  } \
+}
+
 START_TEST(repl) {
 
-    // TODO: make these tests...
-    //
-    // (def + (fn (a b) (builtin :add a b)))
-    // (+ 1 2)
-    // > 3
-    //
-    // (if 1 2 3)
-    // > 2
-    // (if 0 2 3)
-    // > 3
-    //
-    // (def + (fn (a b) (builtin :add a b)))
-    // (let (a 100) (+ a 20))
-    // > 120
-    //
-    // (let (x (fn (a b) (builtin :add a b))) (x 1 2))
-    // > 3
-    //
-    // (builtin :compare 1 2)
-    // > false
-    // (builtin :compare 2 2)
-    // > true
+    assertEval(L"(let ()"
+                 "  (def + (fn (a b) (builtin :add a b)))"
+                 "  (+ 1 2))",
+               L"3");
+
+    assertEval(L"(if 1 2 3)",
+               L"2");
+
+    assertEval(L"(if 0 2 3)",
+               L"3");
+
+    assertEval(L"(let ()"
+                "  (def + (fn (a b) (builtin :add a b)))"
+                "  (let (a 100) "
+                "    (+ a 20)))",
+               L"120");
+
+    assertEval(L"(let (x (fn (a b) (builtin :add a b))) (x 1 2))",
+               L"3");
+
+    assertEval(L"(builtin :compare 1 2)",
+               L"false");
+
+    assertEval(L"(builtin :compare 2 2)",
+               L"true");
 
   }
 END_TEST

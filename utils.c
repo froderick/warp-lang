@@ -215,6 +215,23 @@ typedef struct StringBuffer {
   unsigned long usedChars;
 } StringBuffer;
 
+void stringBufferInitContents(StringBuffer *b) {
+  b->allocatedChars = 0;
+  b->usedChars = 0;
+  b->data = NULL;
+}
+
+void stringBufferFreeContents(StringBuffer *b) {
+  if (b != NULL) {
+    b->allocatedChars = 0;
+    b->usedChars = 0;
+    if (b->data != NULL) {
+      free(b->data);
+      b->data = NULL;
+    }
+  }
+}
+
 uint64_t stringBufferAllocatedBytes(StringBuffer *buf) {
   return sizeof(wchar_t) * buf->allocatedChars;
 }
@@ -254,7 +271,7 @@ void stringBufferFree(StringBuffer *b) {
   free(b);
 }
 
-RetVal tryStringBufferAppend(StringBuffer *b, wchar_t ch, Error *error) {
+RetVal tryStringBufferAppendChar(StringBuffer *b, wchar_t ch, Error *error) {
 
   if (b->usedChars + 1 == (b->allocatedChars - 1)) {
 
@@ -271,6 +288,30 @@ RetVal tryStringBufferAppend(StringBuffer *b, wchar_t ch, Error *error) {
 
   b->data[b->usedChars] = ch;
   b->usedChars = b->usedChars + 1;
+  b->data[b->usedChars] = L'\0';
+
+  return R_SUCCESS;
+}
+
+RetVal tryStringBufferAppendStr(StringBuffer *b, wchar_t *str, Error *error) {
+
+  uint64_t len = wcslen(str);
+
+  if (b->usedChars + len > (b->allocatedChars - 1)) {
+
+    unsigned long oldSizeInBytes = stringBufferAllocatedBytes(b);
+    unsigned long newSizeInBytes = (oldSizeInBytes + (sizeof(wchar_t) * len)) * 2;
+
+    b->data = realloc(b->data, newSizeInBytes);
+    if (b->data == NULL) {
+      return memoryError(error, "realloc StringBuffer array");
+    }
+
+    b->allocatedChars = b->allocatedChars * 2;
+  }
+
+  memcpy(b->data + b->usedChars, str, len * sizeof(wchar_t));
+  b->usedChars = b->usedChars + len;
   b->data[b->usedChars] = L'\0';
 
   return R_SUCCESS;

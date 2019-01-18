@@ -155,8 +155,9 @@ void vmFree(VM_t vm);
 
 RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, Value *result, Error *error);
 
-// need a prn-str that takes vm and a value, so the repl can 'print'
 RetVal tryVMPrn(VM_t vm, Value result, Error *error);
+
+RetVal tryVMPrnStr(VM_t vm, Value result, wchar_t **ptr, Error *error);
 
 #endif //WARP_LANG_VM_H
 

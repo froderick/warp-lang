@@ -1409,6 +1409,67 @@ RetVal tryVMPrn(VM_t vm, Value result, Error *error) {
     return ret;
 }
 
+RetVal _tryVMPrnStr(VM_t vm, Value result, StringBuffer_t b, Error *error) {
+  RetVal ret;
+
+  switch (result.type) {
+    case VT_NIL:
+      throws(tryStringBufferAppendStr(b, L"nil", error));
+      break;
+    case VT_UINT: {
+      wchar_t text[256];
+      swprintf(text, sizeof(text), L"%llu", result.value);
+      throws(tryStringBufferAppendStr(b, text, error));
+      break;
+    }
+    case VT_BOOL:
+      if (result.value == 0) {
+        throws(tryStringBufferAppendStr(b, L"false", error));
+      }
+      else {
+        throws(tryStringBufferAppendStr(b, L"true", error));
+      }
+      break;
+    case VT_FN:
+      throws(tryStringBufferAppendStr(b, L"<function>", error));
+      break;
+    case VT_STR: {
+      String str;
+      throws(tryDerefString(&vm->gc, result, &str, error));
+      throws(tryStringBufferAppendChar(b, L'"', error));
+      throws(tryStringBufferAppendStr(b, str.value, error));
+      throws(tryStringBufferAppendChar(b, L'"', error));
+      break;
+    }
+  }
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryVMPrnStr(VM_t vm, Value result, wchar_t **ptr, Error *error) {
+  RetVal ret;
+
+  // clean up on exit always
+  StringBuffer_t b = NULL;
+
+  throws(tryStringBufferMake(&b, error));
+  throws(_tryVMPrnStr(vm, result, b, error));
+
+  wchar_t *output;
+  throws(tryCopyText(stringBufferText(b), &output, stringBufferLength(b), error));
+  stringBufferFree(b);
+
+  *ptr = output;
+  return R_SUCCESS;
+
+  failure:
+    stringBufferFree(b);
+    return ret;
+}
+
 RetVal tryVMInitContents(VM *vm , Error *error) {
   RetVal ret;
 

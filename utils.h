@@ -67,10 +67,14 @@ RetVal tryStringOutputStreamMake(wchar_t *text, uint64_t length, OutputStream_t 
 
 typedef struct StringBuffer *StringBuffer_t;
 
+//void stringBufferInitContents(StringBuffer_t b);
+//void stringBufferFreeContents(StringBuffer_t b);
+
 RetVal tryStringBufferMake(StringBuffer_t *ptr, Error *error);
 void stringBufferFree(StringBuffer_t b);
 
-RetVal tryStringBufferAppend(StringBuffer_t b, wchar_t ch, Error *error);
+RetVal tryStringBufferAppendChar(StringBuffer_t b, wchar_t ch, Error *error);
+RetVal tryStringBufferAppendStr(StringBuffer_t b, wchar_t *str, Error *error);
 uint64_t stringBufferLength(StringBuffer_t b);
 wchar_t* stringBufferText(StringBuffer_t b);
 void stringBufferClear(StringBuffer_t b);

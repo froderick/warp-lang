@@ -126,7 +126,7 @@ bool isNewline(wchar_t ch) {
 
 RetVal tryReadString(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryStringBufferAppend(s->b, first, error) != R_SUCCESS) {
+  if (tryStringBufferAppendChar(s->b, first, error) != R_SUCCESS) {
     return R_ERROR;
   }
 
@@ -146,7 +146,7 @@ RetVal tryReadString(InputStream_t source, LexerState *s, wchar_t first, Token *
       return tokenizationError(error, s->position, "unexpected EOF, string must end in a '\"''");
     }
 
-    if (tryStringBufferAppend(s->b, ch, error) != R_SUCCESS) {
+    if (tryStringBufferAppendChar(s->b, ch, error) != R_SUCCESS) {
       return R_ERROR;
     }
 
@@ -168,7 +168,7 @@ RetVal tryReadString(InputStream_t source, LexerState *s, wchar_t first, Token *
 
 RetVal tryReadNumber(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryStringBufferAppend(s->b, first, error) != R_SUCCESS) {
+  if (tryStringBufferAppendChar(s->b, first, error) != R_SUCCESS) {
     return R_ERROR;
   }
 
@@ -193,7 +193,7 @@ RetVal tryReadNumber(InputStream_t source, LexerState *s, wchar_t first, Token *
       matched = false;
     }
     else {
-      if (tryStringBufferAppend(s->b, ch, error) != R_SUCCESS) {
+      if (tryStringBufferAppendChar(s->b, ch, error) != R_SUCCESS) {
         return R_ERROR;
       }
       matched = true;
@@ -238,7 +238,7 @@ bool isSymbolContinue(wchar_t ch) {
 
 RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryStringBufferAppend(s->b, first, error) != R_SUCCESS) {
+  if (tryStringBufferAppendChar(s->b, first, error) != R_SUCCESS) {
     return R_ERROR;
   }
 
@@ -264,7 +264,7 @@ RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token *
       matched = false;
     }
     else {
-      if (tryStringBufferAppend(s->b, ch, error) != R_SUCCESS) {
+      if (tryStringBufferAppendChar(s->b, ch, error) != R_SUCCESS) {
         return R_ERROR;
       }
       matched = true;
@@ -297,7 +297,7 @@ RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token *
 
 RetVal tryReadKeyword(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryStringBufferAppend(s->b, first, error) != R_SUCCESS) {
+  if (tryStringBufferAppendChar(s->b, first, error) != R_SUCCESS) {
     return R_ERROR;
   }
 
@@ -322,7 +322,7 @@ RetVal tryReadKeyword(InputStream_t source, LexerState *s, wchar_t first, Token 
       matched = false;
     }
     else {
-      if (tryStringBufferAppend(s->b, ch, error) != R_SUCCESS) {
+      if (tryStringBufferAppendChar(s->b, ch, error) != R_SUCCESS) {
         return R_ERROR;
       }
       matched = true;
