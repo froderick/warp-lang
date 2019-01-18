@@ -60,6 +60,24 @@ RetVal tryOutputStreamClose(OutputStream_t output, Error *error);
 RetVal tryFileOutputStreamMake(FILE *file, OutputStream_t output, Error *error);
 RetVal tryStringOutputStreamMake(wchar_t *text, uint64_t length, OutputStream_t output, Error *error);
 
+/*
+ * Auto-expanding string buffer implementation.
+ * Built on wide chars, so UTF8 friendly.
+ */
+
+typedef struct StringBuffer *StringBuffer_t;
+
+RetVal tryStringBufferMake(StringBuffer_t *ptr, Error *error);
+void stringBufferFree(StringBuffer_t b);
+
+RetVal tryStringBufferAppend(StringBuffer_t b, wchar_t ch, Error *error);
+uint64_t stringBufferLength(StringBuffer_t b);
+wchar_t* stringBufferText(StringBuffer_t b);
+void stringBufferClear(StringBuffer_t b);
+
+uint64_t stringBufferAllocatedBytes(StringBuffer_t buf);
+uint64_t stringBufferUnusedBytes(StringBuffer_t buf);
+
 #endif //WARP_LANG_UTILS_H
 
 

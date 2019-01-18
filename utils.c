@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <wchar.h>
+#include <strings.h>
 
 /*
  * Allocate a new string of the same length, and copy the original string into
@@ -201,5 +202,90 @@ RetVal tryInputStreamReadChar(InputStream *source, wchar_t *ch, Error *error) {
 
 RetVal tryInputStreamUnreadChar(InputStream *source, wchar_t ch, Error *error) {
   return source->unreadChar(source->state, ch, error);
+}
+
+/*
+ * Auto-expanding string buffer implementation.
+ * Built on wide chars, so UTF8 friendly.
+ */
+
+typedef struct StringBuffer {
+  wchar_t *data;
+  unsigned long allocatedChars;
+  unsigned long usedChars;
+} StringBuffer;
+
+uint64_t stringBufferAllocatedBytes(StringBuffer *buf) {
+  return sizeof(wchar_t) * buf->allocatedChars;
+}
+
+uint64_t stringBufferUnusedBytes(StringBuffer *buf) {
+  return sizeof(wchar_t) * buf->usedChars;
+}
+
+RetVal tryStringBufferMake(StringBuffer **ptr, Error *error) {
+
+  StringBuffer *b;
+  wchar_t *data;
+
+  if (NULL == (b = malloc(sizeof(StringBuffer)))) {
+    return memoryError(error, "malloc StringBuffer");
+  }
+
+  b->usedChars = 0;
+  b->allocatedChars = 256;
+
+  if (NULL == (data = malloc(stringBufferAllocatedBytes(b)))) {
+    free(b);
+    return memoryError(error, "malloc StringBuffer array");
+  }
+
+  bzero(data, stringBufferAllocatedBytes(b));
+
+  b->data = data;
+  *ptr = b;
+  return R_SUCCESS;
+}
+
+void stringBufferFree(StringBuffer *b) {
+  if (b != NULL) {
+    free(b->data);
+  }
+  free(b);
+}
+
+RetVal tryStringBufferAppend(StringBuffer *b, wchar_t ch, Error *error) {
+
+  if (b->usedChars + 1 == (b->allocatedChars - 1)) {
+
+    unsigned long oldSizeInBytes = stringBufferAllocatedBytes(b);
+    unsigned long newSizeInBytes = oldSizeInBytes * 2;
+
+    b->data = realloc(b->data, newSizeInBytes);
+    if (b->data == NULL) {
+      return memoryError(error, "realloc StringBuffer array");
+    }
+
+    b->allocatedChars = b->allocatedChars * 2;
+  }
+
+  b->data[b->usedChars] = ch;
+  b->usedChars = b->usedChars + 1;
+  b->data[b->usedChars] = L'\0';
+
+  return R_SUCCESS;
+}
+
+uint64_t stringBufferLength(StringBuffer_t b) {
+  return b->usedChars;
+}
+
+wchar_t* stringBufferText(StringBuffer_t b) {
+  return b->data;
+}
+
+void stringBufferClear(StringBuffer *b) {
+  bzero(b->data, stringBufferUnusedBytes(b));
+  b->usedChars = 0;
 }
 

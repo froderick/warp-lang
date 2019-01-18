@@ -11,83 +11,6 @@
 #include "lexer.h"
 
 /*
- * Auto-expanding string buffer implementation.
- * Built on wide chars, so UTF8 friendly.
- */
-
-typedef struct StringBuffer {
-  wchar_t *data;
-  unsigned long allocatedChars;
-  unsigned long usedChars;
-} StringBuffer;
-
-unsigned long bufferAllocatedBytes(StringBuffer *buf) {
-  return sizeof(wchar_t) * buf->allocatedChars;
-}
-
-unsigned long bufferUnusedBytes(StringBuffer *buf) {
-  return sizeof(wchar_t) * buf->usedChars;
-}
-
-RetVal tryBufferMake(StringBuffer **ptr, Error *error) {
-
-  StringBuffer *b;
-  wchar_t *data;
-
-  if (NULL == (b = malloc(sizeof(StringBuffer)))) {
-    return memoryError(error, "malloc StringBuffer");
-  }
-
-  b->usedChars = 0;
-  b->allocatedChars = 256;
-
-  if (NULL == (data = malloc(bufferAllocatedBytes(b)))) {
-    free(b);
-    return memoryError(error, "malloc StringBuffer array");
-  }
-
-  bzero(data, bufferAllocatedBytes(b));
-
-  b->data = data;
-  *ptr = b;
-  return R_SUCCESS;
-}
-
-void bufferFree(StringBuffer *b) {
-  if (b != NULL) {
-    free(b->data);
-  }
-  free(b);
-}
-
-RetVal tryBufferAppend(StringBuffer *b, wchar_t ch, Error *error) {
-
-  if (b->usedChars + 1 == (b->allocatedChars - 1)) {
-
-    unsigned long oldSizeInBytes = bufferAllocatedBytes(b);
-    unsigned long newSizeInBytes = oldSizeInBytes * 2;
-
-    b->data = realloc(b->data, newSizeInBytes);
-    if (b->data == NULL) {
-      return memoryError(error, "realloc StringBuffer array");
-    }
-
-    b->allocatedChars = b->allocatedChars * 2;
-  }
-
-  b->data[b->usedChars] = ch;
-  b->usedChars = b->usedChars + 1;
-  b->data[b->usedChars] = L'\0';
-
-  return R_SUCCESS;
-}
-
-void bufferClear(StringBuffer *b) {
-  bzero(b->data, bufferUnusedBytes(b));
-  b->usedChars = 0;
-}
-
-/*
  * Token Model and Lexer
  */
 
@@ -95,7 +18,7 @@ typedef struct LexerState {
   unsigned long position;
   unsigned long lineNumber;
   unsigned long colNumber;
-  StringBuffer *b;
+  StringBuffer_t b;
 } LexerState;
 
 const char* tokenName(TokenType type) {
@@ -125,8 +48,8 @@ const char* tokenName(TokenType type) {
   }
 }
 
-RetVal tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsigned long length,
-                    unsigned long lineNumber, unsigned long colNumber, Token **ptr, Error *error) {
+RetVal tryTokenInit(TokenType type, wchar_t *text, uint64_t position, uint64_t length,
+                    uint64_t lineNumber, uint64_t colNumber, Token **ptr, Error *error) {
 
   Token *t;
 
@@ -151,7 +74,9 @@ RetVal tryTokenInit(TokenType type, wchar_t *text, unsigned long position, unsig
 }
 
 RetVal tryTokenInitFromLexer(LexerState *s, TokenType type, Token **ptr, Error *error) {
-  return tryTokenInit(type, s->b->data, s->position, s->b->usedChars, s->lineNumber, s->colNumber, ptr, error);
+  uint64_t length = stringBufferLength(s->b);
+  wchar_t *text = stringBufferText(s->b);
+  return tryTokenInit(type, text, s->position, length, s->lineNumber, s->colNumber, ptr, error);
 }
 
 void tokenFree(Token *t) {
@@ -160,16 +85,16 @@ void tokenFree(Token *t) {
 
 RetVal tryLexerStateMake(LexerState **ptr, Error *error) {
 
-  StringBuffer *b = NULL;
+  StringBuffer_t b = NULL;
   LexerState *s = NULL;
 
-  if (tryBufferMake(&b, error) != R_SUCCESS) {
+  if (tryStringBufferMake(&b, error) != R_SUCCESS) {
     return R_ERROR;
   }
 
   s = malloc(sizeof(LexerState));
   if (s == NULL) {
-    bufferFree(b);
+    stringBufferFree(b);
     return memoryError(error, "malloc LexerState");
   }
 
@@ -184,7 +109,7 @@ RetVal tryLexerStateMake(LexerState **ptr, Error *error) {
 
 void lexerStateFree(LexerState *s) {
   if (s != NULL) {
-    bufferFree(s->b);
+    stringBufferFree(s->b);
   }
   free(s);
 }
@@ -201,7 +126,7 @@ bool isNewline(wchar_t ch) {
 
 RetVal tryReadString(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
+  if (tryStringBufferAppend(s->b, first, error) != R_SUCCESS) {
     return R_ERROR;
   }
 
@@ -221,7 +146,7 @@ RetVal tryReadString(InputStream_t source, LexerState *s, wchar_t first, Token *
       return tokenizationError(error, s->position, "unexpected EOF, string must end in a '\"''");
     }
 
-    if (tryBufferAppend(s->b, ch, error) != R_SUCCESS) {
+    if (tryStringBufferAppend(s->b, ch, error) != R_SUCCESS) {
       return R_ERROR;
     }
 
@@ -243,7 +168,7 @@ RetVal tryReadString(InputStream_t source, LexerState *s, wchar_t first, Token *
 
 RetVal tryReadNumber(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
+  if (tryStringBufferAppend(s->b, first, error) != R_SUCCESS) {
     return R_ERROR;
   }
 
@@ -268,7 +193,7 @@ RetVal tryReadNumber(InputStream_t source, LexerState *s, wchar_t first, Token *
       matched = false;
     }
     else {
-      if (tryBufferAppend(s->b, ch, error) != R_SUCCESS) {
+      if (tryStringBufferAppend(s->b, ch, error) != R_SUCCESS) {
         return R_ERROR;
       }
       matched = true;
@@ -313,7 +238,7 @@ bool isSymbolContinue(wchar_t ch) {
 
 RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
+  if (tryStringBufferAppend(s->b, first, error) != R_SUCCESS) {
     return R_ERROR;
   }
 
@@ -339,7 +264,7 @@ RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token *
       matched = false;
     }
     else {
-      if (tryBufferAppend(s->b, ch, error) != R_SUCCESS) {
+      if (tryStringBufferAppend(s->b, ch, error) != R_SUCCESS) {
         return R_ERROR;
       }
       matched = true;
@@ -347,7 +272,7 @@ RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token *
 
   } while (matched);
 
-  wchar_t *text = s->b->data;
+  wchar_t *text = stringBufferText(s->b);
 
   TokenType type;
   if (isNil(text)) {
@@ -372,7 +297,7 @@ RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token *
 
 RetVal tryReadKeyword(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
 
-  if (tryBufferAppend(s->b, first, error) != R_SUCCESS) {
+  if (tryStringBufferAppend(s->b, first, error) != R_SUCCESS) {
     return R_ERROR;
   }
 
@@ -397,7 +322,7 @@ RetVal tryReadKeyword(InputStream_t source, LexerState *s, wchar_t first, Token 
       matched = false;
     }
     else {
-      if (tryBufferAppend(s->b, ch, error) != R_SUCCESS) {
+      if (tryStringBufferAppend(s->b, ch, error) != R_SUCCESS) {
         return R_ERROR;
       }
       matched = true;
@@ -405,7 +330,7 @@ RetVal tryReadKeyword(InputStream_t source, LexerState *s, wchar_t first, Token 
 
   } while (matched);
 
-  if (s->b->usedChars == 1) {
+  if (stringBufferLength(s->b) == 1) {
     return tokenizationError(error, s->position, "keyword token type cannot be empty");
   }
 
@@ -418,7 +343,7 @@ RetVal tryReadKeyword(InputStream_t source, LexerState *s, wchar_t first, Token 
 
 RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *error) {
 
-  bufferClear(s->b);
+  stringBufferClear(s->b);
 
   wint_t ch;
 
