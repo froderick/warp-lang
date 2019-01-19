@@ -72,6 +72,9 @@ typedef enum ConstantType {
   CT_STR,
   CT_FN,
   CT_VAR_REF,
+  CT_SYMBOL,
+  CT_KEYWORD,
+  CT_LIST,
 } ConstantType;
 
 typedef struct Constant Constant;
@@ -93,6 +96,16 @@ typedef struct VarRefConstant {
   wchar_t *name;
 } VarRefConstant;
 
+typedef struct SymbolConstant {
+  uint64_t length;
+  wchar_t *value;
+} SymbolConstant;
+
+typedef struct KeywordConstant {
+  uint64_t length;
+  wchar_t *value;
+} KeywordConstant;
+
 typedef struct Constant {
   ConstantType type;
   union {
@@ -101,6 +114,8 @@ typedef struct Constant {
     StringConstant string;
     FnConstant function;
     VarRefConstant varRef;
+    SymbolConstant symbol;
+    KeywordConstant keyword;
   };
 } Constant;
 
@@ -110,15 +125,18 @@ typedef struct CodeUnit {
   Code code;
 } CodeUnit;
 
-void printCodeUnit(CodeUnit *unit);
 
 void sourceTableInitContents(SourceTable *t);
-void codeInitContents(Code *code);
-void codeUnitInitContents(CodeUnit *codeUnit);
 
-void codeUnitFreeContents(CodeUnit *codeUnit);
+void codeInitContents(Code *code);
+void codeFreeContents(Code *code);
+void printCodeUnit(CodeUnit *unit);
 
 void constantFnInitContents(FnConstant *fnConst);
+void _constantFreeContents(Constant *c);
+
+void codeUnitInitContents(CodeUnit *codeUnit);
+void codeUnitFreeContents(CodeUnit *codeUnit);
 
 typedef struct VM *VM_t;
 
@@ -140,6 +158,8 @@ typedef enum ValueType {
   VT_FN,
 //  VT_CHAR,
   VT_STR,
+  VT_SYMBOL,
+  VT_KEYWORD,
 //  VT_OBJECT,
 } ValueType;
 

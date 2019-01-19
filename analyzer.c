@@ -586,6 +586,10 @@ RetVal tryEnvRefAnalyze(EnvBindingStack *bindingStack, Expr *expr, EnvBinding *b
   return R_SUCCESS;
 }
 
+void envRefFreeContents(FormEnvRef *ref) {
+  // nothing to do
+}
+
 RetVal tryVarRefAnalyze(EnvBindingStack *bindingStack, Expr *expr, FormVarRef *varRef, Error *error) {
   RetVal ret;
 
@@ -600,6 +604,16 @@ RetVal tryVarRefAnalyze(EnvBindingStack *bindingStack, Expr *expr, FormVarRef *v
 
   failure:
     return ret;
+}
+
+void varRefFreeContents(FormVarRef *ref) {
+  if (ref != NULL) {
+    if (ref->name != NULL) {
+      free(ref->name);
+      ref->name = NULL;
+    }
+    ref->nameLength = 0;
+  }
 }
 
 RetVal assertFnCallable(Form *form, Error *error) {
@@ -703,6 +717,22 @@ void constantFreeContents(Expr *constant) {
   }
 }
 
+RetVal tryQuoteAnalyze(Expr* expr, Expr **constant, Error *error) {
+
+  RetVal ret;
+
+  if (expr->list.length != 2) {
+    throwSyntaxError(error, expr->source.position, "wrong number of args passed to quote (%llu instead of 1)",
+                     expr->list.length - 1);
+  }
+
+  throws(tryConstantAnalyze(expr->list.head->next->expr, constant, error));
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 RetVal tryFormAnalyzeContents(EnvBindingStack *bindingStack, Expr* expr, Form *form, Error *error) {
 
   // copy expression source metadata
@@ -779,6 +809,12 @@ RetVal tryFormAnalyzeContents(EnvBindingStack *bindingStack, Expr* expr, Form *f
           break;
         }
 
+        if (wcscmp(sym, L"quote") == 0) {
+          form->type = F_CONST;
+          throws(tryQuoteAnalyze(expr, &form->constant, error));
+          break;
+        }
+
         if (wcscmp(sym, L"builtin") == 0) {
           form->type = F_BUILTIN;
           throws(tryBuiltinAnalyze(bindingStack, expr, &form->builtin, error));
@@ -837,10 +873,10 @@ void formFreeContents(Form* form) {
         defFreeContents(&form->def);
         break;
       case F_ENV_REF:
-        // TODO: do nothing (FOR NOW)
+        envRefFreeContents(&form->envRef);
         break;
       case F_VAR_REF:
-        // TODO: do nothing (FOR NOW)
+        varRefFreeContents(&form->varRef);
         break;
       case F_FN:
         fnFreeContents(&form->fn);

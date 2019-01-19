@@ -688,6 +688,14 @@ START_TEST(repl) {
     assertEval(L"(builtin :compare 2 2)",
                L"true");
 
+    assertEval(L"nil",
+               L"nil");
+
+    assertEval(L"'hi",
+               L"hi");
+
+    assertEval(L":hi",
+               L":hi");
   }
 END_TEST
 

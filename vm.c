@@ -55,8 +55,6 @@ void codeFreeContents(Code *code) {
   }
 }
 
-void _constantFreeContents(Constant *c);
-
 void constantFnInitContents(FnConstant *fnConst) {
   fnConst->numArgs = 0;
   fnConst->numConstants = 0;
@@ -107,6 +105,21 @@ void _constantFreeContents(Constant *c) {
         break;
       case CT_FN:
         constantFnFreeContents(&c->function);
+        break;
+      case CT_SYMBOL:
+        c->symbol.length = 0;
+        if (c->symbol.value != NULL) {
+          free(c->symbol.value);
+          c->symbol.value = NULL;
+        }
+      case CT_KEYWORD:
+        c->keyword.length = 0;
+        if (c->keyword.value != NULL) {
+          free(c->keyword.value);
+          c->keyword.value = NULL;
+        }
+      case CT_LIST:
+        // TODO
         break;
     }
   }
@@ -177,6 +190,16 @@ typedef struct String {
   wchar_t *value;
 } String;
 
+typedef struct Symbol {
+  uint64_t length;
+  wchar_t *value;
+} Symbol;
+
+typedef struct Keyword {
+  uint64_t length;
+  wchar_t *value;
+} Keyword;
+
 typedef struct GC {
 
   uint64_t allocatedFnSpace;
@@ -186,6 +209,14 @@ typedef struct GC {
   uint64_t allocatedStringSpace;
   uint64_t usedStringSpace;
   String *strings;
+
+  uint64_t allocatedSymbolSpace;
+  uint64_t usedSymbolSpace;
+  Symbol *symbols;
+
+  uint64_t allocatedKeywordSpace;
+  uint64_t usedKeywordSpace;
+  Keyword *keywords;
 
 } GC;
 
@@ -739,6 +770,102 @@ RetVal tryDerefString(GC *gc, Value value, String *str, Error *error) {
   return ret;
 }
 
+RetVal tryAllocateSymbol(GC *gc, Symbol sym, Value *value, Error *error) {
+  RetVal ret;
+
+  if (gc->symbols == NULL) {
+    uint16_t len = 16;
+    tryMalloc(gc->symbols, len * sizeof(Symbol), "Symbol array");
+    gc->allocatedSymbolSpace = len;
+  }
+  else if (gc->usedSymbolSpace == gc->allocatedSymbolSpace) {
+    uint64_t newAllocatedLength = gc->allocatedSymbolSpace * 2;
+
+    Symbol* resizedSymbols = realloc(gc->symbols, newAllocatedLength);
+    if (resizedSymbols == NULL) {
+      ret = memoryError(error, "realloc Symbol array");
+      goto failure;
+    }
+
+    gc->allocatedSymbolSpace = newAllocatedLength;
+    gc->symbols = resizedSymbols;
+  }
+
+  uint64_t index = gc->usedSymbolSpace;
+  gc->symbols[index] = sym;
+  gc->usedSymbolSpace = index + 1;
+
+  value->type = VT_SYMBOL;
+  value->value = index;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryDerefSymbol(GC *gc, Value value, Symbol *sym, Error *error) {
+  RetVal ret;
+
+  if (gc->usedSymbolSpace <= value.value) {
+    throwInternalError(error, "sym reference points to sym that does not exist");
+  }
+
+  *sym = gc->symbols[value.value];
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryAllocateKeyword(GC *gc, Keyword kw, Value *value, Error *error) {
+  RetVal ret;
+
+  if (gc->keywords == NULL) {
+    uint16_t len = 16;
+    tryMalloc(gc->keywords, len * sizeof(Keyword), "Keyword array");
+    gc->allocatedKeywordSpace = len;
+  }
+  else if (gc->usedKeywordSpace == gc->allocatedKeywordSpace) {
+    uint64_t newAllocatedLength = gc->allocatedKeywordSpace * 2;
+
+    Keyword* resizedKeywords = realloc(gc->keywords, newAllocatedLength);
+    if (resizedKeywords == NULL) {
+      ret = memoryError(error, "realloc Keyword array");
+      goto failure;
+    }
+
+    gc->allocatedKeywordSpace = newAllocatedLength;
+    gc->keywords = resizedKeywords;
+  }
+
+  uint64_t index = gc->usedKeywordSpace;
+  gc->keywords[index] = kw;
+  gc->usedKeywordSpace = index + 1;
+
+  value->type = VT_KEYWORD;
+  value->value = index;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryDerefKeyword(GC *gc, Value value, Keyword *kw, Error *error) {
+  RetVal ret;
+
+  if (gc->usedKeywordSpace <= value.value) {
+    throwInternalError(error, "kw reference points to kw that does not exist");
+  }
+
+  *kw = gc->keywords[value.value];
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 /*
  * Instruction Definitions
  */
@@ -1210,6 +1337,34 @@ RetVal tryVarRefHydrate(VM *vm, VarRefConstant varRefConst, Value *value, Error 
     return ret;
 }
 
+RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *error) {
+  RetVal ret;
+
+  Symbol sym;
+  sym.length = symConst.length;
+  throws(tryCopyText(symConst.value, &sym.value, sym.length, error));
+  throws(tryAllocateSymbol(&vm->gc, sym, value, error));
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *error) {
+  RetVal ret;
+
+  Keyword kw;
+  kw.length = kwConst.length;
+  throws(tryCopyText(kwConst.value, &kw.value, kw.length, error));
+  throws(tryAllocateKeyword(&vm->gc, kw, value, error));
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr, Error *error) {
   RetVal ret;
 
@@ -1245,8 +1400,15 @@ RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, V
       case CT_STR:
         throws(tryStringHydrate(vm, c.string, &v, error));
         break;
+      case CT_SYMBOL:
+        throws(trySymbolHydrate(vm, c.symbol, &v, error));
+        break;
+      case CT_KEYWORD:
+        throws(tryKeywordHydrate(vm, c.keyword, &v, error));
+        break;
+      case CT_LIST:
       case CT_NONE:
-        throwInternalError(error, "invalid constant");
+        throwInternalError(error, "invalid constant: %u", c.type);
         break;
     }
 
@@ -1374,41 +1536,6 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
     return ret;
 }
 
-RetVal tryVMPrn(VM_t vm, Value result, Error *error) {
-  RetVal ret;
-
-  switch (result.type) {
-    case VT_NIL:
-      printf("nil");
-      break;
-    case VT_UINT:
-      printf("%llu", result.value);
-      break;
-    case VT_BOOL:
-      if (result.value == 0) {
-        printf("false");
-      }
-      else {
-        printf("true");
-      }
-      break;
-    case VT_FN:
-      printf("<function>");
-      break;
-    case VT_STR: {
-      String str;
-      throws(tryDerefString(&vm->gc, result, &str, error));
-      printf("\"%ls\"", str.value);
-      break;
-    }
-  }
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
 RetVal _tryVMPrnStr(VM_t vm, Value result, StringBuffer_t b, Error *error) {
   RetVal ret;
 
@@ -1441,6 +1568,21 @@ RetVal _tryVMPrnStr(VM_t vm, Value result, StringBuffer_t b, Error *error) {
       throws(tryStringBufferAppendChar(b, L'"', error));
       break;
     }
+    case VT_SYMBOL: {
+      Symbol sym;
+      throws(tryDerefSymbol(&vm->gc, result, &sym, error));
+      throws(tryStringBufferAppendStr(b, sym.value, error));
+      break;
+    }
+    case VT_KEYWORD: {
+      Keyword kw;
+      throws(tryDerefKeyword(&vm->gc, result, &kw, error));
+      throws(tryStringBufferAppendChar(b, L':', error));
+      throws(tryStringBufferAppendStr(b, kw.value, error));
+      break;
+    }
+    default:
+      throwRuntimeError(error, "unsuported value type: %u", result.type);
   }
 
   return R_SUCCESS;
@@ -1467,6 +1609,20 @@ RetVal tryVMPrnStr(VM_t vm, Value result, wchar_t **ptr, Error *error) {
 
   failure:
     stringBufferFree(b);
+    return ret;
+}
+
+RetVal tryVMPrn(VM_t vm, Value result, Error *error) {
+  RetVal ret;
+
+  wchar_t *str = NULL;
+  throws(tryVMPrnStr(vm, result, &str, error));
+  printf("%ls", str);
+  free(str);
+
+  return R_SUCCESS;
+
+  failure:
     return ret;
 }
 

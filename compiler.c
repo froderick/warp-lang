@@ -19,6 +19,9 @@ void constantsFreeContents(Constants *constants) {
     constants->numAllocated = 0;
     constants->numUsed = 0;
     if (constants->constants != NULL) {
+      for (int i=0; i<constants->numUsed; i++) {
+        _constantFreeContents(&constants->constants[i]);
+      }
       free(constants->constants);
       constants->constants = NULL;
     }
@@ -317,13 +320,45 @@ RetVal varRefConstantGetIndex(Text name, Output output, uint16_t *index, Error *
 RetVal tryCompileConst(Form *form, Output output, Error *error) {
   RetVal ret;
 
-  if (form->constant->type != N_NUMBER) {
-    throwCompilerError(error, "unsupported");
-  }
-
   Constant c;
-  c.type = CT_INT;
-  c.integer = form->constant->number.value;
+  switch (form->constant->type) {
+
+    case N_NUMBER: {
+      c.type = CT_INT;
+      c.integer = form->constant->number.value;
+      break;
+    }
+    case N_NIL: {
+      c.type = CT_NIL;
+      break;
+    }
+    case N_BOOLEAN: {
+      c.type = CT_BOOL;
+      c.boolean = (uint8_t) form->constant->boolean.value;
+      break;
+    }
+    case N_STRING: {
+      c.type = CT_STR;
+      c.string.length = form->constant->string.length;
+      throws(tryCopyText(form->constant->string.value, &c.string.value, c.string.length, error));
+      break;
+    }
+    case N_SYMBOL: {
+      c.type = CT_SYMBOL;
+      c.symbol.length = form->constant->symbol.length;
+      throws(tryCopyText(form->constant->symbol.value, &c.symbol.value, c.symbol.length, error));
+      break;
+    }
+    case N_KEYWORD: {
+      c.type = CT_KEYWORD;
+      c.keyword.length = form->constant->keyword.length;
+      throws(tryCopyText(form->constant->keyword.value, &c.keyword.value, c.keyword.length, error));
+      break;
+    }
+    case N_LIST:
+    default:
+      throwCompilerError(error, "unsupported: %u", form->constant->type);
+  }
   throws(tryAppendConstant(output.constants, c, error));
 
   uint16_t index = output.constants->numUsed - 1;
@@ -334,6 +369,7 @@ RetVal tryCompileConst(Form *form, Output output, Error *error) {
   return R_SUCCESS;
 
   failure:
+    _constantFreeContents(&c);
     return ret;
 }
 

@@ -185,7 +185,7 @@ typedef enum FormType {
   F_VAR_REF,
   F_FN,
   F_BUILTIN,
-  F_FN_CALL
+  F_FN_CALL,
 } FormType;
 
 typedef struct Form {
