@@ -696,6 +696,9 @@ START_TEST(repl) {
 
     assertEval(L":hi",
                L":hi");
+
+    assertEval(L"'(1 2 3)",
+               L"(1 2 3)");
   }
 END_TEST
 

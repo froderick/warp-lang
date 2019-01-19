@@ -752,6 +752,7 @@ RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error) {
 
         elem = elem->next;
       }
+      break;
     }
 
     default:

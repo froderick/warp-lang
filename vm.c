@@ -119,7 +119,11 @@ void _constantFreeContents(Constant *c) {
           c->keyword.value = NULL;
         }
       case CT_LIST:
-        // TODO
+        c->list.length = 0;
+        if (c->list.constants != NULL) {
+          free(c->list.constants);
+          c->list.constants = NULL;
+        }
         break;
     }
   }
@@ -200,6 +204,13 @@ typedef struct Keyword {
   wchar_t *value;
 } Keyword;
 
+typedef struct Cons Cons;
+
+typedef struct Cons {
+  Value value;
+  Value next; // this must be a Cons, or Nil
+} Cons;
+
 typedef struct GC {
 
   uint64_t allocatedFnSpace;
@@ -217,6 +228,10 @@ typedef struct GC {
   uint64_t allocatedKeywordSpace;
   uint64_t usedKeywordSpace;
   Keyword *keywords;
+
+  uint64_t allocatedConsSpace;
+  uint64_t usedConsSpace;
+  Cons *conses;
 
 } GC;
 
@@ -866,6 +881,54 @@ RetVal tryDerefKeyword(GC *gc, Value value, Keyword *kw, Error *error) {
   return ret;
 }
 
+RetVal tryAllocateCons(GC *gc, Cons cons, Value *value, Error *error) {
+  RetVal ret;
+
+  if (gc->conses == NULL) {
+    uint16_t len = 16;
+    tryMalloc(gc->conses, len * sizeof(Cons), "Cons array");
+    gc->allocatedConsSpace = len;
+  }
+  else if (gc->usedConsSpace == gc->allocatedConsSpace) {
+    uint64_t newAllocatedLength = gc->allocatedConsSpace * 2;
+
+    Cons* resizedConses = realloc(gc->conses, newAllocatedLength);
+    if (resizedConses == NULL) {
+      ret = memoryError(error, "realloc Cons array");
+      goto failure;
+    }
+
+    gc->allocatedConsSpace = newAllocatedLength;
+    gc->conses = resizedConses;
+  }
+
+  uint64_t index = gc->usedConsSpace;
+  gc->conses[index] = cons;
+  gc->usedConsSpace = index + 1;
+
+  value->type = VT_LIST;
+  value->value = index;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryDerefCons(GC *gc, Value value, Cons *cons, Error *error) {
+  RetVal ret;
+
+  if (gc->usedConsSpace <= value.value) {
+    throwInternalError(error, "cons reference points to cons that does not exist");
+  }
+
+  *cons = gc->conses[value.value];
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 /*
  * Instruction Definitions
  */
@@ -1260,6 +1323,8 @@ void printCodeUnit(CodeUnit *unit) {
  * Loading and evaluating code within the VM
  */
 
+RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, Error *error);
+
 RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr, Error *error);
 
 void _fnFreeContents(Fn *fn) {
@@ -1365,6 +1430,86 @@ RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *e
   return ret;
 }
 
+Value nil() {
+  Value v;
+  v.type = VT_NIL;
+  v.value = 0;
+  return v;
+}
+
+RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant listConst, Value *value, Error *error) {
+  RetVal ret;
+
+  // build up list with conses
+
+  Value seq = nil();
+
+  for (uint16_t i=0; i < listConst.length; i++) {
+
+    uint16_t listConstEnd = listConst.length - 1;
+    uint16_t valueIndex = listConst.constants[listConstEnd - i];
+
+    Cons cons;
+    cons.value = alreadyHydratedConstants[valueIndex];
+    cons.next = seq;
+
+    throws(tryAllocateCons(&vm->gc, cons, &seq, error));
+  }
+
+  *value = seq;
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, Error *error) {
+  RetVal ret;
+
+  Value v;
+
+  switch (c.type) {
+    case CT_BOOL:
+      v.type = VT_BOOL;
+      v.value = c.boolean;
+      break;
+    case CT_INT:
+      v.type = VT_UINT;
+      v.value = c.integer;
+      break;
+    case CT_NIL:
+      v.type = VT_NIL;
+      v.value = 0;
+      break;
+    case CT_FN:
+      throws(tryFnHydrate(vm, &c.function, &v, error));
+      break;
+    case CT_VAR_REF:
+      throws(tryVarRefHydrate(vm, c.varRef, &v, error));
+      break;
+    case CT_STR:
+      throws(tryStringHydrate(vm, c.string, &v, error));
+      break;
+    case CT_SYMBOL:
+      throws(trySymbolHydrate(vm, c.symbol, &v, error));
+      break;
+    case CT_KEYWORD:
+      throws(tryKeywordHydrate(vm, c.keyword, &v, error));
+      break;
+    case CT_LIST:
+      throws(tryListHydrate(vm, alreadyHydratedConstants, c.list, &v, error));
+      break;
+    case CT_NONE:
+      throwInternalError(error, "invalid constant: %u", c.type);
+  }
+
+  *ptr = v;
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr, Error *error) {
   RetVal ret;
 
@@ -1378,39 +1523,7 @@ RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, V
     Constant c = constants[i];
     Value v;
 
-    switch (c.type) {
-      case CT_BOOL:
-        v.type = VT_BOOL;
-        v.value = c.boolean;
-        break;
-      case CT_INT:
-        v.type = VT_UINT;
-        v.value = c.integer;
-        break;
-      case CT_NIL:
-        v.type = VT_NIL;
-        v.value = 0;
-        break;
-      case CT_FN:
-        throws(tryFnHydrate(vm, &c.function, &v, error));
-        break;
-      case CT_VAR_REF:
-        throws(tryVarRefHydrate(vm, c.varRef, &v, error));
-        break;
-      case CT_STR:
-        throws(tryStringHydrate(vm, c.string, &v, error));
-        break;
-      case CT_SYMBOL:
-        throws(trySymbolHydrate(vm, c.symbol, &v, error));
-        break;
-      case CT_KEYWORD:
-        throws(tryKeywordHydrate(vm, c.keyword, &v, error));
-        break;
-      case CT_LIST:
-      case CT_NONE:
-        throwInternalError(error, "invalid constant: %u", c.type);
-        break;
-    }
+    throws(tryHydrateConstant(vm, values, c, &v, error));
 
     values[i] = v;
   }
@@ -1579,6 +1692,21 @@ RetVal _tryVMPrnStr(VM_t vm, Value result, StringBuffer_t b, Error *error) {
       throws(tryDerefKeyword(&vm->gc, result, &kw, error));
       throws(tryStringBufferAppendChar(b, L':', error));
       throws(tryStringBufferAppendStr(b, kw.value, error));
+      break;
+    }
+    case VT_LIST: {
+      Cons cons;
+      throws(tryDerefCons(&vm->gc, result, &cons, error));
+      throws(tryStringBufferAppendChar(b, L'(', error));
+      throws(_tryVMPrnStr(vm, cons.value, b, error));
+
+      while (cons.next.type != VT_NIL) {
+        throws(tryDerefCons(&vm->gc, cons.next, &cons, error));
+        throws(tryStringBufferAppendChar(b, L' ', error));
+        throws(_tryVMPrnStr(vm, cons.value, b, error));
+      }
+
+      throws(tryStringBufferAppendChar(b, L')', error));
       break;
     }
     default:

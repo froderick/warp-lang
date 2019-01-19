@@ -317,48 +317,81 @@ RetVal varRefConstantGetIndex(Text name, Output output, uint16_t *index, Error *
     return ret;
 }
 
+RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *error) {
+  RetVal ret;
+
+  switch (constant->type) {
+
+    case N_NUMBER: {
+      c->type = CT_INT;
+      c->integer = constant->number.value;
+      break;
+    }
+    case N_NIL: {
+      c->type = CT_NIL;
+      break;
+    }
+    case N_BOOLEAN: {
+      c->type = CT_BOOL;
+      c->boolean = (uint8_t) constant->boolean.value;
+      break;
+    }
+    case N_STRING: {
+      c->type = CT_STR;
+      c->string.length = constant->string.length;
+      throws(tryCopyText(constant->string.value, &c->string.value, c->string.length, error));
+      break;
+    }
+    case N_SYMBOL: {
+      c->type = CT_SYMBOL;
+      c->symbol.length = constant->symbol.length;
+      throws(tryCopyText(constant->symbol.value, &c->symbol.value, c->symbol.length, error));
+      break;
+    }
+    case N_KEYWORD: {
+      c->type = CT_KEYWORD;
+      c->keyword.length = constant->keyword.length;
+      throws(tryCopyText(constant->keyword.value, &c->keyword.value, c->keyword.length, error));
+      break;
+    }
+    case N_LIST: {
+      c->type = CT_LIST;
+      c->list.length = constant->list.length;
+      tryMalloc(c->list.constants, sizeof(uint16_t) * c->list.length, "index array");
+
+      ListElement *elem = constant->list.head;
+      uint16_t elemIndex = 0;
+      while (elem != NULL) {
+
+        Constant child;
+        throws(constInitContents(elem->expr, &child, output, error));
+        throws(tryAppendConstant(output.constants, child, error));
+
+        uint16_t childIndex = output.constants->numUsed - 1;
+        c->list.constants[elemIndex] = childIndex;
+
+        elem = elem->next;
+        elemIndex = elemIndex + 1;
+      }
+
+      break;
+    }
+    default:
+      throwCompilerError(error, "unsupported: %u", constant->type);
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 RetVal tryCompileConst(Form *form, Output output, Error *error) {
   RetVal ret;
 
   Constant c;
-  switch (form->constant->type) {
 
-    case N_NUMBER: {
-      c.type = CT_INT;
-      c.integer = form->constant->number.value;
-      break;
-    }
-    case N_NIL: {
-      c.type = CT_NIL;
-      break;
-    }
-    case N_BOOLEAN: {
-      c.type = CT_BOOL;
-      c.boolean = (uint8_t) form->constant->boolean.value;
-      break;
-    }
-    case N_STRING: {
-      c.type = CT_STR;
-      c.string.length = form->constant->string.length;
-      throws(tryCopyText(form->constant->string.value, &c.string.value, c.string.length, error));
-      break;
-    }
-    case N_SYMBOL: {
-      c.type = CT_SYMBOL;
-      c.symbol.length = form->constant->symbol.length;
-      throws(tryCopyText(form->constant->symbol.value, &c.symbol.value, c.symbol.length, error));
-      break;
-    }
-    case N_KEYWORD: {
-      c.type = CT_KEYWORD;
-      c.keyword.length = form->constant->keyword.length;
-      throws(tryCopyText(form->constant->keyword.value, &c.keyword.value, c.keyword.length, error));
-      break;
-    }
-    case N_LIST:
-    default:
-      throwCompilerError(error, "unsupported: %u", form->constant->type);
-  }
+  throws(constInitContents(form->constant, &c, output, error));
   throws(tryAppendConstant(output.constants, c, error));
 
   uint16_t index = output.constants->numUsed - 1;

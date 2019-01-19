@@ -106,6 +106,11 @@ typedef struct KeywordConstant {
   wchar_t *value;
 } KeywordConstant;
 
+typedef struct ListConstant {
+  uint16_t length;
+  uint16_t *constants;
+} ListConstant;
+
 typedef struct Constant {
   ConstantType type;
   union {
@@ -116,6 +121,7 @@ typedef struct Constant {
     VarRefConstant varRef;
     SymbolConstant symbol;
     KeywordConstant keyword;
+    ListConstant list;
   };
 } Constant;
 
@@ -160,6 +166,7 @@ typedef enum ValueType {
   VT_STR,
   VT_SYMBOL,
   VT_KEYWORD,
+  VT_LIST,
 //  VT_OBJECT,
 } ValueType;
 
