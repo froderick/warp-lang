@@ -35,6 +35,7 @@ RetVal tryInputStreamUnreadChar(InputStream_t input, wchar_t ch, Error *error);
 
 // source factories
 RetVal tryFileInputStreamMake(FILE *file, InputStream_t *s, Error *error);
+RetVal tryFileInputStreamMakeFilename(char *filename, InputStream_t *s, Error *error);
 RetVal tryStringInputStreamMake(wchar_t *text, uint64_t length, InputStream_t *s, Error *error);
 
 typedef struct OutputStream *OutputStream_t;

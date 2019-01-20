@@ -5,8 +5,8 @@ RetVal tryReplCompile(TokenStream_t stream, CodeUnit *codeUnit, Error *error) {
   RetVal ret;
 
   EnvBindingStack bindingStack;
-  Expr *expr;
-  Form *form;
+  Expr *expr = NULL;
+  Form *form = NULL;
 
   envBindingStackInit(&bindingStack);
 
@@ -22,8 +22,12 @@ RetVal tryReplCompile(TokenStream_t stream, CodeUnit *codeUnit, Error *error) {
 
   finally:
     envBindingStackFreeContents(&bindingStack);
-    exprFree(expr);
-    formFree(form);
+    if (expr != NULL) {
+      exprFree(expr);
+    }
+    if (form != NULL) {
+      formFree(form);
+    }
     return ret;
 }
 

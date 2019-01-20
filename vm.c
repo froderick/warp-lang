@@ -1287,6 +1287,7 @@ RetVal tryAddEval(VM *vm, Frame *frame, Error *error) {
   throws(tryOpStackPop(frame->opStack, &b, error));
 
   if (a.type != VT_UINT || b.type != VT_UINT) {
+
     throwRuntimeError(error, "can only add two integers");
   }
 
