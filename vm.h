@@ -49,6 +49,10 @@ typedef enum InstType {
   I_DEF_VAR,     // (8), offset (16) | (name, value ->)
   I_LOAD_VAR,    // (8), offset (16) | (name -> value)
 
+  I_CONS,        // (8),             | (x, seq -> newseq)
+  I_FIRST,       // (8),             | (seq -> x)
+  I_REST,        // (8),             | (seq -> seq)
+
   // requires garbage collection
   I_NEW,         // (8), objlen (16) | (-> objectref)
   I_GET_FIELD,   // (8), index  (16) | (objectref -> value)

@@ -699,6 +699,27 @@ START_TEST(repl) {
 
     assertEval(L"'(1 2 3)",
                L"(1 2 3)");
+
+    assertEval(L"(builtin :first '(x y z))",
+               L"x");
+
+    assertEval(L"(builtin :first nil)",
+               L"nil");
+
+    assertEval(L"(builtin :rest '(x y z))",
+               L"(y z)");
+
+    assertEval(L"(builtin :rest nil)",
+               L"nil");
+
+    assertEval(L"(builtin :cons nil nil)",
+               L"(nil)");
+
+    assertEval(L"(builtin :cons 'x nil)",
+               L"(x)");
+
+    assertEval(L"(builtin :cons 'x '(y z))",
+               L"(x y z)");
   }
 END_TEST
 

@@ -498,7 +498,6 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
   FormBuiltin *builtin = &form->builtin;
 
   if (wcscmp(builtin->name, L"add") == 0) {
-    form->type = F_BUILTIN;
 
     for (int i=0; i < form->builtin.numArgs; i++) {
       throws(tryCompile(&form->builtin.args[i], output, error));
@@ -508,13 +507,47 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
   }
   else if (wcscmp(builtin->name, L"compare") == 0) {
-    form->type = F_BUILTIN;
 
     for (int i=0; i < form->builtin.numArgs; i++) {
       throws(tryCompile(&form->builtin.args[i], output, error));
     }
 
     uint8_t addCode[] = { I_CMP };
+    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+  }
+  else if (wcscmp(builtin->name, L"first") == 0) {
+
+    if (builtin->numArgs != 1) {
+      throwCompilerError(error, "first takes only one argument, got %llu", builtin->numArgs);
+    }
+
+    throws(tryCompile(&form->builtin.args[0], output, error));
+
+    uint8_t addCode[] = { I_FIRST };
+    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+  }
+  else if (wcscmp(builtin->name, L"rest") == 0) {
+
+    if (builtin->numArgs != 1) {
+      throwCompilerError(error, "rest takes only one argument, got %llu", builtin->numArgs);
+    }
+
+    throws(tryCompile(&form->builtin.args[0], output, error));
+
+    uint8_t addCode[] = { I_REST };
+    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+  }
+  else if (wcscmp(builtin->name, L"cons") == 0) {
+
+    if (builtin->numArgs != 2) {
+      throwCompilerError(error, "cons takes two arguments, got %llu", builtin->numArgs);
+    }
+
+    for (int i=0; i < form->builtin.numArgs; i++) {
+      throws(tryCompile(&form->builtin.args[i], output, error));
+    }
+
+    uint8_t addCode[] = { I_CONS };
     throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
   }
   else {
@@ -696,4 +729,40 @@ RetVal tryCompileTopLevel(Form *form, CodeUnit *codeUnit, Error *error) {
  * // of course, this suggests that the var resolution should perhaps not be done in the analyzer at all...
  * // rather, the VarRef can just be the name of the symbol, unqualified. the compiler can inspect the symbols in
  * // the namespaces and do compile-time resolution based on what it finds in the virtual machine.
+ */
+
+
+// TODO: first, rest, cons
+/*
+ * loading the first field on an object via an object reference
+ * cons - this can work by calling I_NEW
+ */
+
+// emit I_DUP so we have two copies of the arg on the stack
+// emit I_TYPE_ASSERT to verify value type is a Cons
+// emit I_LOAD_FIELD to load the first field from the Cons
+
+// emit I_DUP so we have two copies of the arg on the stack
+// emit I_TYPE_ASSERT to verify value type is a Cons
+// emit I_LOAD_FIELD to load the second field from the Cons
+
+/*
+ * newcons
+ * arg1
+ * arg0
+ */
+
+// emit I_DUP so we have two copies of the second arg on the stack
+// emit I_TYPE_ASSERT to verify the second arg's value type is a Cons
+// emit I_NEW to create a new cons object
+// emit I_DUP1
+// emit I_STORE_FIELD to set the cons 'value' field with the first argument
+// emit I_DUP1
+// emit I_STORE_FIELD to set the cons 'next'field with the second argument
+
+/*
+ * so this is an example of implementing cons generically. however, this is basically
+ * the compiler taking knowlege of the record layout of Cons.
+ *
+ * TODO: are lists builtins the VM supplies, or things that are implemented on top of it?
  */

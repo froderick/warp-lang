@@ -317,6 +317,17 @@ typedef struct TopLevelFrame {
 } TopLevelFrame;
 
 /*
+ * Common value factories
+ */
+
+Value nil() {
+  Value v;
+  v.type = VT_NIL;
+  v.value = 0;
+  return v;
+}
+
+/*
  * code printing utils based on InstTable metadata
  */
 
@@ -665,10 +676,25 @@ void GCInit(GC *gc) {
   gc->allocatedStringSpace = 0;
   gc->usedStringSpace = 0;
   gc->strings = NULL;
+
+  gc->allocatedSymbolSpace = 0;
+  gc->usedSymbolSpace = 0;
+  gc->symbols = NULL;
+
+  gc->allocatedKeywordSpace = 0;
+  gc->usedKeywordSpace = 0;
+  gc->keywords = NULL;
+
+  gc->allocatedConsSpace = 0;
+  gc->usedConsSpace = 0;
+  gc->conses = NULL;
 }
 
 void _fnFreeContents(Fn *fn);
 void _stringFreeContents(String *str);
+void _symbolFreeContents(Symbol *s);
+void _keywordFreeContents(Keyword *k);
+void _consFreeContents(Cons *c);
 
 void GCFreeContents(GC *gc) {
   if (gc != NULL) {
@@ -686,6 +712,27 @@ void GCFreeContents(GC *gc) {
     free(gc->strings);
     gc->usedStringSpace = 0;
     gc->allocatedStringSpace = 0;
+
+    for (uint64_t i=0; i<gc->usedSymbolSpace; i++) {
+      _symbolFreeContents(&gc->symbols[i]);
+    }
+    free(gc->symbols);
+    gc->usedSymbolSpace = 0;
+    gc->allocatedSymbolSpace = 0;
+
+    for (uint64_t i=0; i<gc->usedKeywordSpace; i++) {
+      _keywordFreeContents(&gc->keywords[i]);
+    }
+    free(gc->keywords);
+    gc->usedKeywordSpace = 0;
+    gc->allocatedKeywordSpace = 0;
+
+    for (uint64_t i=0; i<gc->usedConsSpace; i++) {
+      _consFreeContents(&gc->conses[i]);
+    }
+    free(gc->conses);
+    gc->usedConsSpace = 0;
+    gc->allocatedConsSpace = 0;
   }
 }
 
@@ -721,6 +768,20 @@ RetVal tryAllocateFn(GC *gc, Fn fn, Value *value, Error *error) {
 
   failure:
   return ret;
+}
+
+void _fnFreeContents(Fn *fn) {
+  if (fn != NULL) {
+    fn->numArgs = 0;
+
+    fn->numConstants = 0;
+    if (fn->constants != NULL) {
+      free(fn->constants);
+      fn->constants = NULL;
+    }
+
+    codeFreeContents(&fn->code);
+  }
 }
 
 RetVal tryDerefFn(GC *gc, Value value, Fn *fn, Error *error) {
@@ -785,6 +846,16 @@ RetVal tryDerefString(GC *gc, Value value, String *str, Error *error) {
   return ret;
 }
 
+void _stringFreeContents(String *str) {
+  if (str != NULL) {
+    if (str->value != NULL) {
+      free(str->value);
+      str->value = NULL;
+    }
+    str->length = 0;
+  }
+}
+
 RetVal tryAllocateSymbol(GC *gc, Symbol sym, Value *value, Error *error) {
   RetVal ret;
 
@@ -831,6 +902,16 @@ RetVal tryDerefSymbol(GC *gc, Value value, Symbol *sym, Error *error) {
 
   failure:
   return ret;
+}
+
+void _symbolFreeContents(Symbol *s) {
+  if (s != NULL) {
+    if (s ->value != NULL) {
+      free(s->value);
+      s->value = NULL;
+    }
+    s->length = 0;
+  }
 }
 
 RetVal tryAllocateKeyword(GC *gc, Keyword kw, Value *value, Error *error) {
@@ -881,6 +962,16 @@ RetVal tryDerefKeyword(GC *gc, Value value, Keyword *kw, Error *error) {
   return ret;
 }
 
+void _keywordFreeContents(Keyword *k) {
+  if (k != NULL) {
+    if (k ->value != NULL) {
+      free(k->value);
+      k->value = NULL;
+    }
+    k->length = 0;
+  }
+}
+
 RetVal tryAllocateCons(GC *gc, Cons cons, Value *value, Error *error) {
   RetVal ret;
 
@@ -927,6 +1018,10 @@ RetVal tryDerefCons(GC *gc, Value value, Cons *cons, Error *error) {
 
   failure:
   return ret;
+}
+
+void _consFreeContents(Cons *c) {
+  // nothing to do
 }
 
 /*
@@ -1260,6 +1355,97 @@ RetVal tryLoadVarEval(VM *vm, Frame *frame, Error *error) {
   return ret;
 }
 
+// (8),             | (x, seq -> newseq)
+RetVal tryConsEval(VM *vm, Frame *frame, Error *error) {
+  RetVal ret;
+
+  Value x, seq;
+  throws(tryOpStackPop(frame->opStack, &seq, error));
+  throws(tryOpStackPop(frame->opStack, &x, error));
+
+  Value result;
+  if (seq.type == VT_NIL || seq.type == VT_LIST) {
+    Cons cons;
+    cons.value = x;
+    cons.next = seq;
+    throws(tryAllocateCons(&vm->gc, cons, &result, error));
+  }
+  else {
+    // TODO: we need to print the actual type here, should make a metadata table for value types
+    throwRuntimeError(error, "cannot cons onto a value of type %u", seq.type);
+  }
+
+  throws(tryOpStackPush(frame->opStack, result, error));
+
+  frame->pc = frame->pc + 1;
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+// (8),             | (seq -> x)
+RetVal tryFirstEval(VM *vm, Frame *frame, Error *error) {
+  RetVal ret;
+
+  Value seq;
+  throws(tryOpStackPop(frame->opStack, &seq, error));
+
+  Value result;
+
+  if (seq.type == VT_NIL) {
+    result = nil();
+  }
+  else if (seq.type == VT_LIST) {
+    Cons cons;
+    throws(tryDerefCons(&vm->gc, seq, &cons, error));
+    result = cons.value;
+  }
+  else {
+    // TODO: we need to print the actual type here, should make a metadata table for value types
+    throwRuntimeError(error, "cannot get first from a value of type %u", seq.type);
+  }
+
+  throws(tryOpStackPush(frame->opStack, result, error));
+
+  frame->pc = frame->pc + 1;
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+// (8),             | (seq -> seq)
+RetVal tryRestEval(VM *vm, Frame *frame, Error *error) {
+  RetVal ret;
+
+  Value seq;
+  throws(tryOpStackPop(frame->opStack, &seq, error));
+
+  Value result;
+
+  if (seq.type == VT_NIL) {
+    result = nil();
+  }
+  else if (seq.type == VT_LIST) {
+    Cons cons;
+    throws(tryDerefCons(&vm->gc, seq, &cons, error));
+    result = cons.next;
+  }
+  else {
+    // TODO: we need to print the actual type here, should make a metadata table for value types
+    throwRuntimeError(error, "cannot get rest from a value of type %u", seq.type);
+  }
+
+  throws(tryOpStackPush(frame->opStack, result, error));
+
+  frame->pc = frame->pc + 1;
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 InstTable instTableCreate() {
 
   InstTable table;
@@ -1286,6 +1472,12 @@ InstTable instTableCreate() {
       [I_ADD]         = { .name = "I_ADD",         .print = printInst,          .tryEval = tryAddEval },
       [I_DEF_VAR]     = { .name = "I_DEF_VAR",     .print = printInstAndIndex,  .tryEval = tryDefVarEval },
       [I_LOAD_VAR]    = { .name = "I_LOAD_VAR",    .print = printInstAndIndex,  .tryEval = tryLoadVarEval },
+
+      [I_CONS]        = { .name = "I_CONS",        .print = printInst,          .tryEval = tryConsEval },
+      [I_FIRST]       = { .name = "I_FIRST",       .print = printInst,          .tryEval = tryFirstEval},
+      [I_REST]        = { .name = "I_REST",        .print = printInst,          .tryEval = tryRestEval },
+
+
 //      [I_NEW]         = { .name = "I_NEW",         .print = printUnknown},
 //      [I_GET_FIELD]   = { .name = "I_GET_FIELD",   .print = printUnknown},
 //      [I_SET_FIELD]   = { .name = "I_SET_FIELD",   .print = printUnknown},
@@ -1327,20 +1519,6 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
 
 RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr, Error *error);
 
-void _fnFreeContents(Fn *fn) {
-  if (fn != NULL) {
-    fn->numArgs = 0;
-
-    fn->numConstants = 0;
-    if (fn->constants != NULL) {
-      free(fn->constants);
-      fn->constants = NULL;
-    }
-
-    codeFreeContents(&fn->code);
-  }
-}
-
 RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   RetVal ret;
 
@@ -1362,16 +1540,6 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   failure:
     _fnFreeContents(&fn);
     return ret;
-}
-
-void _stringFreeContents(String *str) {
-  if (str != NULL) {
-    if (str->value != NULL) {
-      free(str->value);
-      str->value = NULL;
-    }
-    str->length = 0;
-  }
 }
 
 RetVal tryStringHydrate(VM *vm, StringConstant strConst, Value *value, Error *error) {
@@ -1428,13 +1596,6 @@ RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *e
 
   failure:
   return ret;
-}
-
-Value nil() {
-  Value v;
-  v.type = VT_NIL;
-  v.value = 0;
-  return v;
 }
 
 RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant listConst, Value *value, Error *error) {
