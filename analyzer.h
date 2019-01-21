@@ -145,6 +145,11 @@ typedef struct FormFnArg {
 } FormFnArg;
 
 typedef struct FormFn {
+
+  // this name is only used within the function to refer to itself, for things like recursion
+  wchar_t *name;
+  uint64_t nameLength;
+
   FormFnArg *args;
   uint16_t numArgs;
   Form *forms;

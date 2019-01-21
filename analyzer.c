@@ -424,6 +424,8 @@ RetVal tryFnAnalyze(EnvBindingStack *parentBindingStack, Expr* fnExpr, FormFn *f
   EnvBindingStack fnBindingStack;
 
   // things that get cleaned up on failure
+  fn->nameLength = 0;
+  fn->name = NULL;
   fn->numForms = 0;
   fn->args = NULL;
   fn->numForms = 0;
@@ -431,15 +433,38 @@ RetVal tryFnAnalyze(EnvBindingStack *parentBindingStack, Expr* fnExpr, FormFn *f
 
   // sanity checking
   uint64_t pos = getExprPosition(fnExpr);
-  if (fnExpr->list.length < 2) {
+  ListElement *itr = fnExpr->list.head->next;
+  uint16_t numForms = fnExpr->list.length - 1;
+
+  if (itr == NULL) {
     throwSyntaxError(error, pos, "the 'fn' special form requires at least one parameter");
   }
-  Expr *argsExpr = fnExpr->list.head->next->expr;
-  if (argsExpr->type != N_LIST) {
-    throwSyntaxError(error, pos, "the 'fn' special form requires the first parameter to be a list");
+
+  // the optional function name
+  bool hasName = false;
+  if (itr->expr->type == N_SYMBOL) {
+
+    fn->nameLength = itr->expr->symbol.length;
+    throws(tryCopyText(itr->expr->symbol.value, &fn->name, fn->nameLength, error));
+
+    itr = itr->next;
+    numForms = numForms - 1;
+
+    hasName = true;
   }
 
   // create the arguments
+
+  if (itr == NULL) {
+    throwSyntaxError(error, pos, "the 'fn' special form requires an argument list");
+  }
+
+  Expr *argsExpr = itr->expr;
+  if (argsExpr->type != N_LIST) {
+    throwSyntaxError(error, pos, "the 'fn' special form requires an argument list of the type N_LIST: %u",
+        argsExpr->type);
+  }
+
   fn->numArgs = argsExpr->list.length;
   tryMalloc(fn->args, sizeof(FormFnArg) * fn->numArgs, "FormFnArg array");
 
@@ -460,6 +485,9 @@ RetVal tryFnAnalyze(EnvBindingStack *parentBindingStack, Expr* fnExpr, FormFn *f
     argElem = argElem->next;
   }
 
+  itr = itr->next;
+  numForms = numForms - 1;
+
   // create new binding stack, initialized with the fn args as the first bindings
   envBindingStackInit(&fnBindingStack);
   throws(tryPushScope(&fnBindingStack, fn->numArgs, error));
@@ -468,13 +496,14 @@ RetVal tryFnAnalyze(EnvBindingStack *parentBindingStack, Expr* fnExpr, FormFn *f
   }
 
   // create the forms within this fn lexical scope
-  fn->numForms = fnExpr->list.length - 2;
+  fn->numForms = numForms;
   tryMalloc(fn->forms, sizeof(Form) * fn->numForms, "Forms array");
 
-  Expr *expr = fnExpr->list.head->next->next->expr;
   for (int i=0; i<fn->numForms; i++) {
+    Expr *expr = itr->expr;
     Form *thisForm = fn->forms + i;
     throws(tryFormAnalyzeContents(&fnBindingStack, expr, thisForm, error));
+    itr = itr->next;
   }
 
   envBindingStackFreeContents(&fnBindingStack);
@@ -500,6 +529,11 @@ RetVal tryFnAnalyze(EnvBindingStack *parentBindingStack, Expr* fnExpr, FormFn *f
 
 void fnFreeContents(FormFn *fn) {
   if (fn != NULL) {
+    fn->nameLength = 0;
+    if (fn->name != NULL) {
+      free(fn->name);
+      fn->name = NULL;
+    }
     if (fn->args != NULL) {
       for (int i=0; i<fn->numArgs; i++) {
         FormFnArg *arg = fn->args + i;
