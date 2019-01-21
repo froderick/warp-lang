@@ -291,6 +291,30 @@ typedef struct Text {
   wchar_t *value;
 } Text;
 
+RetVal nilConstantGetIndex(Output output, uint16_t *index, Error *error) {
+  RetVal ret;
+
+  // look for already-defined nil ref constant
+  for (uint16_t i=0; i<output.constants->numUsed; i++) {
+    Constant *c = &output.constants->constants[i];
+    if (c->type == CT_NIL) {
+      *index = i;
+      return R_SUCCESS;
+    }
+  }
+
+  // create nil constant
+  Constant c;
+  c.type = CT_NIL;
+  throws(tryAppendConstant(output.constants, c, error));
+  *index = output.constants->numUsed - 1;
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 RetVal varRefConstantGetIndex(Text name, Output output, uint16_t *index, Error *error) {
   RetVal ret;
 
@@ -409,7 +433,15 @@ RetVal tryCompileConst(Form *form, Output output, Error *error) {
 RetVal tryCompileDef(Form *form, Output output, Error *error) {
   RetVal ret;
 
-  throws(tryCompile(form->def.value, output, error));
+  if (form->def.value == NULL) {
+    uint16_t index;
+    throws(nilConstantGetIndex(output, &index, error));
+    uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
+    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+  }
+  else {
+    throws(tryCompile(form->def.value, output, error));
+  }
 
   Text name;
   name.length = form->def.nameLength;

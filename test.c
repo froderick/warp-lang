@@ -720,6 +720,9 @@ START_TEST(repl) {
 
     assertEval(L"(builtin :cons 'x '(y z))",
                L"(x y z)");
+
+    assertEval(L"(def x)",
+               L"nil");
   }
 END_TEST
 
