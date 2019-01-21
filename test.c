@@ -723,6 +723,9 @@ START_TEST(repl) {
 
     assertEval(L"(def x)",
                L"nil");
+
+    assertEval(L"(fn foo () 'x)",
+               L"<function>");
   }
 END_TEST
 
