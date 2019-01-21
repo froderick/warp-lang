@@ -9,4 +9,6 @@
     total
     (_sum (+ total (first remaining)) (rest remaining)))))
 
+;; TODO: add support for comments
+
 (def sum (fn (seq) (_sum 0 seq)))

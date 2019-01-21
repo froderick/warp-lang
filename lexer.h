@@ -20,7 +20,8 @@ typedef enum TokenType {
   T_QUOTE,
   T_TRUE,
   T_FALSE,
-  T_NIL
+  T_NIL,
+  T_COMMENT,
 } TokenType;
 
 typedef struct Token {

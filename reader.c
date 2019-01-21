@@ -637,53 +637,61 @@ RetVal tryExprRead(TokenStream_t stream, Expr **ptr, Error *error) {
   RetVal ret;
   Token *peek;
 
-  ret = tryStreamPeek(stream, &peek, error);
-  if (ret != R_SUCCESS) {
-    return ret; // can be R_EOF or R_ERROR
+  throws(tryStreamPeek(stream, &peek, error));
+
+  // discard comments from the token stream for now
+  // maybe someday we'll use them for autodoc purposes
+  while (peek->type == T_COMMENT) {
+
+    Token *discard;
+    throws(tryStreamNext(stream, &discard, error)); // discard the thing we peeked
+    tokenFree(discard);
+    peek = NULL;
+
+    throws(tryStreamPeek(stream, &peek, error));
   }
 
   switch (peek->type) {
 
     // atoms
     case T_STRING:
-      ret = tryStringRead(stream, ptr, error);
+      throws(tryStringRead(stream, ptr, error));
       break;
     case T_NUMBER:
-      ret = tryNumberRead(stream, ptr, error);
+      throws(tryNumberRead(stream, ptr, error));
       break;
     case T_SYMBOL:
-      ret = trySymbolRead(stream, ptr, error);
+      throws(trySymbolRead(stream, ptr, error));
       break;
     case T_KEYWORD:
-      ret = tryKeywordRead(stream, ptr, error);
+      throws(tryKeywordRead(stream, ptr, error));
       break;
     case T_TRUE:
     case T_FALSE:
-      ret = tryBooleanRead(stream, ptr, error);
+      throws(tryBooleanRead(stream, ptr, error));
       break;
     case T_NIL:
-      ret = tryNilRead(stream, ptr, error);
+      throws(tryNilRead(stream, ptr, error));
       break;
 
     // lists
     case T_OPAREN:
-      ret = tryListRead(stream, ptr, error);
+      throws(tryListRead(stream, ptr, error));
       break;
 
     // reader macros
     case T_QUOTE:
-      ret = tryQuoteRead(stream, ptr, error);
+      throws(tryQuoteRead(stream, ptr, error));
       break;
 
     default:
-      ret = syntaxError(error, peek->source.position, "Unknown token type");
-  }
-
-  if (ret != R_SUCCESS) {
-    return ret;
+      throwSyntaxError(error, peek->source.position, "Unknown token type: %u", peek->type);
   }
 
   return R_SUCCESS;
+
+  failure:
+    return ret;
 }
 
 void exprFree(Expr *expr) {

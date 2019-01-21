@@ -43,6 +43,8 @@ const char* tokenName(TokenType type) {
       return "STRING";
     case T_KEYWORD:
       return "KEYWORD";
+    case T_COMMENT:
+      return "COMMENT";
     default:
       return "<UNKNOWN>";
   }
@@ -345,6 +347,48 @@ RetVal tryReadKeyword(InputStream_t source, LexerState *s, wchar_t first, Token 
   return R_SUCCESS;
 }
 
+RetVal tryReadComment(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
+
+  if (tryStringBufferAppendChar(s->b, first, error) != R_SUCCESS) {
+    return R_ERROR;
+  }
+
+  // keep reading until char is not alphanumeric, then push back
+
+  bool matched;
+  wchar_t ch;
+  do {
+
+    int read = tryInputStreamReadChar(source, &ch, error);
+    if (read == R_ERROR) {
+      return R_ERROR;
+    }
+
+    if (read == R_EOF) {
+      matched = false;
+    }
+    else if (ch == L'\n') {
+      if (tryInputStreamUnreadChar(source, ch, error) != R_SUCCESS) {
+        return R_ERROR;
+      }
+      matched = false;
+    }
+    else {
+      if (tryStringBufferAppendChar(s->b, ch, error) != R_SUCCESS) {
+        return R_ERROR;
+      }
+      matched = true;
+    }
+
+  } while (matched);
+
+  if (tryTokenInitFromLexer(s, T_COMMENT, token, error) != R_SUCCESS) {
+    return R_ERROR;
+  }
+
+  return R_SUCCESS;
+}
+
 RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *error) {
 
   stringBufferClear(s->b);
@@ -406,6 +450,11 @@ RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *e
   }
   else if (ch == L'"') {
     ret = tryReadString(source, s, ch, token, error);
+  }
+
+  // comments
+  else if (ch == L';') {
+    ret = tryReadComment(source, s, ch, token, error);
   }
 
     // invalid token
