@@ -9,16 +9,19 @@
  * it.
  */
 RetVal tryCopyText(wchar_t* from, wchar_t **ptr, uint64_t len, Error *error) {
+  RetVal ret;
 
-  wchar_t *to = malloc((sizeof(wchar_t) * len) + 1);
-  if (to == NULL) {
-    return memoryError(error, "malloc wchar_t string");
-  }
+  wchar_t *to;
+  tryMalloc(to, ((sizeof(wchar_t) * len) + 1), "wchar_t string");
+
   wcsncpy(to, from, len);
   to[len] = L'\0';
 
   *ptr = to;
   return R_SUCCESS;
+
+  failure:
+    return ret;
 }
 
 /*
@@ -42,12 +45,11 @@ RetVal tryInputStreamMake(
     RetVal (*freeState)(void *state, Error *error),
     InputStream **ptr,
     Error *error) {
+  RetVal ret;
 
   InputStream *s;
 
-  if (NULL == (s = malloc(sizeof(InputStream)))) {
-    return memoryError(error, "malloc InputStream");
-  }
+  tryMalloc(s, sizeof(InputStream), "InputStream");
 
   s->state = state;
   s->readChar = readChar;
@@ -56,24 +58,24 @@ RetVal tryInputStreamMake(
 
   *ptr = s;
   return R_SUCCESS;
+
+  failure:
+    return ret;
 }
 
 RetVal tryInputStreamFree(InputStream *s, Error *error) {
+  RetVal ret;
 
-  int freeSuccess = R_SUCCESS;
   if (s->freeState != NULL) {
-    freeSuccess = s->freeState(s->state, error);
+    ret = s->freeState(s->state, error);
   }
   free(s);
 
-  if (freeSuccess != R_SUCCESS) {
-    return R_ERROR;
-  }
-
-  return R_SUCCESS;
+  return ret;
 }
 
 RetVal tryReadCharFromFILE(void *state, wchar_t* ch, Error *error) {
+  RetVal ret;
 
   FILE *stream = (FILE*)state;
 
@@ -83,31 +85,45 @@ RetVal tryReadCharFromFILE(void *state, wchar_t* ch, Error *error) {
       return R_EOF;
     }
     else {
-      return ioError(error, "read token from stream");
+      throwIOError(error, "read token from stream");
     }
   }
+
   return R_SUCCESS;
+
+  failure:
+    return ret;
 }
 
 RetVal tryUnreadCharToFILE(void *state, wchar_t ch, Error *error) {
+  RetVal ret;
 
   FILE *stream = (FILE*)state;
 
   wint_t result = ungetwc(ch, stream);
   if (result == WEOF) {
-    return ioError(error, "push character back onto stream");
+    throwIOError(error, "push character back onto stream");
   }
+
   return R_SUCCESS;
+
+  failure:
+    return ret;
 }
 
 RetVal tryFreeFILE(void *state, Error *error) {
+  RetVal ret;
 
   FILE *stream = (FILE*)state;
 
   if (stream != NULL && fclose(stream)) {
-    return ioError(error, "closing stream on free");
+    throwIOError(error, "closing stream on free");
   }
+
   return R_SUCCESS;
+
+  failure:
+    return ret;
 }
 
 RetVal tryFileInputStreamMake(FILE *file, InputStream **s, Error *error) {
@@ -121,22 +137,26 @@ RetVal tryFileInputStreamMake(FILE *file, InputStream **s, Error *error) {
 }
 
 RetVal tryFileInputStreamMakeFilename(char *filename, InputStream **s, Error *error) {
+  RetVal ret;
 
-  FILE *file;
+  FILE *file = NULL;
 
   file = fopen(filename, "r");
   if (file == NULL) {
-    return ioError(error, "making stream from file");
+    throwIOError(error, "making stream from file");
   }
 
-  if (tryFileInputStreamMake(file, s, error) != R_SUCCESS) {
-    if (!fclose(file)) {
-      return ioError(error, "closing file stream");
-    }
-    return R_ERROR;
-  }
+  throws(tryFileInputStreamMake(file, s, error));
 
   return R_SUCCESS;
+
+  failure:
+    if (file != NULL) {
+      if (!fclose(file)) {
+        return ioError(error, "closing file stream");
+      }
+    }
+    return ret;
 }
 
 typedef struct StringInputStream {
@@ -176,12 +196,11 @@ RetVal tryStringInputStreamFree(void *state, Error *error) {
 }
 
 RetVal tryStringInputStreamMake(wchar_t *text, uint64_t length, InputStream **s, Error *error) {
+  RetVal ret;
 
   StringInputStream *state;
 
-  if (NULL == (state = malloc(sizeof(StringInputStream)))) {
-    return memoryError(error, "malloc StringInputStream");
-  }
+  tryMalloc(state, sizeof(StringInputStream), "StringInputStream");
 
   state->text = text;
   state->length = length;
@@ -194,6 +213,9 @@ RetVal tryStringInputStreamMake(wchar_t *text, uint64_t length, InputStream **s,
       tryStringInputStreamFree,
       s,
       error);
+
+  failure:
+    return ret;
 }
 
 RetVal tryInputStreamReadChar(InputStream *source, wchar_t *ch, Error *error) {
@@ -241,27 +263,28 @@ uint64_t stringBufferUnusedBytes(StringBuffer *buf) {
 }
 
 RetVal tryStringBufferMake(StringBuffer **ptr, Error *error) {
+  RetVal ret;
 
-  StringBuffer *b;
-  wchar_t *data;
+  StringBuffer *b = NULL;
+  wchar_t *data = NULL;
 
-  if (NULL == (b = malloc(sizeof(StringBuffer)))) {
-    return memoryError(error, "malloc StringBuffer");
-  }
+  tryMalloc(b, sizeof(StringBuffer), "StringBuffer");
 
   b->usedChars = 0;
   b->allocatedChars = 256;
 
-  if (NULL == (data = malloc(stringBufferAllocatedBytes(b)))) {
-    free(b);
-    return memoryError(error, "malloc StringBuffer array");
-  }
-
+  tryMalloc(data, stringBufferAllocatedBytes(b), "StringBuffer array");
   bzero(data, stringBufferAllocatedBytes(b));
 
   b->data = data;
   *ptr = b;
   return R_SUCCESS;
+
+  failure:
+    if (b != NULL) {
+      free(b);
+    }
+    return ret;
 }
 
 void stringBufferFree(StringBuffer *b) {
@@ -272,6 +295,7 @@ void stringBufferFree(StringBuffer *b) {
 }
 
 RetVal tryStringBufferAppendChar(StringBuffer *b, wchar_t ch, Error *error) {
+  RetVal ret;
 
   if (b->usedChars + 1 == (b->allocatedChars - 1)) {
 
@@ -280,7 +304,7 @@ RetVal tryStringBufferAppendChar(StringBuffer *b, wchar_t ch, Error *error) {
 
     b->data = realloc(b->data, newSizeInBytes);
     if (b->data == NULL) {
-      return memoryError(error, "realloc StringBuffer array");
+      throwMemoryError(error, "realloc StringBuffer array");
     }
 
     b->allocatedChars = b->allocatedChars * 2;
@@ -291,9 +315,13 @@ RetVal tryStringBufferAppendChar(StringBuffer *b, wchar_t ch, Error *error) {
   b->data[b->usedChars] = L'\0';
 
   return R_SUCCESS;
+
+  failure:
+    return ret;
 }
 
 RetVal tryStringBufferAppendStr(StringBuffer *b, wchar_t *str, Error *error) {
+  RetVal ret;
 
   uint64_t len = wcslen(str);
 
@@ -304,7 +332,7 @@ RetVal tryStringBufferAppendStr(StringBuffer *b, wchar_t *str, Error *error) {
 
     b->data = realloc(b->data, newSizeInBytes);
     if (b->data == NULL) {
-      return memoryError(error, "realloc StringBuffer array");
+      throwMemoryError(error, "realloc StringBuffer array");
     }
 
     b->allocatedChars = b->allocatedChars * 2;
@@ -315,6 +343,9 @@ RetVal tryStringBufferAppendStr(StringBuffer *b, wchar_t *str, Error *error) {
   b->data[b->usedChars] = L'\0';
 
   return R_SUCCESS;
+
+  failure:
+    return ret;
 }
 
 uint64_t stringBufferLength(StringBuffer_t b) {
