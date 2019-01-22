@@ -495,9 +495,20 @@ RetVal tryCompileLet(Form *form, Output output, Error *error) {
     *output.numLocals = *output.numLocals + 1;
   }
 
-  for (uint16_t i = 0; i<form->let.numForms; i++) {
-    Form *f = &form->let.forms[i];
-    throws(tryCompile(f, output, error));
+  if (form->let.numForms > 0) {
+    for (uint16_t i = 0; i < form->let.numForms; i++) {
+      Form *f = &form->let.forms[i];
+      throws(tryCompile(f, output, error));
+    }
+  }
+  else {
+    Constant c;
+    c.type = CT_NIL;
+    throws(tryAppendConstant(output.constants, c, error));
+
+    uint16_t index = output.constants->numUsed - 1;
+    uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
+    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
   }
 
   return R_SUCCESS;
