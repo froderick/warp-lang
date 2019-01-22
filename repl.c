@@ -4,14 +4,14 @@ RetVal tryReplCompile(TokenStream_t stream, CodeUnit *codeUnit, Error *error) {
 
   RetVal ret;
 
-  EnvBindingStack bindingStack;
+  AnalyzerContext ctx;
   Expr *expr = NULL;
   Form *form = NULL;
 
-  envBindingStackInit(&bindingStack);
+  analyzerContextInitContents(&ctx);
 
   throws(tryExprRead(stream, &expr, error));
-  throws(tryFormAnalyze(&bindingStack, expr, &form, error));
+  throws(tryFormAnalyze(&ctx, expr, &form, error));
   throws(tryCompileTopLevel(form, codeUnit, error));
 
   ret = R_SUCCESS;
@@ -21,7 +21,7 @@ RetVal tryReplCompile(TokenStream_t stream, CodeUnit *codeUnit, Error *error) {
     goto finally;
 
   finally:
-    envBindingStackFreeContents(&bindingStack);
+    analyzerContextFreeContents(&ctx);
     if (expr != NULL) {
       exprFree(expr);
     }

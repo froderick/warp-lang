@@ -112,18 +112,22 @@ void _constantFreeContents(Constant *c) {
           free(c->symbol.value);
           c->symbol.value = NULL;
         }
+        break;
       case CT_KEYWORD:
         c->keyword.length = 0;
         if (c->keyword.value != NULL) {
           free(c->keyword.value);
           c->keyword.value = NULL;
         }
+        break;
       case CT_LIST:
         c->list.length = 0;
         if (c->list.constants != NULL) {
           free(c->list.constants);
           c->list.constants = NULL;
         }
+        break;
+      case CT_FN_REF:
         break;
     }
   }
@@ -1115,7 +1119,7 @@ RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
   throws(tryOpStackPop(frame->opStack, &invocable, error));
 
   if (invocable.type != VT_FN) {
-    throwRuntimeError(error, "cannot invoke this as a function!");
+    throwRuntimeError(error, "cannot invoke this value type as a function: %u", invocable.type);
   }
 
   Fn fn;
@@ -1516,30 +1520,108 @@ void printCodeUnit(CodeUnit *unit) {
  * Loading and evaluating code within the VM
  */
 
-RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, Error *error);
+typedef struct UnresolvedFnRef {
+  FnRefConstant fnRef;
+  uint16_t constantIndex;
+} UnresolvedFnRef;
 
-RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr, Error *error);
+typedef struct UnresolvedFnRefs {
+  uint64_t allocatedSpace;
+  uint64_t usedSpace;
+  UnresolvedFnRef *references;
+} UnresolvedFnRefs;
+
+void unresolvedFnRefsInitContents(UnresolvedFnRefs *r) {
+  r->allocatedSpace = 0;
+  r->usedSpace = 0;
+  r->references = NULL;
+}
+
+void unresolvedFnRefsFreeContents(UnresolvedFnRefs *r) {
+  if (r != NULL) {
+    r->allocatedSpace = 0;
+    r->usedSpace = 0;
+    if (r->references != NULL) {
+      free(r->references);
+      r->references = NULL;
+    }
+  }
+}
+
+RetVal tryUnresolvedFnRefsAppend(UnresolvedFnRefs *references, UnresolvedFnRef ref, Error *error) {
+  RetVal ret;
+
+  if (references->references == NULL) {
+    uint16_t len = 16;
+    tryMalloc(references->references, len * sizeof(UnresolvedFnRef), "UnresolvedFnRef array");
+    references->allocatedSpace = len;
+  }
+  else if (references->usedSpace == references->allocatedSpace) {
+    uint64_t newAllocatedLength = references->allocatedSpace * 2;
+
+    UnresolvedFnRef* resizedReferences = realloc(references->references, newAllocatedLength);
+    if (resizedReferences == NULL) {
+      ret = memoryError(error, "realloc UnresolvedFnRef array");
+      goto failure;
+    }
+
+    references->allocatedSpace = newAllocatedLength;
+    references->references = resizedReferences;
+  }
+
+  uint64_t index = references->usedSpace;
+  references->references[index] = ref;
+  references->usedSpace = index + 1;
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, uint16_t constantIndex, UnresolvedFnRefs *unresolved, Error *error);
+
+RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr, UnresolvedFnRefs *unresolved, Error *error);
 
 RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   RetVal ret;
 
+  // always clean up
+  UnresolvedFnRefs unresolved;
+
   // cleanup on failure
-
   Fn fn;
-  fn.numArgs = fnConst->numArgs;
 
+  unresolvedFnRefsInitContents(&unresolved);
+
+  fn.numArgs = fnConst->numArgs;
   fn.numConstants = fnConst->numConstants;
   tryMalloc(fn.constants, sizeof(Value) * fn.numConstants, "Value array");
-  throws(tryHydrateConstants(vm, fn.numConstants, fnConst->constants, &fn.constants, error));
+  throws(tryHydrateConstants(vm, fn.numConstants, fnConst->constants, &fn.constants, &unresolved, error));
 
   throws(tryCodeDeepCopy(&fnConst->code, &fn.code, error));
 
   throws(tryAllocateFn(&vm->gc, fn, value, error));
 
+  for (uint16_t i=0; i<unresolved.usedSpace; i++) {
+    UnresolvedFnRef ref = unresolved.references[i];
+
+    if (ref.fnRef.fnId == fnConst->fnId) {
+      // resolve the reference
+      fn.constants[ref.constantIndex] = *value;
+    }
+    else {
+      throwRuntimeError(error, "cannot hydrate a reference to a function other than the current one: %llu", ref.fnRef.fnId);
+    }
+  }
+
+  unresolvedFnRefsFreeContents(&unresolved);
+
   return R_SUCCESS;
 
   failure:
     _fnFreeContents(&fn);
+    unresolvedFnRefsFreeContents(&unresolved);
     return ret;
 }
 
@@ -1625,7 +1707,22 @@ RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant list
     return ret;
 }
 
-RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, Error *error) {
+// TODO: when hydrating a function, determine its fn declaration depth and keep these in a mapping table after hydration is complete
+// TODO: while hydrating, keep a growing list of the constant specs and pointers to the values that should reference functions
+// TODO: after hydrating, iterate over the unresolved references, match them up by index
+
+// during analysis
+// - grant a unique id to each function
+// - within the function, when adding a binding for the function name, use this id for the binding index
+// during compilation
+// - include function ids in functions
+// - include function ids in constants that reference functions
+// during hydration
+// - collect a list of function references, along with pointers to their intended value locations, while hydrating a function
+// - before completing hydration, resolve any matching references with the function's hydrated value
+// - explode if there are any references that the current function can't satisfy, since we don't support closures yet
+
+RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, uint16_t constantIndex, UnresolvedFnRefs *unresolved, Error *error) {
   RetVal ret;
 
   Value v;
@@ -1661,7 +1758,22 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
     case CT_LIST:
       throws(tryListHydrate(vm, alreadyHydratedConstants, c.list, &v, error));
       break;
+    case CT_FN_REF: {
+
+      // capture this for later
+      UnresolvedFnRef ref;
+      ref.fnRef = c.fnRef;
+      ref.constantIndex = constantIndex;
+      throws(tryUnresolvedFnRefsAppend(unresolved, ref, error));
+
+      // leave the value nil for now
+      v.type = VT_NIL;
+      v.value = 0;
+
+      break;
+    }
     case CT_NONE:
+    default:
       throwInternalError(error, "invalid constant: %u", c.type);
   }
 
@@ -1672,11 +1784,11 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
     return ret;
 }
 
-RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr, Error *error) {
+RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr, UnresolvedFnRefs *unresolved, Error *error) {
   RetVal ret;
 
   // clean up on failure
-  Value *values;
+  Value *values = NULL;
 
   tryMalloc(values, sizeof(Value) * numConstants, "Value array");
 
@@ -1685,7 +1797,7 @@ RetVal tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, V
     Constant c = constants[i];
     Value v;
 
-    throws(tryHydrateConstant(vm, values, c, &v, error));
+    throws(tryHydrateConstant(vm, values, c, &v, i, unresolved, error));
 
     values[i] = v;
   }
@@ -1738,11 +1850,20 @@ void topLevelFrameFreeContents(TopLevelFrame *topLevel);
 RetVal tryTopLevelFrameLoad(VM *vm, TopLevelFrame *topLevel, CodeUnit *codeUnit, Error *error) {
   RetVal ret;
 
-  // hydrate all constant values referenced by the code
+  // hydrate all the immediate constant values referenced by the code
+
+  UnresolvedFnRefs unresolved;
+  unresolvedFnRefsInitContents(&unresolved);
 
   topLevel->numConstants = codeUnit->numConstants;
   tryMalloc(topLevel->constants, sizeof(Value) * topLevel->numConstants, "Value array");
-  throws(tryHydrateConstants(vm, codeUnit->numConstants, codeUnit->constants, &topLevel->constants, error));
+  throws(tryHydrateConstants(vm, codeUnit->numConstants, codeUnit->constants, &topLevel->constants, &unresolved, error));
+
+  if (unresolved.usedSpace > 0) {
+    throwRuntimeError(error, "no unresolved function references should be present in the top level");
+  }
+
+  unresolvedFnRefsFreeContents(&unresolved);
 
   // deep-copy the code
 
@@ -1753,10 +1874,13 @@ RetVal tryTopLevelFrameLoad(VM *vm, TopLevelFrame *topLevel, CodeUnit *codeUnit,
   topLevel->numLocals = codeUnit->code.numLocals;
   tryMalloc(topLevel->locals, sizeof(Value) * topLevel->numLocals, "Value array for locals");
   throws(tryOpStackInitContents(&topLevel->opStack, codeUnit->code.maxOperandStackSize, error));
+
+  unresolvedFnRefsFreeContents(&unresolved);
+
   return R_SUCCESS;
 
   failure:
-  topLevelFrameFreeContents(topLevel);
+    topLevelFrameFreeContents(topLevel);
   return ret;
 }
 

@@ -4,11 +4,9 @@
 (def + (fn (a b) (builtin :add a b)))
 (def = (fn (a b) (builtin :compare a b)))
 
-(def _sum (fn (total remaining)
-  (if (= remaining nil)
-    total
-    (_sum (+ total (first remaining)) (rest remaining)))))
-
-;; TODO: add support for comments
-
-(def sum (fn (seq) (_sum 0 seq)))
+(def sum (fn (seq)
+           (let (_sum (fn foo (total remaining)
+                        (if (= remaining nil)
+                          total
+                          (foo (+ total (first remaining)) (rest remaining)))))
+             (_sum 0 seq))))

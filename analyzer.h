@@ -102,6 +102,7 @@ typedef enum FormEnvRefType {
   RT_NONE,
   RT_ARG,         // function argument
   RT_LOCAL,       // a local binding within a function
+  RT_FN,          // a binding refering to one of the enclosing function definitions by fn name
   RT_RT_CAPTURED  // a captured variable from the surrounding lexical context
 } FormEnvRefType;
 
@@ -149,6 +150,7 @@ typedef struct FormFn {
   // this name is only used within the function to refer to itself, for things like recursion
   wchar_t *name;
   uint64_t nameLength;
+  uint64_t id;
 
   FormFnArg *args;
   uint16_t numArgs;
@@ -202,6 +204,28 @@ typedef struct Form {
     FormDef def;
     FormEnvRef envRef;
     FormVarRef varRef;
+    /*
+     * TODO: this can be realized by creating a builtin the vm honors to load a reference to the function currently being executed into the op stack
+     * - analyzer detects function self-references by keeping a stack of in-scope fn-calls
+     * - analyzer creates function reference forms
+     * - the compiler emits I_LOAD_FN_REF instructions
+     * - the vm honors I_LOAD_FN_REF by keeping a 'current' fn handle in the Frame
+     *
+     * New Plan
+     *
+     * - analyzer adds function names as bindings in the binding stack
+     *   - these bindings get a new binding type
+     *   - bindings of this type are indexed separately from the locals, such that index represents the function
+     *     definition depth
+     *
+     * - compiler creates constants and emits I_LOAD_CONSTs based on references to these new bindings
+     *
+     * - vm hydration has two phases now:
+     *   - the current phase where things get allocated
+     *   - the new phase where the function reference constants are resolved. two phases are needed because with the
+     *     current algo hydration is depth-first recursive, and I'm not eager to change it right now.
+     *
+     */
     FormFn fn;
     FormFnCall fnCall;
     FormBuiltin builtin;
@@ -222,6 +246,8 @@ typedef struct EnvBindingScope {
   uint64_t allocNumBindings;
   EnvBinding *bindings;
   struct EnvBindingScope *next;
+  // these are denormalized counts used for computing indexes
+  uint64_t numLocalBindings;
 } EnvBindingScope;
 
 typedef struct EnvBindingStack {
@@ -229,10 +255,18 @@ typedef struct EnvBindingStack {
   EnvBindingScope *head;
 } EnvBindingStack;
 
+typedef struct AnalyzerContext {
+  EnvBindingStack bindingStack;
+  uint16_t fnCount;
+} AnalyzerContext;
+
 void envBindingStackInit(EnvBindingStack *bindingStack);
 void envBindingStackFreeContents(EnvBindingStack *bindingStack);
 
-RetVal tryFormAnalyze(EnvBindingStack *bindingStack, Expr* expr, Form **form, Error *error);
+void analyzerContextInitContents(AnalyzerContext *ctx);
+void analyzerContextFreeContents(AnalyzerContext *ctx);
+
+RetVal tryFormAnalyze(AnalyzerContext *ctx, Expr* expr, Form **form, Error *error);
 void formFreeContents(Form* expr);
 void formFree(Form* expr);
 

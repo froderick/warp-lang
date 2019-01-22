@@ -260,6 +260,7 @@ RetVal tryCompileFn(Form *form, Output output, Error *error) {
   FnConstant fnConst;
   constantFnInitContents(&fnConst);
 
+  fnConst.fnId = form->fn.id;
   fnConst.numArgs = form->fn.numArgs;
   fnConst.numConstants = fnConstants.numUsed;
   fnConst.constants = fnConstants.constants;
@@ -517,6 +518,26 @@ RetVal tryCompileLet(Form *form, Output output, Error *error) {
     return ret;
 }
 
+RetVal tryCompileEnvFnRef(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  Constant c;
+  c.type = CT_FN_REF;
+  c.fnRef.fnId = form->envRef.index;
+
+  throws(tryAppendConstant(output.constants, c, error));
+
+  uint16_t index = output.constants->numUsed - 1;
+  uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
+
+  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 RetVal tryCompileEnvRef(Form *form, Output output, Error *error) {
   RetVal ret;
 
@@ -524,6 +545,9 @@ RetVal tryCompileEnvRef(Form *form, Output output, Error *error) {
     uint16_t index = form->envRef.index;
     uint8_t code[] = { I_LOAD_LOCAL, index >> 8, index & 0xFF };
     throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+  }
+  else if (form->envRef.type == RT_FN) {
+    throws(tryCompileEnvFnRef(form, output, error));
   }
   else {
     throwCompilerError(error, "unsupported");

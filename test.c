@@ -262,37 +262,37 @@ END_TEST
 START_TEST(analyzer) {
 
     Error e;
-    EnvBindingStack bindingStack;
+    AnalyzerContext ctx;
     Expr *expr;
     Form *form;
 
     errorInitContents(&e);
-    envBindingStackInit(&bindingStack);
+    analyzerContextInitContents(&ctx);
 
     // constant
     ck_assert_int_eq(tryParse(L"\"str\"", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&ctx, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_CONST);
     formFree(form);
 
     // if
     ck_assert_int_eq(tryParse(L"(if true 10 20)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&ctx, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_IF);
     formFree(form);
 
     // let
     ck_assert_int_eq(tryParse(L"(let (a nil) true)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&ctx, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_LET);
     formFree(form);
 
     // env-ref
     ck_assert_int_eq(tryParse(L"(let (a nil) a)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&ctx, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_LET);
     ck_assert_int_eq(form->let.forms[0].type, F_ENV_REF);
@@ -302,21 +302,21 @@ START_TEST(analyzer) {
 
     // def
     ck_assert_int_eq(tryParse(L"(def money 100)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&ctx, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_DEF);
     formFree(form);
 
     // var-ref
     ck_assert_int_eq(tryParse(L"money", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&ctx, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_VAR_REF);
     formFree(form);
 
     // fn with args
     ck_assert_int_eq(tryParse(L"(fn (a b c) a)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&ctx, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_FN);
     ck_assert_int_eq(form->fn.forms[0].type, F_ENV_REF);
@@ -326,13 +326,13 @@ START_TEST(analyzer) {
 
     // fn-call
     ck_assert_int_eq(tryParse(L"(def barf (fn () 100))", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&ctx, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_DEF);
     formFree(form);
 
     ck_assert_int_eq(tryParse(L"(barf)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(&bindingStack, expr, &form, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(&ctx, expr, &form, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(form->type, F_FN_CALL);
     ck_assert_int_eq(form->fnCall.fnCallable->type , F_VAR_REF);
@@ -348,17 +348,17 @@ RetVal tryTestCompile(wchar_t *input, CodeUnit *codeUnit, Error *error) {
 
   RetVal ret;
 
-  EnvBindingStack bindingStack;
+  AnalyzerContext ctx;
   Expr *expr;
   Form *form;
 
-  envBindingStackInit(&bindingStack);
+  analyzerContextInitContents(&ctx);
 
   throws(tryParse(input, &expr, error));
-  throws(tryFormAnalyze(&bindingStack, expr, &form, error));
+  throws(tryFormAnalyze(&ctx, expr, &form, error));
   throws(tryCompileTopLevel(form, codeUnit, error));
 
-  envBindingStackFreeContents(&bindingStack);
+  analyzerContextFreeContents(&ctx);
   exprFree(expr);
   formFree(form);
 
@@ -726,6 +726,13 @@ START_TEST(repl) {
 
     assertEval(L"(fn foo () 'x)",
                L"<function>");
+
+    assertEval(L"(let (x (fn more (n)"
+               "           (if (builtin :compare n 5)"
+               "             n"
+               "             (more (builtin :add n 1)))))"
+               "   (x 0))",
+               L"5");
   }
 END_TEST
 

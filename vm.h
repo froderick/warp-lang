@@ -79,6 +79,7 @@ typedef enum ConstantType {
   CT_SYMBOL,
   CT_KEYWORD,
   CT_LIST,
+  CT_FN_REF,
 } ConstantType;
 
 typedef struct Constant Constant;
@@ -88,7 +89,8 @@ typedef struct StringConstant {
   wchar_t *value;
 } StringConstant;
 
-typedef struct FnConstant { // this is the runtime definition of a function
+typedef struct FnConstant {
+  uint64_t fnId;
   uint64_t numArgs;
   uint16_t numConstants;
   Constant *constants;
@@ -115,6 +117,10 @@ typedef struct ListConstant {
   uint16_t *constants;
 } ListConstant;
 
+typedef struct FnRefConstant {
+  uint64_t fnId;
+} FnRefConstant;
+
 typedef struct Constant {
   ConstantType type;
   union {
@@ -126,6 +132,7 @@ typedef struct Constant {
     SymbolConstant symbol;
     KeywordConstant keyword;
     ListConstant list;
+    FnRefConstant fnRef;
   };
 } Constant;
 
