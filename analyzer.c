@@ -548,6 +548,34 @@ RetVal tryFnParse(Expr* fnExpr, FormFn *fn, Expr **formElements, Error *error) {
     return ret;
 }
 
+void _markTailCalls(Form *last) {
+  switch (last->type) {
+    case F_IF:
+      _markTailCalls(last->iff.ifBranch);
+      _markTailCalls(last->iff.elseBranch);
+      break;
+    case F_LET: {
+      if (last->let.numForms > 0) {
+        Form *letLast = &last->let.forms[last->let.numForms - 1];
+        _markTailCalls(letLast);
+      }
+      break;
+    }
+    case F_FN_CALL:
+      last->fnCall.tailPosition = true;
+      break;
+    default:
+      break;
+  }
+}
+
+void markTailCalls(FormFn *fn) {
+  if (fn->numForms > 0) {
+    Form *last = &fn->forms[fn->numForms - 1];
+    _markTailCalls(last);
+  }
+}
+
 RetVal tryFnAnalyze(AnalyzerContext *parentContext, Expr* fnExpr, FormFn *fn, Error *error) {
   RetVal ret;
 
@@ -584,6 +612,8 @@ RetVal tryFnAnalyze(AnalyzerContext *parentContext, Expr* fnExpr, FormFn *fn, Er
   }
 
   parentContext->fnCount = fnContext.fnCount;
+
+  markTailCalls(fn);
 
   ret = R_SUCCESS;
   goto done;
@@ -780,6 +810,8 @@ RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Expr *expr, FormFnCall *fnCall, Er
 
   fnCall->fnCallable = NULL;
   fnCall->args = NULL;
+  fnCall->numArgs = 0;
+  fnCall->tailPosition = false;
 
   throws(tryFormAnalyze(ctx, expr->list.head->expr, &fnCall->fnCallable, error));
   throws(assertFnCallable(fnCall->fnCallable, error));

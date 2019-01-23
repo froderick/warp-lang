@@ -35,23 +35,25 @@ typedef struct Code {
 
 typedef enum InstType {
 
-  I_LOAD_CONST,  // (8), index  (16) | (-> value)
+  I_LOAD_CONST,      // (8), index  (16) | (-> value)
 
-  I_LOAD_LOCAL,  // (8), index  (16) | (-> value)
-  I_STORE_LOCAL, // (8), index  (16) | (objectref ->)
-  I_INVOKE_DYN,  // (8)              | (numargs, arg1, arg0..., objectref -> ...)
-  I_RET,         // (8)              | (objectref ->)
-  I_CMP,         // (8)              | (a, b -> 0 | 1)
-  I_JMP,         // (8), offset (16) | (->)
-  I_JMP_IF,      // (8), offset (16) | (value ->)
-  I_JMP_IF_NOT,  // (8), offset (16) | (value ->)
-  I_ADD,         // (8)              | (a, b -> c)
-  I_DEF_VAR,     // (8), offset (16) | (name, value ->)
-  I_LOAD_VAR,    // (8), offset (16) | (name -> value)
+  I_LOAD_LOCAL,      // (8), index  (16) | (-> value)
+  I_STORE_LOCAL,     // (8), index  (16) | (objectref ->)
+  I_INVOKE_DYN,      // (8)              | (objectref, args... -> ...)
+  I_INVOKE_DYN_TAIL, // (8)              | (objectref, args... -> ...)
+  I_RET,             // (8)              | (objectref ->)
+  I_CMP,             // (8)              | (a, b -> 0 | 1)
+  I_JMP,             // (8), offset (16) | (->)
+  I_JMP_IF,          // (8), offset (16) | (value ->)
+  I_JMP_IF_NOT,      // (8), offset (16) | (value ->)
+  I_ADD,             // (8)              | (a, b -> c)
+  I_SUB,             // (8)              | (a, b -> c)
+  I_DEF_VAR,         // (8), offset (16) | (name, value ->)
+  I_LOAD_VAR,        // (8), offset (16) | (name -> value)
 
-  I_CONS,        // (8),             | (x, seq -> newseq)
-  I_FIRST,       // (8),             | (seq -> x)
-  I_REST,        // (8),             | (seq -> seq)
+  I_CONS,            // (8),             | (x, seq -> newseq)
+  I_FIRST,           // (8),             | (seq -> x)
+  I_REST,            // (8),             | (seq -> seq)
 
   // requires garbage collection
   I_NEW,         // (8), objlen (16) | (-> objectref)

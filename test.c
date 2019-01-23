@@ -733,6 +733,8 @@ START_TEST(repl) {
                "             (more (builtin :add n 1)))))"
                "   (x 0))",
                L"5");
+
+    assertEval(L"(builtin :subtract 10 2)", L"8");
   }
 END_TEST
 

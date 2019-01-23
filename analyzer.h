@@ -168,6 +168,7 @@ typedef struct FormFnCall {
   Form *fnCallable;
   Form *args;
   uint64_t numArgs;
+  bool tailPosition;
 } FormFnCall;
 
 /*

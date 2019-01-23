@@ -304,6 +304,7 @@ typedef struct Frame {
   uint16_t numConstants; // TODO: make a verifier so we can check these bounds at load time rather than compile time
   Value *constants;
   Code code;
+  uint16_t numLocals;
   Value *locals;
   OpStack *opStack;
   Value result;
@@ -751,7 +752,7 @@ RetVal tryAllocateFn(GC *gc, Fn fn, Value *value, Error *error) {
   else if (gc->usedFnSpace == gc->allocatedFnSpace) {
     uint64_t newAllocatedLength = gc->allocatedFnSpace * 2;
 
-    Fn* resizedFns = realloc(gc->fns, newAllocatedLength);
+    Fn* resizedFns = realloc(gc->fns, newAllocatedLength * sizeof(Fn));
     if (resizedFns == NULL) {
       ret = memoryError(error, "realloc Fn array");
       goto failure;
@@ -813,7 +814,7 @@ RetVal tryAllocateString(GC *gc, String str, Value *value, Error *error) {
   else if (gc->usedStringSpace == gc->allocatedStringSpace) {
     uint64_t newAllocatedLength = gc->allocatedStringSpace * 2;
 
-    String* resizedStrings = realloc(gc->strings, newAllocatedLength);
+    String* resizedStrings = realloc(gc->strings, newAllocatedLength * sizeof(String));
     if (resizedStrings == NULL) {
       ret = memoryError(error, "realloc String array");
       goto failure;
@@ -871,7 +872,7 @@ RetVal tryAllocateSymbol(GC *gc, Symbol sym, Value *value, Error *error) {
   else if (gc->usedSymbolSpace == gc->allocatedSymbolSpace) {
     uint64_t newAllocatedLength = gc->allocatedSymbolSpace * 2;
 
-    Symbol* resizedSymbols = realloc(gc->symbols, newAllocatedLength);
+    Symbol* resizedSymbols = realloc(gc->symbols, newAllocatedLength * sizeof(Symbol));
     if (resizedSymbols == NULL) {
       ret = memoryError(error, "realloc Symbol array");
       goto failure;
@@ -929,7 +930,7 @@ RetVal tryAllocateKeyword(GC *gc, Keyword kw, Value *value, Error *error) {
   else if (gc->usedKeywordSpace == gc->allocatedKeywordSpace) {
     uint64_t newAllocatedLength = gc->allocatedKeywordSpace * 2;
 
-    Keyword* resizedKeywords = realloc(gc->keywords, newAllocatedLength);
+    Keyword* resizedKeywords = realloc(gc->keywords, newAllocatedLength * sizeof(Keyword));
     if (resizedKeywords == NULL) {
       ret = memoryError(error, "realloc Keyword array");
       goto failure;
@@ -987,7 +988,7 @@ RetVal tryAllocateCons(GC *gc, Cons cons, Value *value, Error *error) {
   else if (gc->usedConsSpace == gc->allocatedConsSpace) {
     uint64_t newAllocatedLength = gc->allocatedConsSpace * 2;
 
-    Cons* resizedConses = realloc(gc->conses, newAllocatedLength);
+    Cons* resizedConses = realloc(gc->conses, newAllocatedLength * sizeof(Cons));
     if (resizedConses == NULL) {
       ret = memoryError(error, "realloc Cons array");
       goto failure;
@@ -1102,6 +1103,7 @@ void frameInitContents(Frame *frame) {
   frame->numConstants = 0;
   frame->constants = NULL;
   codeInitContents(&frame->code);
+  frame->numLocals = 0;
   frame->locals = NULL;
   frame->opStack = NULL;
   frame->resultAvailable = 0;
@@ -1146,6 +1148,7 @@ RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
   child.numConstants = fn.numConstants;
   child.constants = fn.constants;
   child.code = fn.code;
+  child.numLocals = fn.code.numLocals;
   child.locals = locals;
   child.opStack = &opStack;
 
@@ -1162,6 +1165,86 @@ RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
   free(child.locals);
   opStackFreeContents(&opStack);
   return ret;
+}
+
+//typedef struct Frame {
+//  Frame *parent;
+//  uint16_t numConstants;
+//  Value *constants;
+//  Code code;
+//  Value *locals;
+//  OpStack *opStack;
+//  Value result;
+//  bool resultAvailable;
+//  uint16_t pc;
+//} Frame;
+
+RetVal tryPopInvocable(VM *vm, Frame *frame, Fn *fn, Error *error) {
+  RetVal ret;
+
+  Value invocable;
+  throws(tryOpStackPop(frame->opStack, &invocable, error));
+
+  if (invocable.type != VT_FN) {
+    throwRuntimeError(error, "cannot invoke this value type as a function: %u", invocable.type);
+  }
+
+  throws(tryDerefFn(&vm->gc, invocable, fn, error));
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+/*
+ * tail calls basically don't execute any code, they just re-use an existing stack frame
+ * and set up a different function and arguments, reallocate locals as needed, and reset the pc to 0.
+ * then the execution starts all over again in the same frame
+ *
+ * TODO: How do I write tests for this?
+ * `(fib 1000000)` smashes my default stack size (8mb on macos) without tail calls, so it validates that the
+ * tail calls are being used, but it is slow (2s) and I'm impatient.
+ */
+
+// (8)              | (objectref, args... -> ...)
+RetVal tryInvokeDynTailEval(VM *vm, Frame *frame, Error *error) {
+  RetVal ret;
+
+  Fn fn;
+  throws(tryPopInvocable(vm, frame, &fn, error));
+
+  frame->numConstants = fn.numConstants;
+  frame->constants = fn.constants;
+  frame->code = fn.code;
+
+  // resize locals if needed
+  if (fn.code.numLocals > frame->numLocals) {
+    Value *resizedLocals = realloc(frame->locals, fn.code.numLocals * sizeof(Value));
+    if (resizedLocals == NULL) {
+      ret = memoryError(error, "realloc Value array");
+      goto failure;
+    }
+    frame->numLocals = fn.code.numLocals;
+    frame->locals = resizedLocals;
+  }
+
+  // pop args and set as locals, reversing the order
+  for (uint16_t i=0; i<fn.numArgs; i++) {
+    Value arg;
+    throws(tryOpStackPop(frame->opStack, &arg, error));
+    uint16_t idx = fn.numArgs - (uint16_t)1 - i;
+    frame->locals[idx] = arg;
+  }
+
+  frame->result = nil();
+  frame->resultAvailable = false;
+  frame->pc = 0;
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
 }
 
 // (8)              | (objectref ->)
@@ -1287,8 +1370,8 @@ RetVal tryAddEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
   Value a, b;
-  throws(tryOpStackPop(frame->opStack, &a, error));
   throws(tryOpStackPop(frame->opStack, &b, error));
+  throws(tryOpStackPop(frame->opStack, &a, error));
 
   if (a.type != VT_UINT || b.type != VT_UINT) {
 
@@ -1298,6 +1381,32 @@ RetVal tryAddEval(VM *vm, Frame *frame, Error *error) {
   Value c;
   c.type = VT_UINT;
   c.value = a.value + b.value;
+
+  throws(tryOpStackPush(frame->opStack, c, error));
+
+  frame->pc = frame->pc + 1;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+// (8)              | (a, b -> c)
+RetVal trySubEval(VM *vm, Frame *frame, Error *error) {
+  RetVal ret;
+
+  Value a, b;
+  throws(tryOpStackPop(frame->opStack, &b, error));
+  throws(tryOpStackPop(frame->opStack, &a, error));
+
+  if (a.type != VT_UINT || b.type != VT_UINT) {
+
+    throwRuntimeError(error, "can only add two integers");
+  }
+
+  Value c;
+  c.type = VT_UINT;
+  c.value = a.value - b.value;
 
   throws(tryOpStackPush(frame->opStack, c, error));
 
@@ -1464,23 +1573,25 @@ InstTable instTableCreate() {
   }
 
   // init with known instructions
-  Inst instructions[] = {
-      [I_LOAD_CONST]  = { .name = "I_LOAD_CONST",  .print = printInstAndIndex,  .tryEval = tryLoadConstEval },
-      [I_LOAD_LOCAL]  = { .name = "I_LOAD_LOCAL",  .print = printInstAndIndex,  .tryEval = tryLoadLocalEval },
-      [I_STORE_LOCAL] = { .name = "I_STORE_LOCAL", .print = printInstAndIndex,  .tryEval = tryStoreLocalEval },
-      [I_INVOKE_DYN]  = { .name = "I_INVOKE_DYN",  .print = printInst,          .tryEval = tryInvokeDynEval },
-      [I_RET]         = { .name = "I_RET",         .print = printInst,          .tryEval = tryRetEval },
-      [I_CMP]         = { .name = "I_CMP",         .print = printInst,          .tryEval = tryCmpEval },
-      [I_JMP]         = { .name = "I_JMP",         .print = printInstAndIndex,  .tryEval = tryJmpEval },
-      [I_JMP_IF]      = { .name = "I_JMP_IF",      .print = printInstAndIndex,  .tryEval = tryJmpIfEval },
-      [I_JMP_IF_NOT]  = { .name = "I_JMP_IF_NOT",  .print = printInstAndIndex,  .tryEval = tryJmpIfNotEval },
-      [I_ADD]         = { .name = "I_ADD",         .print = printInst,          .tryEval = tryAddEval },
-      [I_DEF_VAR]     = { .name = "I_DEF_VAR",     .print = printInstAndIndex,  .tryEval = tryDefVarEval },
-      [I_LOAD_VAR]    = { .name = "I_LOAD_VAR",    .print = printInstAndIndex,  .tryEval = tryLoadVarEval },
+  Inst instructions[]      = {
+      [I_LOAD_CONST]       = { .name = "I_LOAD_CONST",      .print = printInstAndIndex,  .tryEval = tryLoadConstEval },
+      [I_LOAD_LOCAL]       = { .name = "I_LOAD_LOCAL",      .print = printInstAndIndex,  .tryEval = tryLoadLocalEval },
+      [I_STORE_LOCAL]      = { .name = "I_STORE_LOCAL",     .print = printInstAndIndex,  .tryEval = tryStoreLocalEval },
+      [I_INVOKE_DYN]       = { .name = "I_INVOKE_DYN",      .print = printInst,          .tryEval = tryInvokeDynEval },
+      [I_INVOKE_DYN_TAIL]  = { .name = "I_INVOKE_DYN_TAIL", .print = printInst,          .tryEval = tryInvokeDynTailEval },
+      [I_RET]              = { .name = "I_RET",             .print = printInst,          .tryEval = tryRetEval },
+      [I_CMP]              = { .name = "I_CMP",             .print = printInst,          .tryEval = tryCmpEval },
+      [I_JMP]              = { .name = "I_JMP",             .print = printInstAndIndex,  .tryEval = tryJmpEval },
+      [I_JMP_IF]           = { .name = "I_JMP_IF",          .print = printInstAndIndex,  .tryEval = tryJmpIfEval },
+      [I_JMP_IF_NOT]       = { .name = "I_JMP_IF_NOT",      .print = printInstAndIndex,  .tryEval = tryJmpIfNotEval },
+      [I_ADD]              = { .name = "I_ADD",             .print = printInst,          .tryEval = tryAddEval },
+      [I_SUB]              = { .name = "I_SUB",             .print = printInst,          .tryEval = trySubEval },
+      [I_DEF_VAR]          = { .name = "I_DEF_VAR",         .print = printInstAndIndex,  .tryEval = tryDefVarEval },
+      [I_LOAD_VAR]         = { .name = "I_LOAD_VAR",        .print = printInstAndIndex,  .tryEval = tryLoadVarEval },
 
-      [I_CONS]        = { .name = "I_CONS",        .print = printInst,          .tryEval = tryConsEval },
-      [I_FIRST]       = { .name = "I_FIRST",       .print = printInst,          .tryEval = tryFirstEval},
-      [I_REST]        = { .name = "I_REST",        .print = printInst,          .tryEval = tryRestEval },
+      [I_CONS]             = { .name = "I_CONS",            .print = printInst,          .tryEval = tryConsEval },
+      [I_FIRST]            = { .name = "I_FIRST",           .print = printInst,          .tryEval = tryFirstEval},
+      [I_REST]             = { .name = "I_REST",            .print = printInst,          .tryEval = tryRestEval },
 
 
 //      [I_NEW]         = { .name = "I_NEW",         .print = printUnknown},
@@ -1559,7 +1670,7 @@ RetVal tryUnresolvedFnRefsAppend(UnresolvedFnRefs *references, UnresolvedFnRef r
   else if (references->usedSpace == references->allocatedSpace) {
     uint64_t newAllocatedLength = references->allocatedSpace * 2;
 
-    UnresolvedFnRef* resizedReferences = realloc(references->references, newAllocatedLength);
+    UnresolvedFnRef* resizedReferences = realloc(references->references, newAllocatedLength * sizeof(UnresolvedFnRef));
     if (resizedReferences == NULL) {
       ret = memoryError(error, "realloc UnresolvedFnRef array");
       goto failure;
@@ -1920,6 +2031,7 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
   frame.numConstants = topLevel.numConstants;
   frame.constants = topLevel.constants;
   frame.code = topLevel.code;
+  frame.numLocals = topLevel.numLocals;
   frame.locals = topLevel.locals;
   frame.opStack = &topLevel.opStack;
 

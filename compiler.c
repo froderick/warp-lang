@@ -573,6 +573,15 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     uint8_t addCode[] = { I_ADD};
     throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
   }
+  else if (wcscmp(builtin->name, L"subtract") == 0) {
+
+    for (int i=0; i < form->builtin.numArgs; i++) {
+      throws(tryCompile(&form->builtin.args[i], output, error));
+    }
+
+    uint8_t addCode[] = { I_SUB };
+    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+  }
   else if (wcscmp(builtin->name, L"compare") == 0) {
 
     for (int i=0; i < form->builtin.numArgs; i++) {
@@ -639,7 +648,15 @@ RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
   throws(tryCompile(form->fnCall.fnCallable, output, error));
 
   // invoke
-  uint8_t code[] = { I_INVOKE_DYN };
+
+  uint8_t inst;
+  if (form->fnCall.tailPosition) {
+    inst = I_INVOKE_DYN_TAIL;
+  }
+  else {
+    inst = I_INVOKE_DYN;
+  }
+  uint8_t code[] = { inst };
   throws(tryCodeAppend(output.codes, sizeof(code), code, error));
 
   return R_SUCCESS;
