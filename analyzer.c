@@ -466,14 +466,8 @@ void defFreeContents(FormDef *def) {
 
 void fnFreeContents(FormFn *fn);
 
-RetVal tryFnAnalyze(AnalyzerContext *parentContext, Expr* fnExpr, FormFn *fn, Error *error) {
-
-  RetVal ret;
-
-  // things that get cleaned up always
-  AnalyzerContext fnContext;
-
-  // things that get cleaned up on failure
+void formFnInitContents(FormFn *fn) {
+  fn->hasName = false;
   fn->nameLength = 0;
   fn->name = NULL;
   fn->id = 0;
@@ -481,31 +475,29 @@ RetVal tryFnAnalyze(AnalyzerContext *parentContext, Expr* fnExpr, FormFn *fn, Er
   fn->args = NULL;
   fn->numForms = 0;
   fn->forms = NULL;
+}
 
-  // sanity checking
+RetVal tryFnParse(Expr* fnExpr, FormFn *fn, Expr **formElements, Error *error) {
+  RetVal ret;
+
   uint64_t pos = getExprPosition(fnExpr);
   ListElement *itr = fnExpr->list.head->next;
-  uint16_t numForms = fnExpr->list.length - 1;
 
   if (itr == NULL) {
     throwSyntaxError(error, pos, "the 'fn' special form requires at least one parameter");
   }
 
   // the optional function name
-  bool hasName = false;
   if (itr->expr->type == N_SYMBOL) {
 
     fn->nameLength = itr->expr->symbol.length;
     throws(tryCopyText(itr->expr->symbol.value, &fn->name, fn->nameLength, error));
+    fn->hasName = true;
 
     itr = itr->next;
-    numForms = numForms - 1;
-
-    hasName = true;
   }
 
   // create the arguments
-
   if (itr == NULL) {
     throwSyntaxError(error, pos, "the 'fn' special form requires an argument list");
   }
@@ -513,7 +505,7 @@ RetVal tryFnAnalyze(AnalyzerContext *parentContext, Expr* fnExpr, FormFn *fn, Er
   Expr *argsExpr = itr->expr;
   if (argsExpr->type != N_LIST) {
     throwSyntaxError(error, pos, "the 'fn' special form requires an argument list of the type N_LIST: %u",
-        argsExpr->type);
+                     argsExpr->type);
   }
 
   fn->numArgs = argsExpr->list.length;
@@ -535,16 +527,45 @@ RetVal tryFnAnalyze(AnalyzerContext *parentContext, Expr* fnExpr, FormFn *fn, Er
 
     argElem = argElem->next;
   }
-
   itr = itr->next;
-  numForms = numForms - 1;
+
+  uint16_t nonFormElems = 2; // 'fn' and 'args list'
+  if (fn->hasName) {
+    nonFormElems = nonFormElems + 1; // optional function name
+  }
+
+  fn->numForms = fnExpr->list.length - nonFormElems;
+  tryMalloc(*formElements, sizeof(Expr) * fn->numForms, "Expr array");
+
+  for (int i=0; i<fn->numForms; i++) {
+    *formElements[i] = *itr->expr;
+    itr = itr->next;
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryFnAnalyze(AnalyzerContext *parentContext, Expr* fnExpr, FormFn *fn, Error *error) {
+  RetVal ret;
+
+  // things that get cleaned up always
+  AnalyzerContext fnContext;
+  Expr *formElements = NULL;
+
+  formFnInitContents(fn);
+  throws(tryFnParse(fnExpr, fn, &formElements, error));
 
   // create new binding stack, initialized with the fn args as the first bindings
   analyzerContextInitContents(&fnContext);
   fnContext.fnCount = parentContext->fnCount;
-  throws(tryPushScope(&fnContext.bindingStack, hasName ? fn->numArgs + 1 : fn->numArgs, error));
 
-  if (hasName) {
+  uint16_t numBindings = fn->hasName ? fn->numArgs + 1 : fn->numArgs;
+  throws(tryPushScope(&fnContext.bindingStack, numBindings, error));
+
+  if (fn->hasName) {
     fn->id = fnContext.fnCount;
     fnContext.fnCount = fnContext.fnCount + 1;
     throws(addFnBinding(&fnContext.bindingStack, fn, error));
@@ -555,24 +576,26 @@ RetVal tryFnAnalyze(AnalyzerContext *parentContext, Expr* fnExpr, FormFn *fn, Er
   }
 
   // create the forms within this fn lexical scope
-  fn->numForms = numForms;
   tryMalloc(fn->forms, sizeof(Form) * fn->numForms, "Forms array");
-
   for (int i=0; i<fn->numForms; i++) {
-    Expr *expr = itr->expr;
+    Expr expr = formElements[i];
     Form *thisForm = fn->forms + i;
-    throws(tryFormAnalyzeContents(&fnContext, expr, thisForm, error));
-    itr = itr->next;
+    throws(tryFormAnalyzeContents(&fnContext, &expr, thisForm, error));
   }
 
   parentContext->fnCount = fnContext.fnCount;
 
-  analyzerContextFreeContents(&fnContext);
-
-  return R_SUCCESS;
+  ret = R_SUCCESS;
+  goto done;
 
   failure:
     fnFreeContents(fn);
+    goto done;
+
+  done:
+    if (formElements != NULL) {
+      free(formElements);
+    }
     analyzerContextFreeContents(&fnContext);
     return ret;
 }
