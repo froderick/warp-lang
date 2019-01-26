@@ -728,6 +728,117 @@ void builtinFreeContents(FormBuiltin *builtin) {
 
 RetVal tryEnvRefAnalyze(AnalyzerContext *ctx, Expr *expr, EnvBinding *binding, FormEnvRef *envRef, Error *error) {
 
+  /*
+   * TODO: is this env binding within my local scope, or am I capturing this from a parent scope?
+   *
+   * you might know this by examining the binding scopes, working backwards until you get to one defined as part of a function definition
+   * if you can't resolve this env ref without crossing that boundary, you know you're capturing
+   *
+   * if you're capturing, then you need to somehow indicate that so the compiler knows to include this captured value
+   * as a part of the current closure
+   * - you need to identify which value is being captured (by unique binding id)
+   *
+   * TODO: within a single Form tree, all bindings must have a unique id
+   *
+   * the compiler will need to identify the need to create closures based on aggregating these captured values for each fn definition
+   * the compiler will need to then compute local indexes based on these plus the fn args and all the normally bound locals wthin a function
+   *
+   *
+   *
+   * bindings can be defined by
+   * - a fn
+   * - a let
+   *
+   * referenced bindings originating from outside a fn definition must be captured as a part of a closure
+   *
+   * // TODO: bindings must be defined in the Form tree homogenously, so they can be collected by the compiler
+   *    and compared to the references that refer to them. This way the compiler can emit code to create closures
+   *    as needed.
+   *
+   * // TODO: frame locals should not be computed based on references, but based on bindings
+   */
+
+  /*
+   * More from notes:
+   *
+   *
+   * Each fn and the root expr get their own binding tables. These tables can be appended to as captured bindings and
+   * let bindings are discovered. References within a function use the binding index to identify them.
+   *
+   * Also the idea of a stack frame node specifically to represent a top-level expression separate from the idea of a
+   * function definition. The function would be additive.
+   */
+
+  /*
+   * (let (a 100)
+   *   (fn X ()
+   *     (let (b 200)
+   *       (fn Y ()      -- we need to emit a closure here, we need to load a and b from their locals
+   *         (+ a b))))) -- but a and b are defined as locals in different stack frames
+   *                     -- which means a becomes an extra parameter to X, and a and b become extra parameters to Y
+   *
+   *                     -- the behavior needed is to seek up the binding stack until a can be resolved. each function
+   *                     -- boundary that is crossed to resolve a must have a added to the list of bindings that function
+   *                     -- captures. this causes the compiler to allocate local space for a in each function's stack frame,
+   *                     -- as well as to create the function as a closure to populate the local space
+   *
+   *                     -- this way, each captured binding (a and b) are resolved into locals within Y
+   *
+   * The Plan
+   * - the analyzer needs a form type to describe lexical bindings uniformly
+   *
+   * - the analyzer needs to use a single binding stack for an entire analysis run, no longer creating new binding stacks for fn's
+   *   - the analyzer needs to drop the idea of 'scopes', and use a simple array stack where each item in the stack is a union of:
+   *     - a let binding (includes unique let index within a function)
+   *     - a function reference binding (only one defined per function)
+   *     - a function arg binding (includes arg index within a function)
+   *     - a function definition boundary, referencing a FormFn
+   *     instead of pushing/popping scopes, the analyzer can save the current stack height, and then pop back down to it
+   *     efficiently when it is done with a particular binding scope
+   *
+   * - the analyzer needs to walk through the binding stack to resolve binding references as it encounters them. it
+   *   starts at the top of the stack and keeps moving down until it finds a binding with a matching name, or hits the
+   *   bottom of the stack and errors out because the binding reference cannot be resolved
+   *
+   * - the analyzer must emit a FormEnvRef that identifies which binding it references. bindings are identified by type
+   *   and index. FormEnvRefs can only identify bindings that originate from within a function or top-level code unit.
+   *   All indexes are function and ref-type specific. (types are 'fn-capture', 'fn-self-reference', 'fn-arg', 'let')
+   *
+   * - if a binding reference is resolved, and it originates from outside a function (it is captured), then each
+   *   function definition boundary crossed must have the binding added to it as a captured binding.
+   *
+   * - captured bindings explicitly reference a binding defined in the function definition boundary immediately above
+   *   where the function is defined. otherwise, they are identical to regular binding references.
+   *
+   * - the compiler needs to build a binding lookup table for all bindings in the CodeUnit and all declared functions,
+   *   organizing bindings by id.
+   *
+   * - the compiler, for each code block, (for code units and fn constants)
+   *
+   *   // TODO it would be nice if the analyzer gave all the bindings a unique id within a function up-front to make this easier
+   *   // it would use this id for all the references
+   *
+   *   - assigns all the bindings defined a storage location from which they can be loaded when
+   *     referenced. these storage locations are stored in a binding table
+   *     - function-name bindings have values that are stored as constants
+   *     - let-bindings have values that are stored as locals
+   *
+   *   - when the compiler encounters a binding reference
+   *     - if the binding reference refers to a function by name, create a fn-ref-const and emit a LOAD_CONST
+   *     - if the binding reference refers to a binding created within the local code scope, emit a LOAD_LOCAL. locals
+   *       are referenced by index. these indexes must be computed
+   *
+   *   - the compiler should traverse
+   *
+   *   - the compiler should collect a list of all the captured bindings
+   *     if there are one or more captures, the function declaration should be wrapped in a call to the vm to create a closure
+   *
+   *   - the compiler should build a locals table, and assign locally-defined bindings into it
+   *
+   *   - the compiler should emit LOADS and STOREs for locals based on the values in this table
+   *   - the compiler should emit a LOAD_CONST wherever function references are encountered
+   */
+
   envRef->type = binding->type;
   envRef->index = binding->index;
 
