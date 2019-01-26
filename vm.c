@@ -186,12 +186,24 @@ RetVal tryCodeDeepCopy(Code *from, Code *to, Error *error) {
 
 // gc
 
+/*
+ * The constant part of a function is the FnDef. This is what gets hydrated at eval time.
+ * The variable part of a function is the Fn. It holds a value reference to the FnDef?
+ */
+
 typedef struct Fn {
+  uint16_t numCaptures;
   uint16_t numArgs;
   uint16_t numConstants;
   Value *constants;
   Code code;
 } Fn;
+
+typedef struct Closure {
+  Value fn;
+  uint16_t numCaptures;
+  Value *captures;
+} Closure;
 
 typedef struct String {
   uint64_t length;
@@ -220,6 +232,10 @@ typedef struct GC {
   uint64_t allocatedFnSpace;
   uint64_t usedFnSpace;
   Fn *fns;
+
+  uint64_t allocatedClosureSpace;
+  uint64_t usedClosureSpace;
+  Closure *closures;
 
   uint64_t allocatedStringSpace;
   uint64_t usedStringSpace;
@@ -678,6 +694,10 @@ void GCInit(GC *gc) {
   gc->allocatedFnSpace = 0;
   gc->fns = NULL;
 
+  gc->usedClosureSpace = 0;
+  gc->allocatedClosureSpace = 0;
+  gc->closures = NULL;
+
   gc->allocatedStringSpace = 0;
   gc->usedStringSpace = 0;
   gc->strings = NULL;
@@ -708,13 +728,20 @@ void GCFreeContents(GC *gc) {
       _fnFreeContents(&gc->fns[i]);
     }
     free(gc->fns);
+    gc->fns = NULL;
     gc->usedFnSpace = 0;
     gc->allocatedFnSpace = 0;
+
+    free(gc->closures);
+    gc->closures = NULL;
+    gc->usedClosureSpace = 0;
+    gc->allocatedClosureSpace = 0;
 
     for (uint64_t i=0; i<gc->usedStringSpace; i++) {
       _stringFreeContents(&gc->strings[i]);
     }
     free(gc->strings);
+    gc->strings = NULL;
     gc->usedStringSpace = 0;
     gc->allocatedStringSpace = 0;
 
@@ -722,6 +749,7 @@ void GCFreeContents(GC *gc) {
       _symbolFreeContents(&gc->symbols[i]);
     }
     free(gc->symbols);
+    gc->symbols = NULL;
     gc->usedSymbolSpace = 0;
     gc->allocatedSymbolSpace = 0;
 
@@ -729,6 +757,7 @@ void GCFreeContents(GC *gc) {
       _keywordFreeContents(&gc->keywords[i]);
     }
     free(gc->keywords);
+    gc->keywords = NULL;
     gc->usedKeywordSpace = 0;
     gc->allocatedKeywordSpace = 0;
 
@@ -736,6 +765,7 @@ void GCFreeContents(GC *gc) {
       _consFreeContents(&gc->conses[i]);
     }
     free(gc->conses);
+    gc->conses = NULL;
     gc->usedConsSpace = 0;
     gc->allocatedConsSpace = 0;
   }
@@ -797,6 +827,63 @@ RetVal tryDerefFn(GC *gc, Value value, Fn *fn, Error *error) {
   }
 
   *fn = gc->fns[value.value];
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryAllocateClosure(GC *gc, Closure closure, Value *value, Error *error) {
+  RetVal ret;
+
+  if (gc->closures == NULL) {
+    uint16_t len = 16;
+    tryMalloc(gc->closures, len * sizeof(Closure), "Closure array");
+    gc->allocatedClosureSpace = len;
+  }
+  else if (gc->usedClosureSpace == gc->allocatedClosureSpace) {
+    uint64_t newAllocatedLength = gc->allocatedClosureSpace * 2;
+
+    Closure* resizedClosures = realloc(gc->closures, newAllocatedLength * sizeof(Closure));
+    if (resizedClosures == NULL) {
+      ret = memoryError(error, "realloc Closure array");
+      goto failure;
+    }
+
+    gc->allocatedClosureSpace = newAllocatedLength;
+    gc->closures = resizedClosures;
+  }
+
+  uint64_t index = gc->usedClosureSpace;
+  gc->closures[index] = closure;
+  gc->usedClosureSpace = index + 1;
+
+  value->type = VT_FN;
+  value->value = index;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+void _closureFreeContents(Closure *closure) {
+  if (closure != NULL) {
+    if (closure->captures != NULL) {
+      free(closure->captures);
+      closure->captures = NULL;
+    }
+  }
+}
+
+RetVal tryDerefClosure(GC *gc, Value value, Closure *closure, Error *error) {
+  RetVal ret;
+
+  if (gc->usedClosureSpace <= value.value) {
+    throwInternalError(error, "closure reference points to closure that does not exist");
+  }
+
+  *closure = gc->closures[value.value];
   return R_SUCCESS;
 
   failure:
@@ -1112,43 +1199,89 @@ void frameInitContents(Frame *frame) {
   frame->pc = 0;
 }
 
+typedef struct Invocable {
+  Fn fn;
+  bool hasClosure;
+  Closure closure;
+} Invocable;
+
+RetVal tryPopInvocable(VM *vm, Frame *frame, Invocable *invocable, Error *error) {
+  RetVal ret;
+
+  Value popVal;
+  throws(tryOpStackPop(frame->opStack, &popVal, error));
+
+  switch (popVal.type) {
+    case VT_FN: {
+      throws(tryDerefFn(&vm->gc, popVal, &invocable->fn, error));
+      invocable->hasClosure = false;
+      invocable->closure.fn = nil();
+      invocable->closure.numCaptures = 0;
+      invocable->closure.captures = NULL;
+      break;
+    }
+    case VT_CLOSURE: {
+      throws(tryDerefClosure(&vm->gc, popVal, &invocable->closure, error));
+      invocable->hasClosure = true;
+      throws(tryDerefFn(&vm->gc, invocable->closure.fn, &invocable->fn, error));
+      break;
+    }
+    default:
+    throwRuntimeError(error, "cannot invoke this value type as a function: %u", popVal.type);
+  }
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 // (8)              | (objectref, args... -> ...)
 RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
 
   RetVal ret;
 
-  Value invocable;
-  throws(tryOpStackPop(frame->opStack, &invocable, error));
-
-  if (invocable.type != VT_FN) {
-    throwRuntimeError(error, "cannot invoke this value type as a function: %u", invocable.type);
-  }
-
-  Fn fn;
-  throws(tryDerefFn(&vm->gc, invocable, &fn, error));
+  Invocable invocable;
+  throws(tryPopInvocable(vm, frame, &invocable, error));
 
   // clean up on return
   Value *locals = NULL;
   OpStack opStack;
 
-  tryMalloc(locals, sizeof(Value) * fn.code.numLocals, "Value array");
-  tryOpStackInitContents(&opStack, fn.code.maxOperandStackSize, error);
+  tryMalloc(locals, sizeof(Value) * invocable.fn.code.numLocals, "Value array");
+  tryOpStackInitContents(&opStack, invocable.fn.code.maxOperandStackSize, error);
 
   // pop args and set as locals, reversing the order
-  for (uint16_t i=0; i<fn.numArgs; i++) {
+  for (uint16_t i=0; i<invocable.fn.numArgs; i++) {
     Value arg;
     throws(tryOpStackPop(frame->opStack, &arg, error));
-    uint16_t idx = fn.numArgs - (uint16_t)1 - i;
+    uint16_t idx = invocable.fn.numArgs - (uint16_t)1 - i;
     locals[idx] = arg;
+  }
+
+  if (invocable.fn.numCaptures > 0) {
+
+    if (!invocable.hasClosure) {
+      throwRuntimeError(error, "cannot invoke this fn without a closure, it captures variables: %u", invocable.fn.numCaptures);
+    }
+    if (invocable.closure.numCaptures < invocable.fn.numCaptures) {
+      throwRuntimeError(error, "closure does not have enough captured variables: %u", invocable.closure.numCaptures);
+    }
+
+    uint16_t nextLocalIdx = invocable.fn.numArgs;
+    for (uint16_t i=0; i<invocable.fn.numCaptures; i++) {
+      locals[nextLocalIdx] = invocable.closure.captures[i];
+      nextLocalIdx = nextLocalIdx + 1;
+    }
   }
 
   Frame child;
   frameInitContents(&child);
   child.parent = frame;
-  child.numConstants = fn.numConstants;
-  child.constants = fn.constants;
-  child.code = fn.code;
-  child.numLocals = fn.code.numLocals;
+  child.numConstants = invocable.fn.numConstants;
+  child.constants = invocable.fn.constants;
+  child.code = invocable.fn.code;
+  child.numLocals = invocable.fn.code.numLocals;
   child.locals = locals;
   child.opStack = &opStack;
 
@@ -1167,36 +1300,6 @@ RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
   return ret;
 }
 
-//typedef struct Frame {
-//  Frame *parent;
-//  uint16_t numConstants;
-//  Value *constants;
-//  Code code;
-//  Value *locals;
-//  OpStack *opStack;
-//  Value result;
-//  bool resultAvailable;
-//  uint16_t pc;
-//} Frame;
-
-RetVal tryPopInvocable(VM *vm, Frame *frame, Fn *fn, Error *error) {
-  RetVal ret;
-
-  Value invocable;
-  throws(tryOpStackPop(frame->opStack, &invocable, error));
-
-  if (invocable.type != VT_FN) {
-    throwRuntimeError(error, "cannot invoke this value type as a function: %u", invocable.type);
-  }
-
-  throws(tryDerefFn(&vm->gc, invocable, fn, error));
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
 /*
  * tail calls basically don't execute any code, they just re-use an existing stack frame
  * and set up a different function and arguments, reallocate locals as needed, and reset the pc to 0.
@@ -1211,29 +1314,29 @@ RetVal tryPopInvocable(VM *vm, Frame *frame, Fn *fn, Error *error) {
 RetVal tryInvokeDynTailEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
-  Fn fn;
-  throws(tryPopInvocable(vm, frame, &fn, error));
+  Invocable invocable;
+  throws(tryPopInvocable(vm, frame, &invocable, error));
 
-  frame->numConstants = fn.numConstants;
-  frame->constants = fn.constants;
-  frame->code = fn.code;
+  frame->numConstants = invocable.fn.numConstants;
+  frame->constants = invocable.fn.constants;
+  frame->code = invocable.fn.code;
 
   // resize locals if needed
-  if (fn.code.numLocals > frame->numLocals) {
-    Value *resizedLocals = realloc(frame->locals, fn.code.numLocals * sizeof(Value));
+  if (invocable.fn.code.numLocals > frame->numLocals) {
+    Value *resizedLocals = realloc(frame->locals, invocable.fn.code.numLocals * sizeof(Value));
     if (resizedLocals == NULL) {
       ret = memoryError(error, "realloc Value array");
       goto failure;
     }
-    frame->numLocals = fn.code.numLocals;
+    frame->numLocals = invocable.fn.code.numLocals;
     frame->locals = resizedLocals;
   }
 
   // pop args and set as locals, reversing the order
-  for (uint16_t i=0; i<fn.numArgs; i++) {
+  for (uint16_t i=0; i<invocable.fn.numArgs; i++) {
     Value arg;
     throws(tryOpStackPop(frame->opStack, &arg, error));
-    uint16_t idx = fn.numArgs - (uint16_t)1 - i;
+    uint16_t idx = invocable.fn.numArgs - (uint16_t)1 - i;
     frame->locals[idx] = arg;
   }
 
@@ -1469,6 +1572,45 @@ RetVal tryLoadVarEval(VM *vm, Frame *frame, Error *error) {
   return ret;
 }
 
+// (8), offset (16) | (captures... -> value)
+RetVal tryLoadClosureEval(VM *vm, Frame *frame, Error *error) {
+  RetVal ret;
+
+  uint16_t constantIndex = readIndex(frame->code.code, frame->pc);
+  Value fnValue = frame->constants[constantIndex];
+
+  if (fnValue.type != VT_FN) {
+    throwRuntimeError(error, "cannot create a closure from this value type: %u", fnValue.type);
+  }
+
+  Fn fn;
+  throws(tryDerefFn(&vm->gc, fnValue, &fn, error));
+
+  Closure closure;
+  closure.fn = fnValue;
+  closure.numCaptures = fn.numCaptures;
+  tryMalloc(closure.captures, fn.numCaptures * sizeof(Value), "Value array");
+
+  // pop captures in reverse order, same as arguments
+  for (uint16_t i=0; i<closure.numCaptures; i++) {
+    Value capture;
+    throws(tryOpStackPop(frame->opStack, &capture, error));
+    uint16_t idx = fn.numArgs - (uint16_t)1 - i;
+    closure.captures[idx] = capture;
+  }
+
+  Value closureValue;
+  throws(tryAllocateClosure(&vm->gc, closure, &closureValue, error));
+  throws(tryOpStackPush(frame->opStack, closureValue, error));
+
+  frame->pc = frame->pc + 3;
+  return R_SUCCESS;
+
+  failure:
+    _closureFreeContents(&closure);
+  return ret;
+}
+
 // (8),             | (x, seq -> newseq)
 RetVal tryConsEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
@@ -1588,6 +1730,7 @@ InstTable instTableCreate() {
       [I_SUB]              = { .name = "I_SUB",             .print = printInst,          .tryEval = trySubEval },
       [I_DEF_VAR]          = { .name = "I_DEF_VAR",         .print = printInstAndIndex,  .tryEval = tryDefVarEval },
       [I_LOAD_VAR]         = { .name = "I_LOAD_VAR",        .print = printInstAndIndex,  .tryEval = tryLoadVarEval },
+      [I_LOAD_CLOSURE]     = { .name = "I_LOAD_CLOSURE",    .print = printInstAndIndex,  .tryEval = tryLoadClosureEval },
 
       [I_CONS]             = { .name = "I_CONS",            .print = printInst,          .tryEval = tryConsEval },
       [I_FIRST]            = { .name = "I_FIRST",           .print = printInst,          .tryEval = tryFirstEval},
@@ -1707,6 +1850,8 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 
   fn.numArgs = fnConst->numArgs;
   fn.numConstants = fnConst->numConstants;
+  fn.numCaptures = 0; // TODO
+
   tryMalloc(fn.constants, sizeof(Value) * fn.numConstants, "Value array");
   throws(tryHydrateConstants(vm, fn.numConstants, fnConst->constants, &fn.constants, &unresolved, error));
 

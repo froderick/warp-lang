@@ -50,6 +50,7 @@ typedef enum InstType {
   I_SUB,             // (8)              | (a, b -> c)
   I_DEF_VAR,         // (8), offset (16) | (name, value ->)
   I_LOAD_VAR,        // (8), offset (16) | (name -> value)
+  I_LOAD_CLOSURE,    // (8), offset (16) | (captures... -> value)
 
   I_CONS,            // (8),             | (x, seq -> newseq)
   I_FIRST,           // (8),             | (seq -> x)
@@ -180,6 +181,7 @@ typedef enum ValueType {
   VT_SYMBOL,
   VT_KEYWORD,
   VT_LIST,
+  VT_CLOSURE,
 //  VT_OBJECT,
 } ValueType;
 
