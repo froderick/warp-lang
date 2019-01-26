@@ -236,39 +236,7 @@ typedef struct Form {
   SourceLocation source;
 } Form;
 
-typedef struct EnvBinding {
-  wchar_t *name;
-  uint64_t nameLength;
-  FormEnvRefType type;
-  uint64_t index;
-} EnvBinding;
-
-typedef struct EnvBindingScope {
-  uint64_t numBindings;
-  uint64_t allocNumBindings;
-  EnvBinding *bindings;
-  struct EnvBindingScope *next;
-  // these are denormalized counts used for computing indexes
-  uint64_t numLocalBindings;
-} EnvBindingScope;
-
-typedef struct EnvBindingStack {
-  uint64_t depth;
-  EnvBindingScope *head;
-} EnvBindingStack;
-
-typedef struct AnalyzerContext {
-  EnvBindingStack bindingStack;
-  uint16_t fnCount;
-} AnalyzerContext;
-
-void envBindingStackInit(EnvBindingStack *bindingStack);
-void envBindingStackFreeContents(EnvBindingStack *bindingStack);
-
-void analyzerContextInitContents(AnalyzerContext *ctx);
-void analyzerContextFreeContents(AnalyzerContext *ctx);
-
-RetVal tryFormAnalyze(AnalyzerContext *ctx, Expr* expr, Form **form, Error *error);
+RetVal tryFormAnalyze(Expr* expr, Form **form, Error *error);
 void formFreeContents(Form* expr);
 void formFree(Form* expr);
 

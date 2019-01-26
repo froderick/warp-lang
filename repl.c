@@ -4,14 +4,11 @@ RetVal tryReplCompile(TokenStream_t stream, CodeUnit *codeUnit, Error *error) {
 
   RetVal ret;
 
-  AnalyzerContext ctx;
   Expr *expr = NULL;
   Form *form = NULL;
 
-  analyzerContextInitContents(&ctx);
-
   throws(tryExprRead(stream, &expr, error));
-  throws(tryFormAnalyze(&ctx, expr, &form, error));
+  throws(tryFormAnalyze(expr, &form, error));
   throws(tryCompileTopLevel(form, codeUnit, error));
 
   ret = R_SUCCESS;
@@ -21,7 +18,6 @@ RetVal tryReplCompile(TokenStream_t stream, CodeUnit *codeUnit, Error *error) {
     goto finally;
 
   finally:
-    analyzerContextFreeContents(&ctx);
     if (expr != NULL) {
       exprFree(expr);
     }

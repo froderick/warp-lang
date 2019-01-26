@@ -9,6 +9,40 @@
  * Core analyzer behavior.
  */
 
+typedef struct EnvBinding {
+  wchar_t *name;
+  uint64_t nameLength;
+  FormEnvRefType type;
+  uint64_t index;
+} EnvBinding;
+
+typedef struct EnvBindingScope {
+  uint64_t numBindings;
+  uint64_t allocNumBindings;
+  EnvBinding *bindings;
+  struct EnvBindingScope *next;
+  // these are denormalized counts used for computing indexes
+  uint64_t numLocalBindings;
+} EnvBindingScope;
+
+typedef struct EnvBindingStack {
+  uint64_t depth;
+  EnvBindingScope *head;
+} EnvBindingStack;
+
+typedef struct AnalyzerContext {
+  EnvBindingStack bindingStack;
+  uint16_t fnCount;
+} AnalyzerContext;
+
+RetVal _tryFormAnalyze(AnalyzerContext *ctx, Expr* expr, Form **ptr, Error *error);
+
+void envBindingStackInit(EnvBindingStack *bindingStack);
+void envBindingStackFreeContents(EnvBindingStack *bindingStack);
+
+void analyzerContextInitContents(AnalyzerContext *ctx);
+void analyzerContextFreeContents(AnalyzerContext *ctx);
+
 RetVal tryFormDeepCopy(Form *from, Form **to, Error *error);
 
 void scopeFree(EnvBindingScope *scope);
@@ -272,9 +306,9 @@ RetVal tryIfAnalyze(AnalyzerContext *ctx, Expr* ifExpr, FormIf *iff, Error *erro
   Expr *ifBranchExpr = ifExpr->list.head->next->next->expr;
   Expr *elseBranchExpr = ifExpr->list.head->next->next->next->expr;
 
-  throws(tryFormAnalyze(ctx, testExpr, &iff->test, error));
-  throws(tryFormAnalyze(ctx, ifBranchExpr, &iff->ifBranch, error));
-  throws(tryFormAnalyze(ctx, elseBranchExpr, &iff->elseBranch, error));
+  throws(_tryFormAnalyze(ctx, testExpr, &iff->test, error));
+  throws(_tryFormAnalyze(ctx, ifBranchExpr, &iff->ifBranch, error));
+  throws(_tryFormAnalyze(ctx, elseBranchExpr, &iff->elseBranch, error));
 
   return R_SUCCESS;
 
@@ -355,7 +389,7 @@ RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *e
 
     throws(tryCopyText(bindingElem->expr->symbol.value, &b->name, b->nameLength, error));
     throws(addLexicalBinding(&ctx->bindingStack, b, error));
-    throws(tryFormAnalyze(ctx, bindingElem->next->expr, &b->value, error));
+    throws(_tryFormAnalyze(ctx, bindingElem->next->expr, &b->value, error));
 
     bindingElem = bindingElem->next->next;
   }
@@ -438,7 +472,7 @@ RetVal tryDefAnalyze(AnalyzerContext *ctx, Expr* defExpr, FormDef *def, Error *e
   throws(tryCopyText(symbol->symbol.value, &def->name, def->nameLength, error));
 
   if (defExpr->list.length == 3) {
-    throws(tryFormAnalyze(ctx, defExpr->list.head->next->next->expr, &def->value, error));
+    throws(_tryFormAnalyze(ctx, defExpr->list.head->next->next->expr, &def->value, error));
   }
 
   // update the analyzer state so it knows about this def
@@ -726,6 +760,47 @@ void builtinFreeContents(FormBuiltin *builtin) {
   }
 }
 
+typedef enum BindingSource {
+  BT_CAPTURED,
+  BT_LOCAL,
+} BindingSource;
+
+typedef enum BindingType {
+  BT_LET,
+  BT_FN_REF,
+  BT_FN_ARG,
+} BindingType;
+
+typedef struct Binding {
+  BindingSource source;
+  BindingType type;
+  uint16_t index;
+} Binding;
+
+typedef struct BindingTable {
+  uint16_t numBindings;
+  Binding *bindings;
+} BindingTable;
+
+typedef struct Forms {
+  uint16_t numForms;
+  Form *forms;
+} Forms;
+
+typedef struct FormLet2 {
+  Forms forms;
+} FormLet2;
+
+typedef struct FormRoot {
+  BindingTable table;
+  Forms forms;
+} FormRoot;
+
+typedef struct FnRoot {
+  BindingTable table;
+  Forms forms;
+} FnRoot;
+
 RetVal tryEnvRefAnalyze(AnalyzerContext *ctx, Expr *expr, EnvBinding *binding, FormEnvRef *envRef, Error *error) {
 
   /*
@@ -924,7 +999,7 @@ RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Expr *expr, FormFnCall *fnCall, Er
   fnCall->numArgs = 0;
   fnCall->tailPosition = false;
 
-  throws(tryFormAnalyze(ctx, expr->list.head->expr, &fnCall->fnCallable, error));
+  throws(_tryFormAnalyze(ctx, expr->list.head->expr, &fnCall->fnCallable, error));
   throws(assertFnCallable(fnCall->fnCallable, error));
 
   fnCall->numArgs = expr->list.length - 1;
@@ -1100,10 +1175,11 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
     return ret;
 }
 
-RetVal tryFormAnalyze(AnalyzerContext *ctx, Expr* expr, Form **ptr, Error *error) {
+RetVal _tryFormAnalyze(AnalyzerContext *ctx, Expr* expr, Form **ptr, Error *error) {
 
   RetVal ret;
-  Form *form;
+
+  Form *form; // clean up on fail
 
   tryMalloc(form, sizeof(Form), "Form");
   throws(tryFormAnalyzeContents(ctx, expr, form, error));
@@ -1116,6 +1192,26 @@ RetVal tryFormAnalyze(AnalyzerContext *ctx, Expr* expr, Form **ptr, Error *error
       free(form);
     }
     return ret;
+}
+
+RetVal tryFormAnalyze(Expr* expr, Form **form, Error *error) {
+
+  RetVal ret;
+  AnalyzerContext ctx;
+
+  analyzerContextInitContents(&ctx);
+
+  throws(_tryFormAnalyze(&ctx, expr, form, error));
+
+  analyzerContextFreeContents(&ctx);
+  return R_SUCCESS;
+
+  failure:
+  if (form != NULL) {
+    free(form);
+  }
+  analyzerContextFreeContents(&ctx);
+  return ret;
 }
 
 void formFreeContents(Form* form) {
