@@ -4,6 +4,6 @@
 #include "vm.h"
 #include "analyzer.h"
 
-RetVal tryCompileTopLevel(Form *form, CodeUnit *codeUnit, Error *error);
+RetVal tryCompileTopLevel(FormRoot *form, CodeUnit *codeUnit, Error *error);
 
 #endif //WARP_LANG_COMPILER_H

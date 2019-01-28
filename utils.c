@@ -361,3 +361,39 @@ void stringBufferClear(StringBuffer *b) {
   b->usedChars = 0;
 }
 
+void textInitContents(Text *text) {
+  text->length = 0;
+  text->value = NULL;
+}
+
+RetVal tryTextMake(wchar_t* from, Text *text, uint64_t len, Error *error) {
+  RetVal ret;
+
+  text->length = len;
+  throws(tryCopyText(from, &text->value, text->length, error));
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryTextCopy(Text *from, Text *to, Error *error) {
+  RetVal ret;
+
+  to->length = from->length;
+  throws(tryCopyText(from->value, &to->value, to->length, error));
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+void textFreeContents(Text *text) {
+  text->length = 0;
+  if (text->value != NULL) {
+    free(text->value);
+    text->value = NULL;
+  }
+}

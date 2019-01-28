@@ -13,7 +13,7 @@ add_compile_definitions(DEBUG=1)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(check REQUIRED check)
 
-add_library(compiler errors.c reader.c analyzer.c vm.c utils.c compiler.h compiler.c lexer.h lexer.c source.h repl.h repl.c)
+add_library(compiler errors.c reader.c analyzer.c vm.c utils.c compiler.h compiler.c lexer.h lexer.c source.h repl.h repl.c source.c)
 
 add_executable(tests test.c)
 target_link_libraries(tests check compiler)

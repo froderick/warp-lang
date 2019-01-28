@@ -1139,7 +1139,7 @@ uint16_t readIndex(uint8_t *code, uint16_t pc) {
   return (code[pc + 1] << 8) | code[pc + 2];
 }
 
-// (8), index (16) | (-> value)
+// (8), typeIndex (16) | (-> value)
 RetVal tryLoadConstEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
@@ -1154,7 +1154,7 @@ RetVal tryLoadConstEval(VM *vm, Frame *frame, Error *error) {
   return ret;
 }
 
-// (8), index (16) | (-> value)
+// (8), typeIndex (16) | (-> value)
 RetVal tryLoadLocalEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
@@ -1169,7 +1169,7 @@ RetVal tryLoadLocalEval(VM *vm, Frame *frame, Error *error) {
   return ret;
 }
 
-// (8), index  (16) | (objectref ->)
+// (8), typeIndex  (16) | (objectref ->)
 RetVal tryStoreLocalEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
@@ -1744,11 +1744,11 @@ InstTable instTableCreate() {
 //      [I_STORE_ARRAY] = { .name = "I_STORE_ARRAY", .print = printUnknown},
 // requires garbage collection
 //      case I_NEW:           // (8), objlen (16) | (-> objectref)
-//      case I_GET_FIELD:     // (8), index  (16) | (objectref -> value)
-//      case I_SET_FIELD:     // (8), index  (16) | (objectref, value ->)
+//      case I_GET_FIELD:     // (8), typeIndex  (16) | (objectref -> value)
+//      case I_SET_FIELD:     // (8), typeIndex  (16) | (objectref, value ->)
 //      case I_NEW_ARRAY:     // (8), objlen (16) | (arraylen -> objectref)
-//      case I_LOAD_ARRAY:    // (8)              | (objectref, index -> value)
-//      case I_STORE_ARRAY:   // (8)              | (objectref, index, value ->)
+//      case I_LOAD_ARRAY:    // (8)              | (objectref, typeIndex -> value)
+//      case I_STORE_ARRAY:   // (8)              | (objectref, typeIndex, value ->)
   };
   memcpy(table.instructions, instructions, sizeof(instructions));
   table.numInstructions = sizeof(instructions) / sizeof(instructions[0]);
@@ -1965,11 +1965,11 @@ RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant list
 
 // TODO: when hydrating a function, determine its fn declaration depth and keep these in a mapping table after hydration is complete
 // TODO: while hydrating, keep a growing list of the constant specs and pointers to the values that should reference functions
-// TODO: after hydrating, iterate over the unresolved references, match them up by index
+// TODO: after hydrating, iterate over the unresolved references, match them up by typeIndex
 
 // during analysis
 // - grant a unique id to each function
-// - within the function, when adding a binding for the function name, use this id for the binding index
+// - within the function, when adding a binding for the function name, use this id for the binding typeIndex
 // during compilation
 // - include function ids in functions
 // - include function ids in constants that reference functions

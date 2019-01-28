@@ -35,10 +35,10 @@ typedef struct Code {
 
 typedef enum InstType {
 
-  I_LOAD_CONST,      // (8), index  (16) | (-> value)
+  I_LOAD_CONST,      // (8), typeIndex  (16) | (-> value)
 
-  I_LOAD_LOCAL,      // (8), index  (16) | (-> value)
-  I_STORE_LOCAL,     // (8), index  (16) | (objectref ->)
+  I_LOAD_LOCAL,      // (8), typeIndex  (16) | (-> value)
+  I_STORE_LOCAL,     // (8), typeIndex  (16) | (objectref ->)
   I_INVOKE_DYN,      // (8)              | (objectref, args... -> ...)
   I_INVOKE_DYN_TAIL, // (8)              | (objectref, args... -> ...)
   I_RET,             // (8)              | (objectref ->)
@@ -58,11 +58,11 @@ typedef enum InstType {
 
   // requires garbage collection
   I_NEW,         // (8), objlen (16) | (-> objectref)
-  I_GET_FIELD,   // (8), index  (16) | (objectref -> value)
-  I_SET_FIELD,   // (8), index  (16) | (objectref, value ->)
+  I_GET_FIELD,   // (8), typeIndex  (16) | (objectref -> value)
+  I_SET_FIELD,   // (8), typeIndex  (16) | (objectref, value ->)
   I_NEW_ARRAY,   // (8), objlen (16) | (arraylen -> objectref)
-  I_LOAD_ARRAY,  // (8)              | (objectref, index -> value)
-  I_STORE_ARRAY, // (8)              | (objectref, index, value ->)
+  I_LOAD_ARRAY,  // (8)              | (objectref, typeIndex -> value)
+  I_STORE_ARRAY, // (8)              | (objectref, typeIndex, value ->)
 
 } InstType;
 

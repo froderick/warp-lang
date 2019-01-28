@@ -135,6 +135,7 @@ typedef struct Output {
   Constants *constants;
   Codes *codes;
   uint16_t *numLocals;
+  BindingTable *bindingTable;
 } Output;
 
 RetVal tryCompile(Form *form, Output output, Error *error);
@@ -248,9 +249,10 @@ RetVal tryCompileFn(Form *form, Output output, Error *error) {
     fnOutput.constants = &fnConstants;
     fnOutput.codes = &fnCodes;
     fnOutput.numLocals = &fnNumLocals;
+    fnOutput.bindingTable = &form->fn.table;
 
-    for (uint16_t i = 0; i < form->fn.numForms; i++) {
-      throws(tryCompile(&form->fn.forms[i], fnOutput, error));
+    for (uint16_t i = 0; i < form->fn.forms.numForms; i++) {
+      throws(tryCompile(&form->fn.forms.forms[i], fnOutput, error));
     }
   }
 
@@ -286,11 +288,6 @@ RetVal tryCompileFn(Form *form, Output output, Error *error) {
     codesFreeContents(&fnCodes);
     return ret;
 }
-
-typedef struct Text {
-  uint64_t length;
-  wchar_t *value;
-} Text;
 
 RetVal nilConstantGetIndex(Output output, uint16_t *index, Error *error) {
   RetVal ret;
@@ -382,7 +379,7 @@ RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *erro
     case N_LIST: {
       c->type = CT_LIST;
       c->list.length = constant->list.length;
-      tryMalloc(c->list.constants, sizeof(uint16_t) * c->list.length, "index array");
+      tryMalloc(c->list.constants, sizeof(uint16_t) * c->list.length, "typeIndex array");
 
       ListElement *elem = constant->list.head;
       uint16_t elemIndex = 0;
@@ -444,12 +441,8 @@ RetVal tryCompileDef(Form *form, Output output, Error *error) {
     throws(tryCompile(form->def.value, output, error));
   }
 
-  Text name;
-  name.length = form->def.nameLength;
-  name.value = form->def.name;
-
   uint16_t index;
-  throws(varRefConstantGetIndex(name, output, &index, error));
+  throws(varRefConstantGetIndex(form->def.name, output, &index, error));
 
   uint8_t code[] = { I_DEF_VAR, index >> 8, index & 0xFF };
   throws(tryCodeAppend(output.codes, sizeof(code), code, error));
@@ -463,12 +456,8 @@ RetVal tryCompileDef(Form *form, Output output, Error *error) {
 RetVal tryCompileVarRef(Form *form, Output output, Error *error) {
   RetVal ret;
 
-  Text name;
-  name.length = form->varRef.nameLength;
-  name.value = form->varRef.name;
-
   uint16_t index;
-  throws(varRefConstantGetIndex(name, output, &index, error));
+  throws(varRefConstantGetIndex(form->varRef.name, output, &index, error));
 
   uint8_t code[] = { I_LOAD_VAR, index >> 8, index & 0xFF };
   throws(tryCodeAppend(output.codes, sizeof(code), code, error));
@@ -485,20 +474,22 @@ RetVal tryCompileLet(Form *form, Output output, Error *error) {
   // 'let's add locals to the current frame
 
   for (uint16_t i=0; i<form->let.numBindings; i++) {
-    LexicalBinding *binding = &form->let.bindings[i];
+    LetBinding *binding = &form->let.bindings[i];
 
     throws(tryCompile(binding->value, output, error));
 
-    uint16_t index = binding->index;
+    // output.bindingTable->bindings[binding->]
+
+    uint16_t index = binding->bindingIndex;
     uint8_t code[] = { I_STORE_LOCAL, index >> 8, index & 0xFF };
     throws(tryCodeAppend(output.codes, sizeof(code), code, error));
 
     *output.numLocals = *output.numLocals + 1;
   }
 
-  if (form->let.numForms > 0) {
-    for (uint16_t i = 0; i < form->let.numForms; i++) {
-      Form *f = &form->let.forms[i];
+  if (form->let.forms.numForms > 0) {
+    for (uint16_t i = 0; i < form->let.forms.numForms; i++) {
+      Form *f = &form->let.forms.forms[i];
       throws(tryCompile(f, output, error));
     }
   }
@@ -518,40 +509,44 @@ RetVal tryCompileLet(Form *form, Output output, Error *error) {
     return ret;
 }
 
-RetVal tryCompileEnvFnRef(Form *form, Output output, Error *error) {
-  RetVal ret;
-
-  Constant c;
-  c.type = CT_FN_REF;
-  c.fnRef.fnId = form->envRef.index;
-
-  throws(tryAppendConstant(output.constants, c, error));
-
-  uint16_t index = output.constants->numUsed - 1;
-  uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-
-  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
+//RetVal tryCompileEnvFnRef(Form *form, Output output, Error *error) {
+//  RetVal ret;
+//
+//  Constant c;
+//  c.type = CT_FN_REF;
+//  c.fnRef.fnId = form->envRef.index;
+//
+//  throws(tryAppendConstant(output.constants, c, error));
+//
+//  uint16_t index = output.constants->numUsed - 1;
+//  uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
+//
+//  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+//
+//  return R_SUCCESS;
+//
+//  failure:
+//    return ret;
+//}
 
 RetVal tryCompileEnvRef(Form *form, Output output, Error *error) {
   RetVal ret;
 
-  if (form->envRef.type == RT_ARG || form->envRef.type == RT_LOCAL) {
-    uint16_t index = form->envRef.index;
+    uint16_t index = form->envRef.bindingIndex;
     uint8_t code[] = { I_LOAD_LOCAL, index >> 8, index & 0xFF };
     throws(tryCodeAppend(output.codes, sizeof(code), code, error));
-  }
-  else if (form->envRef.type == RT_FN) {
-    throws(tryCompileEnvFnRef(form, output, error));
-  }
-  else {
-    throwCompilerError(error, "unsupported");
-  }
+
+//  if (form->envRef.type == RT_ARG || form->envRef.type == RT_LOCAL) {
+//    uint16_t index = form->envRef.index;
+//    uint8_t code[] = { I_LOAD_LOCAL, index >> 8, index & 0xFF };
+//    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+//  }
+//  else if (form->envRef.type == RT_FN) {
+//    throws(tryCompileEnvFnRef(form, output, error));
+//  }
+//  else {
+//    throwCompilerError(error, "unsupported");
+//  }
 
   return R_SUCCESS;
 
@@ -564,70 +559,70 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
 
   FormBuiltin *builtin = &form->builtin;
 
-  if (wcscmp(builtin->name, L"add") == 0) {
+  if (wcscmp(builtin->name.value, L"add") == 0) {
 
-    for (int i=0; i < form->builtin.numArgs; i++) {
-      throws(tryCompile(&form->builtin.args[i], output, error));
+    for (int i=0; i < form->builtin.args.numForms; i++) {
+      throws(tryCompile(&form->builtin.args.forms[i], output, error));
     }
 
     uint8_t addCode[] = { I_ADD};
     throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
   }
-  else if (wcscmp(builtin->name, L"subtract") == 0) {
+  else if (wcscmp(builtin->name.value, L"subtract") == 0) {
 
-    for (int i=0; i < form->builtin.numArgs; i++) {
-      throws(tryCompile(&form->builtin.args[i], output, error));
+    for (int i=0; i < form->builtin.args.numForms; i++) {
+      throws(tryCompile(&form->builtin.args.forms[i], output, error));
     }
 
     uint8_t addCode[] = { I_SUB };
     throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
   }
-  else if (wcscmp(builtin->name, L"compare") == 0) {
+  else if (wcscmp(builtin->name.value, L"compare") == 0) {
 
-    for (int i=0; i < form->builtin.numArgs; i++) {
-      throws(tryCompile(&form->builtin.args[i], output, error));
+    for (int i=0; i < form->builtin.args.numForms; i++) {
+      throws(tryCompile(&form->builtin.args.forms[i], output, error));
     }
 
     uint8_t addCode[] = { I_CMP };
     throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
   }
-  else if (wcscmp(builtin->name, L"first") == 0) {
+  else if (wcscmp(builtin->name.value, L"first") == 0) {
 
-    if (builtin->numArgs != 1) {
-      throwCompilerError(error, "first takes only one argument, got %llu", builtin->numArgs);
+    if (builtin->args.numForms!= 1) {
+      throwCompilerError(error, "first takes only one argument, got %u", builtin->args.numForms);
     }
 
-    throws(tryCompile(&form->builtin.args[0], output, error));
+    throws(tryCompile(&form->builtin.args.forms[0], output, error));
 
     uint8_t addCode[] = { I_FIRST };
     throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
   }
-  else if (wcscmp(builtin->name, L"rest") == 0) {
+  else if (wcscmp(builtin->name.value, L"rest") == 0) {
 
-    if (builtin->numArgs != 1) {
-      throwCompilerError(error, "rest takes only one argument, got %llu", builtin->numArgs);
+    if (builtin->args.numForms!= 1) {
+      throwCompilerError(error, "rest takes only one argument, got %u", builtin->args.numForms);
     }
 
-    throws(tryCompile(&form->builtin.args[0], output, error));
+    throws(tryCompile(&form->builtin.args.forms[0], output, error));
 
     uint8_t addCode[] = { I_REST };
     throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
   }
-  else if (wcscmp(builtin->name, L"cons") == 0) {
+  else if (wcscmp(builtin->name.value, L"cons") == 0) {
 
-    if (builtin->numArgs != 2) {
-      throwCompilerError(error, "cons takes two arguments, got %llu", builtin->numArgs);
+    if (builtin->args.numForms!= 2) {
+      throwCompilerError(error, "cons takes two arguments, got %u", builtin->args.numForms);
     }
 
-    for (int i=0; i < form->builtin.numArgs; i++) {
-      throws(tryCompile(&form->builtin.args[i], output, error));
+    for (int i=0; i < form->builtin.args.numForms; i++) {
+      throws(tryCompile(&form->builtin.args.forms[i], output, error));
     }
 
     uint8_t addCode[] = { I_CONS };
     throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
   }
   else {
-    throwCompilerError(error, "unsupported builtin '%ls'", builtin->name);
+    throwCompilerError(error, "unsupported builtin '%ls'", builtin->name.value);
   }
 
   return R_SUCCESS;
@@ -640,8 +635,8 @@ RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
   RetVal ret;
 
   // push the arguments in evaluation (left-to-right) order
-  for (uint16_t i = 0; i<form->fnCall.numArgs; i++) {
-    throws(tryCompile(&form->fnCall.args[i], output, error));
+  for (uint16_t i = 0; i<form->fnCall.args.numForms; i++) {
+    throws(tryCompile(&form->fnCall.args.forms[i], output, error));
   }
 
   // push the callable
@@ -717,7 +712,7 @@ RetVal tryCompile(Form *form, Output output, Error *error) {
     return ret;
 }
 
-RetVal tryCompileTopLevel(Form *form, CodeUnit *codeUnit, Error *error) {
+RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
   RetVal ret;
 
   // these get cleaned up on failure
@@ -737,8 +732,9 @@ RetVal tryCompileTopLevel(Form *form, CodeUnit *codeUnit, Error *error) {
     output.constants = &constants;
     output.codes = &codes;
     output.numLocals = &numLocals;
+    output.bindingTable = &root->table;
 
-    throws(tryCompile(form, output, error));
+    throws(tryCompile(root->form, output, error));
 
     uint8_t code[] = { I_RET };
     throws(tryCodeAppend(output.codes, sizeof(code), code, error));

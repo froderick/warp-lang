@@ -5,7 +5,7 @@ RetVal tryReplCompile(TokenStream_t stream, CodeUnit *codeUnit, Error *error) {
   RetVal ret;
 
   Expr *expr = NULL;
-  Form *form = NULL;
+  FormRoot *form = NULL;
 
   throws(tryExprRead(stream, &expr, error));
   throws(tryFormAnalyze(expr, &form, error));
@@ -22,7 +22,7 @@ RetVal tryReplCompile(TokenStream_t stream, CodeUnit *codeUnit, Error *error) {
       exprFree(expr);
     }
     if (form != NULL) {
-      formFree(form);
+      rootFree(form);
     }
     return ret;
 }

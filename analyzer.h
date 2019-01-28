@@ -7,6 +7,208 @@
 #include "errors.h"
 #include "reader.h"
 
+typedef enum BindingSource {
+  BS_NONE,
+  BS_CAPTURED,
+  BS_LOCAL,
+} BindingSource;
+
+typedef enum BindingType {
+  BT_NONE,
+  BT_LET,
+  BT_FN_REF,
+  BT_FN_ARG,
+} BindingType;
+
+typedef struct Binding {
+  Text name;
+  BindingSource source;
+  BindingType type;
+  uint16_t typeIndex; // each type of binding is numbered so it can be referenced
+} Binding;
+
+typedef struct BindingTable {
+  uint16_t allocatedSpace;
+  uint16_t usedSpace;
+  Binding *bindings;
+} BindingTable;
+
+typedef struct Form Form;
+
+typedef struct Forms {
+  uint16_t numForms;
+  Form *forms;
+} Forms;
+
+typedef struct FormIf {
+  Form *test;
+  Form *ifBranch;
+  Form *elseBranch;
+} FormIf;
+
+typedef struct LetBinding {
+  Text name;
+  SourceLocation source;
+  Form *value;
+  uint16_t bindingIndex;
+} LetBinding;
+
+typedef struct FormLet {
+  LetBinding *bindings;
+  uint16_t numBindings;
+  Forms forms;
+} FormLet;
+
+typedef struct FormDef {
+  Text name;
+  Form *value;
+} FormDef;
+
+typedef struct FormEnvRef {
+  uint64_t bindingIndex; // this is an typeIndex into the binding table for this reference's lexical scope
+} FormEnvRef;
+
+typedef struct FormVarRef {
+  Text name;
+} FormVarRef;
+
+typedef struct FormFnArg {
+  Text name;
+  SourceLocation source;
+  uint16_t bindingIndex;
+} FormFnArg;
+
+typedef struct FormFn {
+
+  BindingTable table;
+
+  // this name is only used within the function to refer to itself, for things like recursion
+  bool hasName;
+  Text name;
+  uint64_t id;
+  uint16_t bindingIndex;
+
+  FormFnArg *args;
+  uint16_t numArgs;
+  Forms forms;
+
+} FormFn;
+
+typedef struct FormFnCall {
+  Form *fnCallable;
+  Forms args;
+  bool tailPosition;
+} FormFnCall;
+
+/*
+ * `builtin` is a special form that allows code to invoke compile-target specific functionality.
+ * Analyzer does not interpret builtins, they are handled exclusively by the compiler/code emitter.
+ *
+ * (builtin :add 10 20)
+ */
+typedef struct FormBuiltin {
+  Text name;
+  Forms args;
+} FormBuiltin;
+
+typedef enum FormType {
+  F_NONE,
+  F_CONST,
+  F_IF,
+  F_LET,
+  F_DEF,
+  F_ENV_REF,
+  F_VAR_REF,
+  F_FN,
+  F_BUILTIN,
+  F_FN_CALL,
+} FormType;
+
+typedef struct Form {
+  FormType type;
+  union {
+    Expr *constant;
+    FormIf iff;
+    FormLet let;
+    FormDef def;
+    FormEnvRef envRef;
+    FormVarRef varRef;
+    FormFn fn;
+    FormFnCall fnCall;
+    FormBuiltin builtin;
+  };
+  SourceLocation source;
+} Form;
+
+typedef struct FormRoot {
+  BindingTable table;
+  Form *form;
+} FormRoot;
+
+RetVal tryFormAnalyze(Expr* expr, FormRoot **form, Error *error);
+
+void rootInitContents(FormRoot *root);
+void rootFreeContents(FormRoot *root);
+void rootFree(FormRoot *root);
+
+#endif //WARP_LANG_ANALYZER_H
+
+
+// TODO: when a function definition captures values from its lexical scope, those values are copied from their
+// lexical scope into the function object itself. So the compiler needs a way to figure out how to generate
+// code that copies these values whenever they are captured.
+
+/*
+ * TODO: this can be realized by creating a builtin the vm honors to load a reference to the function currently being executed into the op stack
+ * - analyzer detects function self-references by keeping a stack of in-scope fn-calls
+ * - analyzer creates function reference forms
+ * - the compiler emits I_LOAD_FN_REF instructions
+ * - the vm honors I_LOAD_FN_REF by keeping a 'current' fn handle in the Frame
+ *
+ * New Plan
+ *
+ * - analyzer adds function names as bindings in the binding stack
+ *   - these bindings get a new binding type
+ *   - bindings of this type are indexed separately from the locals, such that typeIndex represents the function
+ *     definition depth
+ *
+ * - compiler creates constants and emits I_LOAD_CONSTs based on references to these new bindings
+ *
+ * - vm hydration has two phases now:
+ *   - the current phase where things get allocated
+ *   - the new phase where the function reference constants are resolved. two phases are needed because with the
+ *     current algo hydration is depth-first recursive, and I'm not eager to change it right now.
+ *
+ */
+
+// TODO: need to support 'ns' special form
+
+
+
+/*
+ * Here's a question: how does the compiler know how to identify a var?
+ *
+ * We can store the var name as a constant. But the VarRef needs to have the constant typeIndex for it.
+ *
+ * Is it important that N references to the same var in the same compilation unit all reference the exact same
+ * constant typeIndex when loading the var value? We already do this for locals and arguments.
+ *
+ * We could, during analysis, give each distinct var its own typeIndex id, and then made each var reference use that
+ * typeIndex id, Then, during compilation we could add those as constants. We'd have to either insert these constants
+ * first before adding others
+ *
+ * // TODO: no, this should just be the name
+ * // we can compute distinct values here in the compiler. it can keep track of the strings it has seen, and
+ * // note which ones have been given a constant typeIndex
+ */
+
+// TODO: in the call stack, these fields don't really tell you much about this
+// binding other than that it exists, and how it was defined. is this enough?
+// --
+// also, the captured type isn't terribly helpful, since that isn't a property
+// of the environment, but rather a property of the reference itself
+
+
 /*
  * What the analyzer needs to do:
  *
@@ -68,194 +270,6 @@
  *  first-class functions from the language's perspective.
  *
  */
-
-typedef struct Form Form;
-
-typedef struct FormIf {
-  Form *test;
-  Form *ifBranch;
-  Form *elseBranch;
-} FormIf;
-
-typedef struct LexicalBinding {
-  wchar_t *name;
-  uint64_t nameLength;
-  SourceLocation source;
-  Form *value;
-  uint16_t index;
-} LexicalBinding;
-
-typedef struct FormLet {
-  LexicalBinding *bindings;
-  uint16_t numBindings;
-  Form *forms;
-  uint16_t numForms;
-} FormLet;
-
-typedef struct FormDef {
-  wchar_t *name;
-  uint64_t nameLength;
-  Form *value;
-} FormDef;
-
-typedef enum FormEnvRefType {
-  RT_NONE,
-  RT_ARG,         // function argument
-  RT_LOCAL,       // a local binding within a function
-  RT_FN,          // a binding refering to one of the enclosing function definitions by fn name
-  RT_RT_CAPTURED  // a captured variable from the surrounding lexical context
-} FormEnvRefType;
-
-// TODO: in the call stack, these fields don't really tell you much about this
-// binding other than that it exists, and how it was defined. is this enough?
-// --
-// also, the captured type isn't terribly helpful, since that isn't a property
-// of the environment, but rather a property of the reference itself
-typedef struct FormEnvRef {
-  FormEnvRefType type;
-  uint64_t index;
-} FormEnvRef;
-
-typedef struct FormVarRef {
-  uint64_t nameLength;
-  wchar_t *name;
-  // TODO: make this just the symbol name, no Var reference here... this needs to get moved into the compiler/vm
-
-  /*
-   * Here's a question: how does the compiler know how to identify a var?
-   *
-   * We can store the var name as a constant. But the VarRef needs to have the constant index for it.
-   *
-   * Is it important that N references to the same var in the same compilation unit all reference the exact same
-   * constant index when loading the var value? We already do this for locals and arguments.
-   *
-   * We could, during analysis, give each distinct var its own index id, and then made each var reference use that
-   * index id, Then, during compilation we could add those as constants. We'd have to either insert these constants
-   * first before adding others
-   *
-   * // TODO: no, this should just be the name
-   * // we can compute distinct values here in the compiler. it can keep track of the strings it has seen, and
-   * // note which ones have been given a constant index
-   */
-} FormVarRef;
-
-typedef struct FormFnArg {
-  wchar_t *name;
-  uint64_t nameLength;
-  SourceLocation source;
-} FormFnArg;
-
-typedef struct FormFn {
-
-  // this name is only used within the function to refer to itself, for things like recursion
-  bool hasName;
-  wchar_t *name;
-  uint64_t nameLength;
-  uint64_t id;
-
-  FormFnArg *args;
-  uint16_t numArgs;
-  Form *forms;
-  uint16_t numForms;
-
-  // TODO: things to consider implementing in the analysis phase
-  uint64_t numLocals;
-  bool tailRecursive;
-
-} FormFn;
-
-typedef struct FormFnCall {
-  Form *fnCallable;
-  Form *args;
-  uint64_t numArgs;
-  bool tailPosition;
-} FormFnCall;
-
-/*
- * `builtin` is a special form that allows code to invoke compile-target specific functionality.
- * Analyzer does not interpret builtins, they are handled exclusively by the compiler/code emitter.
- *
- * (builtin :add 10 20)
- */
-typedef struct FormBuiltin {
-  wchar_t *name;
-  uint64_t nameLength;
-  Form *args;
-  uint64_t numArgs;
-} FormBuiltin;
-
-typedef enum FormType {
-  F_NONE,
-  F_CONST,
-  F_IF,
-  F_LET,
-  F_DEF,
-  F_ENV_REF,
-  F_VAR_REF,
-  F_FN,
-  F_BUILTIN,
-  F_FN_CALL,
-} FormType;
-
-typedef struct Form {
-  FormType type;
-  union {
-    Expr *constant;
-    FormIf iff;
-    FormLet let;
-    FormDef def;
-    FormEnvRef envRef;
-    FormVarRef varRef;
-    /*
-     * TODO: this can be realized by creating a builtin the vm honors to load a reference to the function currently being executed into the op stack
-     * - analyzer detects function self-references by keeping a stack of in-scope fn-calls
-     * - analyzer creates function reference forms
-     * - the compiler emits I_LOAD_FN_REF instructions
-     * - the vm honors I_LOAD_FN_REF by keeping a 'current' fn handle in the Frame
-     *
-     * New Plan
-     *
-     * - analyzer adds function names as bindings in the binding stack
-     *   - these bindings get a new binding type
-     *   - bindings of this type are indexed separately from the locals, such that index represents the function
-     *     definition depth
-     *
-     * - compiler creates constants and emits I_LOAD_CONSTs based on references to these new bindings
-     *
-     * - vm hydration has two phases now:
-     *   - the current phase where things get allocated
-     *   - the new phase where the function reference constants are resolved. two phases are needed because with the
-     *     current algo hydration is depth-first recursive, and I'm not eager to change it right now.
-     *
-     */
-    FormFn fn;
-    FormFnCall fnCall;
-    FormBuiltin builtin;
-    // TODO: need to support 'ns' special form
-  };
-  SourceLocation source;
-} Form;
-
-RetVal tryFormAnalyze(Expr* expr, Form **form, Error *error);
-void formFreeContents(Form* expr);
-void formFree(Form* expr);
-
-
-// TODO: when a function definition captures values from its lexical scope, those values are copied from their
-// lexical scope into the function object itself. So the compiler needs a way to figure out how to generate
-// code that copies these values whenever they are captured.
-
-RetVal formPrn(Form* form, FILE *file, Error *error);
-
-#endif //WARP_LANG_ANALYZER_H
-
-
-
-
-
-
-
-
 
 
 

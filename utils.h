@@ -83,6 +83,16 @@ void stringBufferClear(StringBuffer_t b);
 uint64_t stringBufferAllocatedBytes(StringBuffer_t buf);
 uint64_t stringBufferUnusedBytes(StringBuffer_t buf);
 
+typedef struct Text {
+  wchar_t *value;
+  uint64_t length;
+} Text;
+
+void textInitContents(Text *text);
+RetVal tryTextMake(wchar_t* from, Text *text, uint64_t len, Error *error);
+RetVal tryTextCopy(Text *from, Text *to, Error *error);
+void textFreeContents(Text *text);
+
 #endif //WARP_LANG_UTILS_H
 
 
