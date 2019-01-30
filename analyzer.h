@@ -13,18 +13,29 @@ typedef enum BindingSource {
   BS_LOCAL,
 } BindingSource;
 
-typedef enum BindingType {
+typedef enum LocalBindingType {
   BT_NONE,
   BT_LET,
   BT_FN_REF,
   BT_FN_ARG,
-} BindingType;
+} LocalBindingType;
+
+typedef struct LocalBindingInfo {
+  LocalBindingType type;
+  uint16_t typeIndex; // each type of binding is numbered so it can be referenced
+} LocalBindingInfo;
+
+typedef struct CapturedBindingInfo {
+  uint16_t bindingIndex;
+} CapturedBindingInfo;
 
 typedef struct Binding {
   Text name;
   BindingSource source;
-  BindingType type;
-  uint16_t typeIndex; // each type of binding is numbered so it can be referenced
+  union {
+    LocalBindingInfo local;
+    CapturedBindingInfo captured;
+  };
 } Binding;
 
 typedef struct BindingTable {
@@ -81,6 +92,8 @@ typedef struct FormFnArg {
 typedef struct FormFn {
 
   BindingTable table;
+
+  bool isClosure;
 
   // this name is only used within the function to refer to itself, for things like recursion
   bool hasName;

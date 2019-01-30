@@ -148,16 +148,12 @@ typedef struct AnalyzerContext {
 
 void bindingInitContents(Binding *binding) {
   textInitContents(&binding->name);
-  binding->typeIndex = 0;
-  binding->type = BT_NONE;
   binding->source = BS_NONE;
 }
 
 void bindingFreeContents(Binding *binding) {
   if (binding != NULL) {
     textFreeContents(&binding->name);
-    binding->typeIndex = 0;
-    binding->type = BT_NONE;
     binding->source = BS_NONE;
   }
 }
@@ -617,8 +613,8 @@ RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *e
     bindingInitContents(&binding);
     throws(tryTextCopy(&b->name, &binding.name, error));
     binding.source = BS_LOCAL;
-    binding.type = BT_LET;
-    binding.typeIndex = i;
+    binding.local.type = BT_LET;
+    binding.local.typeIndex = i;
 
     throws(tryCreateBinding(ctx, binding, &b->bindingIndex, error));
 
@@ -832,6 +828,16 @@ void markTailCalls(FormFn *fn) {
   }
 }
 
+bool bindingTableCaptures(BindingTable *table) {
+  for (uint16_t i=0; i<table->usedSpace; i++) {
+    Binding *b = &table->bindings[i];
+    if (b->source == BS_CAPTURED) {
+      return true;
+    }
+  }
+  return false;
+}
+
 RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error) {
   RetVal ret;
 
@@ -856,8 +862,8 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
     bindingInitContents(&binding);
     throws(tryTextCopy(&fn->name, &binding.name, error));
     binding.source = BS_LOCAL;
-    binding.type = BT_FN_REF;
-    binding.typeIndex = 0;
+    binding.local.type = BT_FN_REF;
+    binding.local.typeIndex = 0;
 
     throws(tryCreateBinding(ctx, binding, &fn->bindingIndex, error));
     numBindingsPushed = numBindingsPushed + 1;
@@ -869,8 +875,8 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
     bindingInitContents(&binding);
     throws(tryTextCopy(&fn->args[i].name, &binding.name, error));
     binding.source = BS_LOCAL;
-    binding.type = BT_FN_ARG;
-    binding.typeIndex = i;
+    binding.local.type = BT_FN_ARG;
+    binding.local.typeIndex = i;
 
     throws(tryCreateBinding(ctx, binding, &fn->args[i].bindingIndex, error));
     numBindingsPushed = numBindingsPushed + 1;
@@ -885,6 +891,8 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
   }
 
   markTailCalls(fn);
+
+  fn->isClosure = bindingTableCaptures(&fn->table);
 
   throws(tryPopBindings(ctx, numBindingsPushed, error));
   throws(tryPopBindingTable(&ctx->bindingTables, error));
@@ -1165,8 +1173,7 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *err
         bindingInitContents(&binding);
         throws(tryTextCopy(&captured.name, &binding.name, error));
         binding.source = BS_CAPTURED;
-        binding.type = captured.type;
-        binding.typeIndex = captured.typeIndex;
+        binding.captured.bindingIndex = resolved->bindingIndex;
 
         throws(tryAddBinding(this, binding, error));
 

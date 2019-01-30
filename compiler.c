@@ -134,8 +134,7 @@ void codesClear(Codes *codes) {
 typedef struct Output {
   Constants *constants;
   Codes *codes;
-  uint16_t *numLocals;
-  BindingTable *bindingTable;
+  uint16_t *slotsTable; // maps binding table indexes to slot indexes for storing locals
 } Output;
 
 RetVal tryCompile(Form *form, Output output, Error *error);
@@ -232,24 +231,138 @@ RetVal tryCompileIf(Form *form, Output output, Error *error) {
 // TODO: perhaps we need an initial pass before compilation to identify constants, and references to constants
 // so that we can avoid encoding the same constants repeatedly where they are referenced more than once
 
-RetVal tryCompileFn(Form *form, Output output, Error *error) {
+/*
+ * Here is how this code expects the VM to populate the locals when this function is invoked:
+ * - if the function defines a self-referential name, store that as a constant in the first slot
+ * - then store all the captured bindings as locals next
+ * - then store all the arguments as locals next
+ * - the remaining locals space is left blank for let-bindings
+ *
+ * // TODO: the compiler should ensure this order rather than depending on the analyzer's sequence,
+ * // since the virtual machine does not have the binding table at its disposal to inspect
+ */
+
+RetVal trySlotsTableBuild(BindingTable *bindingTable, uint16_t **ptr, Error *error) {
+  RetVal ret;
+
+  uint16_t *slotsTable = NULL;
+
+  tryMalloc(slotsTable, sizeof(uint16_t) * bindingTable->usedSpace, "uint16_t array");
+
+  uint16_t slotsCounter = 0;
+
+  // make sure we only got binding types we recognize
+  for (uint16_t i=0; i<bindingTable->usedSpace; i++) {
+    Binding *b = &bindingTable->bindings[i];
+
+    switch (b->source) {
+
+      case BS_LOCAL:
+        switch (b->local.type) {
+          case BT_LET:
+          case BT_FN_ARG:
+          case BT_FN_REF:
+            break;
+          default:
+            throwCompilerError(error, "unsupported: %u", b->local.type);
+        }
+        break;
+
+      case BS_CAPTURED:
+        break;
+
+      default:
+        throwCompilerError(error, "unsupported: %u", b->source);
+    }
+  }
+
+  // if the function defines a self-referential binding, store that in the first slot, there can be only one
+  bool foundFnRef = false;
+  for (uint16_t i=0; i<bindingTable->usedSpace; i++) {
+    Binding *b = &bindingTable->bindings[i];
+    if (b->source == BS_LOCAL && b->local.type == BT_FN_REF) {
+      if (foundFnRef) {
+        throwCompilerError(error, "unsupported: %u", b->source);
+      }
+      slotsTable[i] = slotsCounter;
+      slotsCounter++;
+      foundFnRef = true;
+    }
+  }
+
+  // next store all the arguments in slots
+  for (uint16_t i=0; i<bindingTable->usedSpace; i++) {
+    Binding *b = &bindingTable->bindings[i];
+    if (b->source == BS_LOCAL && b->local.type == BT_FN_ARG) {
+      slotsTable[i] = slotsCounter;
+      slotsCounter++;
+    }
+  }
+
+  // store captured bindings in slots
+  for (uint16_t i=0; i<bindingTable->usedSpace; i++) {
+    Binding *b = &bindingTable->bindings[i];
+    if (b->source == BS_CAPTURED) {
+      slotsTable[i] = slotsCounter;
+      slotsCounter++;
+    }
+  }
+
+  // the remaining slots are used for let-bindings
+  for (uint16_t i=0; i<bindingTable->usedSpace; i++) {
+    Binding *b = &bindingTable->bindings[i];
+    if (b->source == BS_LOCAL && b->local.type == BT_LET) {
+      slotsTable[i] = slotsCounter;
+      slotsCounter++;
+    }
+  }
+
+  *ptr = slotsTable;
+  return R_SUCCESS;
+
+  failure:
+    if (slotsTable != NULL) {
+      free(slotsTable);
+    }
+    return ret;
+}
+
+RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   RetVal ret;
 
   // clean up on failure
   Constants fnConstants;
   Codes fnCodes;
 
+  // clean up always
+  uint16_t *slotsTable = NULL;
+
   constantsInitContents(&fnConstants);
   codesInitContents(&fnCodes);
 
-  uint16_t fnNumLocals = form->fn.numArgs; // the first n locals are always the first n args
-
   {
+    throws(trySlotsTableBuild(&form->fn.table, &slotsTable, error));
+
     Output fnOutput;
     fnOutput.constants = &fnConstants;
     fnOutput.codes = &fnCodes;
-    fnOutput.numLocals = &fnNumLocals;
-    fnOutput.bindingTable = &form->fn.table;
+    fnOutput.slotsTable = slotsTable;
+
+    // create fn ref constant, emit code to load it and store it at local[0]
+    if (form->fn.hasName) {
+
+      Constant c;
+      c.type = CT_FN_REF;
+      c.fnRef.fnId = form->fn.id;
+      throws(tryAppendConstant(output.constants, c, error));
+
+      uint16_t constantIndex = output.constants->numUsed - 1;
+      uint16_t localIndex = 0;
+
+      uint8_t code[] = { I_LOAD_CONST,  constantIndex >> 8, constantIndex & 0xFF,
+                         I_STORE_LOCAL, localIndex >> 8,    localIndex & 0xFF };
+      throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+    }
 
     for (uint16_t i = 0; i < form->fn.forms.numForms; i++) {
       throws(tryCompile(&form->fn.forms.forms[i], fnOutput, error));
@@ -266,7 +379,7 @@ RetVal tryCompileFn(Form *form, Output output, Error *error) {
   fnConst.numArgs = form->fn.numArgs;
   fnConst.numConstants = fnConstants.numUsed;
   fnConst.constants = fnConstants.constants;
-  fnConst.code.numLocals = fnNumLocals;
+  fnConst.code.numLocals = form->fn.table.usedSpace;
   fnConst.code.maxOperandStackSize = 100; // TODO: need to compute this
   fnConst.code.codeLength = fnCodes.numUsed;
   fnConst.code.code = fnCodes.codes;
@@ -277,15 +390,50 @@ RetVal tryCompileFn(Form *form, Output output, Error *error) {
   c.function = fnConst;
   throws(tryAppendConstant(output.constants, c, error));
 
-  uint16_t index = output.constants->numUsed - 1;
-  uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+  free(slotsTable);
 
   return R_SUCCESS;
 
   failure:
     constantsFreeContents(&fnConstants);
     codesFreeContents(&fnCodes);
+    if (slotsTable != NULL) {
+      free(slotsTable);
+    }
+    return ret;
+}
+
+
+RetVal tryCompileFn(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  throws(tryCompileFnConstant(form, output, error));
+  uint16_t fnConstIndex = output.constants->numUsed - 1;
+
+  uint8_t loadInst;
+  if (form->fn.isClosure) {
+
+    for (uint16_t i=0; i<form->fn.table.usedSpace; i++) {
+      Binding *b = &form->fn.table.bindings[i];
+      if (b->source == BS_CAPTURED) {
+        uint16_t slotIndex = output.slotsTable[b->captured.bindingIndex];
+        uint8_t code[] = { I_LOAD_LOCAL, slotIndex >> 8, slotIndex & 0xFF };
+        throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+      }
+    }
+
+    loadInst = I_LOAD_CLOSURE;
+  }
+  else {
+    loadInst = I_LOAD_CONST;
+  }
+
+  uint8_t code[] = { loadInst, fnConstIndex >> 8, fnConstIndex & 0xFF };
+  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+
+  return R_SUCCESS;
+
+  failure:
     return ret;
 }
 
@@ -478,13 +626,9 @@ RetVal tryCompileLet(Form *form, Output output, Error *error) {
 
     throws(tryCompile(binding->value, output, error));
 
-    // output.bindingTable->bindings[binding->]
-
-    uint16_t index = binding->bindingIndex;
+    uint16_t index = output.slotsTable[binding->bindingIndex];
     uint8_t code[] = { I_STORE_LOCAL, index >> 8, index & 0xFF };
     throws(tryCodeAppend(output.codes, sizeof(code), code, error));
-
-    *output.numLocals = *output.numLocals + 1;
   }
 
   if (form->let.forms.numForms > 0) {
@@ -509,44 +653,12 @@ RetVal tryCompileLet(Form *form, Output output, Error *error) {
     return ret;
 }
 
-//RetVal tryCompileEnvFnRef(Form *form, Output output, Error *error) {
-//  RetVal ret;
-//
-//  Constant c;
-//  c.type = CT_FN_REF;
-//  c.fnRef.fnId = form->envRef.index;
-//
-//  throws(tryAppendConstant(output.constants, c, error));
-//
-//  uint16_t index = output.constants->numUsed - 1;
-//  uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-//
-//  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
-//
-//  return R_SUCCESS;
-//
-//  failure:
-//    return ret;
-//}
-
 RetVal tryCompileEnvRef(Form *form, Output output, Error *error) {
   RetVal ret;
 
-    uint16_t index = form->envRef.bindingIndex;
-    uint8_t code[] = { I_LOAD_LOCAL, index >> 8, index & 0xFF };
-    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
-
-//  if (form->envRef.type == RT_ARG || form->envRef.type == RT_LOCAL) {
-//    uint16_t index = form->envRef.index;
-//    uint8_t code[] = { I_LOAD_LOCAL, index >> 8, index & 0xFF };
-//    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
-//  }
-//  else if (form->envRef.type == RT_FN) {
-//    throws(tryCompileEnvFnRef(form, output, error));
-//  }
-//  else {
-//    throwCompilerError(error, "unsupported");
-//  }
+  uint16_t index = output.slotsTable[form->envRef.bindingIndex];
+  uint8_t code[] = { I_LOAD_LOCAL, index >> 8, index & 0xFF };
+  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
 
   return R_SUCCESS;
 
@@ -718,21 +830,20 @@ RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
   // these get cleaned up on failure
   Constants constants;
   Codes codes;
+  uint16_t *slotsTable;
 
   constantsInitContents(&constants);
   codesInitContents(&codes);
   codeUnitInitContents(codeUnit);
+  slotsTable = NULL;
 
-  // TODO: this was where I left off, the tryCompile needs to provide more information to fill out the Code object
-
-  uint16_t numLocals = 0;
+  throws(trySlotsTableBuild(&root->table, &slotsTable, error));
 
   {
     Output output;
     output.constants = &constants;
     output.codes = &codes;
-    output.numLocals = &numLocals;
-    output.bindingTable = &root->table;
+    output.slotsTable = slotsTable;
 
     throws(tryCompile(root->form, output, error));
 
@@ -740,7 +851,7 @@ RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
     throws(tryCodeAppend(output.codes, sizeof(code), code, error));
   }
 
-  codeUnit->code.numLocals = numLocals;
+  codeUnit->code.numLocals = root->table.usedSpace;
   codeUnit->numConstants = constants.numUsed;
   codeUnit->constants = constants.constants;
   codeUnit->code.codeLength = codes.numUsed;
@@ -750,11 +861,16 @@ RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
   codeUnit->code.maxOperandStackSize = 10;
   codeUnit->code.hasSourceTable = false;
 
+  free(slotsTable);
+
   return R_SUCCESS;
 
   failure:
     constantsFreeContents(&constants);
     codesFreeContents(&codes);
+    if (slotsTable != NULL) {
+      free(slotsTable);
+    }
     return ret;
 }
 
@@ -841,7 +957,7 @@ RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
 // emit I_STORE_FIELD to set the cons 'next'field with the second argument
 
 /*
- * so this is an example of implementing cons generically. however, this is basically
+
  * the compiler taking knowlege of the record layout of Cons.
  *
  * TODO: are lists builtins the VM supplies, or things that are implemented on top of it?
