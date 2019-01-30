@@ -276,21 +276,7 @@ RetVal trySlotsTableBuild(BindingTable *bindingTable, uint16_t **ptr, Error *err
     }
   }
 
-  // if the function defines a self-referential binding, store that in the first slot, there can be only one
-  bool foundFnRef = false;
-  for (uint16_t i=0; i<bindingTable->usedSpace; i++) {
-    Binding *b = &bindingTable->bindings[i];
-    if (b->source == BS_LOCAL && b->local.type == BT_FN_REF) {
-      if (foundFnRef) {
-        throwCompilerError(error, "unsupported: %u", b->source);
-      }
-      slotsTable[i] = slotsCounter;
-      slotsCounter++;
-      foundFnRef = true;
-    }
-  }
-
-  // next store all the arguments in slots
+  // store all the arguments in slots
   for (uint16_t i=0; i<bindingTable->usedSpace; i++) {
     Binding *b = &bindingTable->bindings[i];
     if (b->source == BS_LOCAL && b->local.type == BT_FN_ARG) {
@@ -305,6 +291,20 @@ RetVal trySlotsTableBuild(BindingTable *bindingTable, uint16_t **ptr, Error *err
     if (b->source == BS_CAPTURED) {
       slotsTable[i] = slotsCounter;
       slotsCounter++;
+    }
+  }
+
+  // if the function defines a self-referential binding, store that in a slot, there can be only one
+  bool foundFnRef = false;
+  for (uint16_t i=0; i<bindingTable->usedSpace; i++) {
+    Binding *b = &bindingTable->bindings[i];
+    if (b->source == BS_LOCAL && b->local.type == BT_FN_REF) {
+      if (foundFnRef) {
+        throwCompilerError(error, "unsupported: %u", b->source);
+      }
+      slotsTable[i] = slotsCounter;
+      slotsCounter++;
+      foundFnRef = true;
     }
   }
 
@@ -354,14 +354,14 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
       Constant c;
       c.type = CT_FN_REF;
       c.fnRef.fnId = form->fn.id;
-      throws(tryAppendConstant(output.constants, c, error));
+      throws(tryAppendConstant(fnOutput.constants, c, error));
 
-      uint16_t constantIndex = output.constants->numUsed - 1;
-      uint16_t localIndex = 0;
+      uint16_t constantIndex = fnOutput.constants->numUsed - 1;
+      uint16_t slotIndex = fnOutput.slotsTable[form->fn.bindingIndex];
 
       uint8_t code[] = { I_LOAD_CONST,  constantIndex >> 8, constantIndex & 0xFF,
-                         I_STORE_LOCAL, localIndex >> 8,    localIndex & 0xFF };
-      throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+                         I_STORE_LOCAL, slotIndex >> 8,     slotIndex & 0xFF };
+      throws(tryCodeAppend(fnOutput.codes, sizeof(code), code, error));
     }
 
     for (uint16_t i = 0; i < form->fn.forms.numForms; i++) {

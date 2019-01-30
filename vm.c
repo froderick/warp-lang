@@ -1227,7 +1227,7 @@ RetVal tryPopInvocable(VM *vm, Frame *frame, Invocable *invocable, Error *error)
       break;
     }
     default:
-    throwRuntimeError(error, "cannot invoke this value type as a function: %u", popVal.type);
+      throwRuntimeError(error, "cannot invoke this value type as a function: %u", popVal.type);
   }
 
   return R_SUCCESS;

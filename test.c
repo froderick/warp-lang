@@ -398,6 +398,8 @@ START_TEST(compilerBasic) {
     {
       ck_assert_int_eq(tryTestCompile(L"((fn (a b) (builtin :add a b)) 4 5)", &codeUnit, &e), R_SUCCESS);
 
+      //printCodeUnit(&codeUnit);
+
       // verify fn
 
       FnConstant fn = codeUnit.constants[2].function;
@@ -490,13 +492,13 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t expectedCode[] = {
-          I_LOAD_CONST, 0, 0,
+          I_LOAD_CONST,  0, 0,
           I_STORE_LOCAL, 0, 0,
-          I_LOAD_CONST, 0, 1,
-          I_STORE_LOCAL, 0, 2,
-          I_LOAD_LOCAL, 0, 2,
+          I_LOAD_CONST,  0, 1,
           I_STORE_LOCAL, 0, 1,
-          I_LOAD_LOCAL, 0, 1,
+          I_LOAD_LOCAL,  0, 1,
+          I_STORE_LOCAL, 0, 2,
+          I_LOAD_LOCAL,  0, 2,
           I_RET,
       };
 

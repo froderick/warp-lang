@@ -261,7 +261,7 @@ RetVal tryPopBindingTable(BindingTables *tables, Error *error) {
     throwInternalError(error, "cannot pop binding table from empty stack");
   }
 
-  bindingTableInitContents(tables->tables[tables->usedSpace - 1]);
+  tables->tables[tables->usedSpace - 1] = NULL;
   tables->usedSpace = tables->usedSpace - 1;
 
   return R_SUCCESS;
@@ -842,14 +842,13 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
   RetVal ret;
 
   // things that get cleaned up always
-  AnalyzerContext fnContext;
   Expr *formElements = NULL;
 
   formFnInitContents(fn);
   throws(tryFnParse(fnExpr, fn, &formElements, error));
 
-  fn->id = fnContext.fnCount;
-  fnContext.fnCount = fnContext.fnCount + 1;
+  fn->id = ctx->fnCount;
+  ctx->fnCount = ctx->fnCount + 1;
 
   // create new binding stack, initialized with the fn args as the first bindings
 
@@ -887,7 +886,7 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
   for (int i=0; i<fn->forms.numForms; i++) {
     Expr expr = formElements[i];
     Form *thisForm = fn->forms.forms + i;
-    throws(tryFormAnalyzeContents(&fnContext, &expr, thisForm, error));
+    throws(tryFormAnalyzeContents(ctx, &expr, thisForm, error));
   }
 
   markTailCalls(fn);
