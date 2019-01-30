@@ -736,6 +736,12 @@ START_TEST(repl) {
 
     assertEval(L"(let (a 100 b (fn () a)) (b))",
                L"100");
+
+    assertEval(L"(let (minimum 101"
+               "       adder (fn (n) (builtin :add minimum n))"
+               "       doer (fn () (adder 5)))"
+               "   (doer))",
+               L"106");
   }
 END_TEST
 
