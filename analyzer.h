@@ -94,6 +94,7 @@ typedef struct FormFn {
   BindingTable table;
 
   bool isClosure;
+  uint16_t numCaptures;
 
   // this name is only used within the function to refer to itself, for things like recursion
   bool hasName;

@@ -609,6 +609,7 @@ START_TEST(vmBasic) {
     fn.constants[0].type = CT_INT;
     fn.constants[0].integer = 100;
     fn.numArgs = 1;
+    fn.numCaptures = 0;
     fn.code.numLocals = 1;
     fn.code.maxOperandStackSize = 10;
     fn.code.codeLength = sizeof(fnCode);
@@ -636,6 +637,7 @@ START_TEST(vmBasic) {
     unit.code.hasSourceTable = false;
 
     ck_assert_int_eq(tryVMEval(vm, &unit, &result, &error), R_SUCCESS);
+
     ck_assert_int_eq(result.type, VT_UINT);
     ck_assert_int_eq(result.value, 110);
 
@@ -729,6 +731,11 @@ START_TEST(repl) {
                L"5");
 
     assertEval(L"(builtin :subtract 10 2)", L"8");
+
+    assertEval(L"(let (a 100) (fn () a))", L"<closure>");
+
+    assertEval(L"(let (a 100 b (fn () a)) (b))",
+               L"100");
   }
 END_TEST
 

@@ -828,14 +828,15 @@ void markTailCalls(FormFn *fn) {
   }
 }
 
-bool bindingTableCaptures(BindingTable *table) {
+uint16_t bindingTableCaptures(BindingTable *table) {
+  uint16_t numCaptures = 0;
   for (uint16_t i=0; i<table->usedSpace; i++) {
     Binding *b = &table->bindings[i];
     if (b->source == BS_CAPTURED) {
-      return true;
+      numCaptures++;
     }
   }
-  return false;
+  return numCaptures;
 }
 
 RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error) {
@@ -891,7 +892,8 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
 
   markTailCalls(fn);
 
-  fn->isClosure = bindingTableCaptures(&fn->table);
+  fn->numCaptures = bindingTableCaptures(&fn->table);
+  fn->isClosure = fn->numCaptures > 0;
 
   throws(tryPopBindings(ctx, numBindingsPushed, error));
   throws(tryPopBindingTable(&ctx->bindingTables, error));
@@ -1144,7 +1146,7 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *err
       // because we discover them late)
 
       BindingTable *current = ctx->bindingTables.tables[currentTableIndex];
-      for (uint16_t i=0; i<= current->usedSpace; i++) {
+      for (uint16_t i=0; i<current->usedSpace; i++) {
         Binding *b = &current->bindings[i];
 
         if (b->source == BS_CAPTURED && wcscmp(b->name.value, sym) == 0) {

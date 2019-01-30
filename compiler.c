@@ -378,6 +378,7 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   fnConst.fnId = form->fn.id;
   fnConst.numArgs = form->fn.numArgs;
   fnConst.numConstants = fnConstants.numUsed;
+  fnConst.numCaptures = form->fn.numCaptures;
   fnConst.constants = fnConstants.constants;
   fnConst.code.numLocals = form->fn.table.usedSpace;
   fnConst.code.maxOperandStackSize = 100; // TODO: need to compute this

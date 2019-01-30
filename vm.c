@@ -858,7 +858,7 @@ RetVal tryAllocateClosure(GC *gc, Closure closure, Value *value, Error *error) {
   gc->closures[index] = closure;
   gc->usedClosureSpace = index + 1;
 
-  value->type = VT_FN;
+  value->type = VT_CLOSURE;
   value->value = index;
 
   return R_SUCCESS;
@@ -1255,7 +1255,7 @@ RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
   for (uint16_t i=0; i<invocable.fn.numArgs; i++) {
     Value arg;
     throws(tryOpStackPop(frame->opStack, &arg, error));
-    uint16_t idx = invocable.fn.numArgs - (uint16_t)1 - i;
+    uint16_t idx = invocable.fn.numArgs - (1 + i);
     locals[idx] = arg;
   }
 
@@ -1288,16 +1288,16 @@ RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
   throws(tryFrameEval(vm, &child, error));
   throws(tryOpStackPush(frame->opStack, child.result, error));
 
-  free(child.locals);
+  free(locals);
   opStackFreeContents(&opStack);
 
   frame->pc = frame->pc + 1;
   return R_SUCCESS;
 
   failure:
-  free(child.locals);
-  opStackFreeContents(&opStack);
-  return ret;
+    free(locals);
+    opStackFreeContents(&opStack);
+    return ret;
 }
 
 /*
@@ -1595,7 +1595,7 @@ RetVal tryLoadClosureEval(VM *vm, Frame *frame, Error *error) {
   for (uint16_t i=0; i<closure.numCaptures; i++) {
     Value capture;
     throws(tryOpStackPop(frame->opStack, &capture, error));
-    uint16_t idx = fn.numArgs - (uint16_t)1 - i;
+    uint16_t idx = fn.numCaptures - (1 + i);
     closure.captures[idx] = capture;
   }
 
@@ -1850,7 +1850,7 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 
   fn.numArgs = fnConst->numArgs;
   fn.numConstants = fnConst->numConstants;
-  fn.numCaptures = 0; // TODO
+  fn.numCaptures = fnConst->numCaptures;
 
   tryMalloc(fn.constants, sizeof(Value) * fn.numConstants, "Value array");
   throws(tryHydrateConstants(vm, fn.numConstants, fnConst->constants, &fn.constants, &unresolved, error));
@@ -2215,6 +2215,9 @@ RetVal _tryVMPrnStr(VM_t vm, Value result, StringBuffer_t b, Error *error) {
       break;
     case VT_FN:
       throws(tryStringBufferAppendStr(b, L"<function>", error));
+      break;
+    case VT_CLOSURE:
+      throws(tryStringBufferAppendStr(b, L"<closure>", error));
       break;
     case VT_STR: {
       String str;
