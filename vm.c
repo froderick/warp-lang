@@ -1236,6 +1236,40 @@ RetVal tryPopInvocable(VM *vm, Frame *frame, Invocable *invocable, Error *error)
   return ret;
 }
 
+// TODO: use this to fix the duplication
+RetVal tryInvokePopulateLocals(VM *vm, Frame *frame, Invocable *invocable, Error *error) {
+  RetVal ret;
+
+  // pop args and set as locals, reversing the order
+  for (uint16_t i=0; i<invocable->fn.numArgs; i++) {
+    Value arg;
+    throws(tryOpStackPop(frame->opStack, &arg, error));
+    uint16_t idx = invocable->fn.numArgs - (1 + i);
+    frame->locals[idx] = arg;
+  }
+
+  if (invocable->fn.numCaptures > 0) {
+
+    if (!invocable->hasClosure) {
+      throwRuntimeError(error, "cannot invoke this fn without a closure, it captures variables: %u", invocable->fn.numCaptures);
+    }
+    if (invocable->closure.numCaptures < invocable->fn.numCaptures) {
+      throwRuntimeError(error, "closure does not have enough captured variables: %u", invocable->closure.numCaptures);
+    }
+
+    uint16_t nextLocalIdx = invocable->fn.numArgs;
+    for (uint16_t i=0; i<invocable->fn.numCaptures; i++) {
+      frame->locals[nextLocalIdx] = invocable->closure.captures[i];
+      nextLocalIdx = nextLocalIdx + 1;
+    }
+  }
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 // (8)              | (objectref, args... -> ...)
 RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
 
@@ -1333,7 +1367,7 @@ RetVal tryInvokeDynTailEval(VM *vm, Frame *frame, Error *error) {
     frame->locals = resizedLocals;
   }
 
-  // TODO: this does not yet support closures
+  // TODO: fix the duplication here with tryInvokeDynTailEval
 
   // pop args and set as locals, reversing the order
   for (uint16_t i=0; i<invocable.fn.numArgs; i++) {
@@ -1341,6 +1375,22 @@ RetVal tryInvokeDynTailEval(VM *vm, Frame *frame, Error *error) {
     throws(tryOpStackPop(frame->opStack, &arg, error));
     uint16_t idx = invocable.fn.numArgs - (uint16_t)1 - i;
     frame->locals[idx] = arg;
+  }
+
+  if (invocable.fn.numCaptures > 0) {
+
+    if (!invocable.hasClosure) {
+      throwRuntimeError(error, "cannot invoke this fn without a closure, it captures variables: %u", invocable.fn.numCaptures);
+    }
+    if (invocable.closure.numCaptures < invocable.fn.numCaptures) {
+      throwRuntimeError(error, "closure does not have enough captured variables: %u", invocable.closure.numCaptures);
+    }
+
+    uint16_t nextLocalIdx = invocable.fn.numArgs;
+    for (uint16_t i=0; i<invocable.fn.numCaptures; i++) {
+      frame->locals[nextLocalIdx] = invocable.closure.captures[i];
+      nextLocalIdx = nextLocalIdx + 1;
+    }
   }
 
   frame->result = nil();
