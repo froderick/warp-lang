@@ -1245,18 +1245,27 @@ RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
   throws(tryPopInvocable(vm, frame, &invocable, error));
 
   // clean up on return
-  Value *locals = NULL;
-  OpStack opStack;
+  Frame child;
+  frameInitContents(&child);
 
-  tryMalloc(locals, sizeof(Value) * invocable.fn.code.numLocals, "Value array");
-  tryOpStackInitContents(&opStack, invocable.fn.code.maxOperandStackSize, error);
+  child.parent = frame;
+  child.numConstants = invocable.fn.numConstants;
+  child.constants = invocable.fn.constants;
+  child.code = invocable.fn.code;
+  child.numLocals = invocable.fn.code.numLocals;
+
+  tryMalloc(child.locals, sizeof(Value) * invocable.fn.code.numLocals, "Value array");
+
+  OpStack childOpStack;
+  tryOpStackInitContents(&childOpStack, invocable.fn.code.maxOperandStackSize, error);
+  child.opStack = &childOpStack;
 
   // pop args and set as locals, reversing the order
   for (uint16_t i=0; i<invocable.fn.numArgs; i++) {
     Value arg;
     throws(tryOpStackPop(frame->opStack, &arg, error));
     uint16_t idx = invocable.fn.numArgs - (1 + i);
-    locals[idx] = arg;
+    child.locals[idx] = arg;
   }
 
   if (invocable.fn.numCaptures > 0) {
@@ -1270,33 +1279,25 @@ RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
 
     uint16_t nextLocalIdx = invocable.fn.numArgs;
     for (uint16_t i=0; i<invocable.fn.numCaptures; i++) {
-      locals[nextLocalIdx] = invocable.closure.captures[i];
+      child.locals[nextLocalIdx] = invocable.closure.captures[i];
       nextLocalIdx = nextLocalIdx + 1;
     }
   }
 
-  Frame child;
-  frameInitContents(&child);
-  child.parent = frame;
-  child.numConstants = invocable.fn.numConstants;
-  child.constants = invocable.fn.constants;
-  child.code = invocable.fn.code;
-  child.numLocals = invocable.fn.code.numLocals;
-  child.locals = locals;
-  child.opStack = &opStack;
-
   throws(tryFrameEval(vm, &child, error));
   throws(tryOpStackPush(frame->opStack, child.result, error));
 
-  free(locals);
-  opStackFreeContents(&opStack);
-
   frame->pc = frame->pc + 1;
-  return R_SUCCESS;
+
+  ret = R_SUCCESS;
+  goto done;
 
   failure:
-    free(locals);
-    opStackFreeContents(&opStack);
+    goto done;
+
+  done:
+    free(child.locals);
+    opStackFreeContents(child.opStack);
     return ret;
 }
 
@@ -1331,6 +1332,8 @@ RetVal tryInvokeDynTailEval(VM *vm, Frame *frame, Error *error) {
     frame->numLocals = invocable.fn.code.numLocals;
     frame->locals = resizedLocals;
   }
+
+  // TODO: this does not yet support closures
 
   // pop args and set as locals, reversing the order
   for (uint16_t i=0; i<invocable.fn.numArgs; i++) {
