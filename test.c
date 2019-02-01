@@ -742,6 +742,10 @@ START_TEST(repl) {
                "       doer (fn () (adder 5)))"
                "   (doer))",
                L"106");
+
+    assertEval(L"(let () "
+               "    (def foo (fn (x) x))"
+               "    (builtin :setmacro \"foo\"))", L"nil");
   }
 END_TEST
 

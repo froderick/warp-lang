@@ -261,6 +261,7 @@ typedef struct Var {
   wchar_t *namespace;
   wchar_t *name;
   Value value;
+  bool isMacro;
 } Var;
 
 typedef struct VarList {
@@ -466,6 +467,7 @@ void varInitContents(Var *var) {
   var->name = NULL;
   var->value.type = VT_NIL;
   var->value.value = 0;
+  var->isMacro = false;
 }
 
 RetVal tryVarInit(wchar_t *namespace, wchar_t *name, Value value, Var *var, Error *error) {
@@ -1706,6 +1708,41 @@ RetVal tryRestEval(VM *vm, Frame *frame, Error *error) {
     return ret;
 }
 
+// (8),             | (name ->)
+RetVal trySetMacroEval(VM *vm, Frame *frame, Error *error) {
+  RetVal ret;
+
+  Value strValue;
+  throws(tryOpStackPop(frame->opStack, &strValue, error));
+
+  if (strValue.type != VT_STR) {
+    throwRuntimeError(error, "only symbols can identify vars: %u", strValue.type);
+  }
+
+  String str;
+  throws(tryDerefString(&vm->gc, strValue, &str, error));
+
+  Var *var;
+  if (!resolveVar(&vm->namespaces, str.value, str.length, &var)) {
+    throwRuntimeError(error, "no such var exists: %ls", str.value);
+  }
+
+  if (!var->isMacro) {
+    if (var->value.type != VT_FN) {
+      throwRuntimeError(error, "only vars referring to functions can be macros: %ls, %u", str.value, var->value.type);
+    }
+    var->isMacro = true;
+  }
+
+  throws(tryOpStackPush(frame->opStack, nil(), error));
+
+  frame->pc = frame->pc + 1;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 InstTable instTableCreate() {
 
   InstTable table;
@@ -1739,6 +1776,7 @@ InstTable instTableCreate() {
       [I_CONS]             = { .name = "I_CONS",            .print = printInst,          .tryEval = tryConsEval },
       [I_FIRST]            = { .name = "I_FIRST",           .print = printInst,          .tryEval = tryFirstEval},
       [I_REST]             = { .name = "I_REST",            .print = printInst,          .tryEval = tryRestEval },
+      [I_SET_MACRO]        = { .name = "I_SET_MACRO",       .print = printInst,          .tryEval = trySetMacroEval},
 
 
 //      [I_NEW]         = { .name = "I_NEW",         .print = printUnknown},

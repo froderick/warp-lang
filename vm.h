@@ -55,6 +55,7 @@ typedef enum InstType {
   I_CONS,            // (8),             | (x, seq -> newseq)
   I_FIRST,           // (8),             | (seq -> x)
   I_REST,            // (8),             | (seq -> seq)
+  I_SET_MACRO,       // (8),             | (name ->)
 
   // requires garbage collection
   I_NEW,         // (8), objlen (16) | (-> objectref)
