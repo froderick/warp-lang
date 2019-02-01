@@ -746,6 +746,8 @@ START_TEST(repl) {
     assertEval(L"(let () "
                "    (def foo (fn (x) x))"
                "    (builtin :setmacro \"foo\"))", L"nil");
+
+    assertEval(L"(let () (def x 100) user/x)", L"100");
   }
 END_TEST
 
