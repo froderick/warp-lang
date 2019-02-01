@@ -45,5 +45,5 @@
 ;;              (let (name (first args)
 ;;                    fnargs (second args)
 ;;                    forms (drop 2 args))
-;;                '(def `name '(fn `name `args @forms))))))
+;;                `(def ~name (fn ~name ~args ~@forms))))))
 ;;(builtin :setmacro "defn")
