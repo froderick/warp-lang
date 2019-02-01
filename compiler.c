@@ -760,6 +760,46 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     uint8_t addCode[] = { I_GET_MACRO };
     throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
   }
+  else if (wcscmp(builtin->name.value, L"list") == 0) {
+
+    if (builtin->args.numForms == 0) {
+      {
+        Constant c;
+        c.type = CT_NIL;
+        throws(tryAppendConstant(output.constants, c, error));
+        uint16_t index = output.constants->numUsed - 1;
+        uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
+        throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+      }
+    }
+    else {
+      for (int i=0; i < builtin->args.numForms; i++) {
+
+        uint16_t idx = builtin->args.numForms - (i + 1);
+        Form *form = &builtin->args.forms[idx];
+
+        if (i == 0) {
+          throws(tryCompile(form, output, error));
+
+          Constant c;
+          c.type = CT_NIL;
+          throws(tryAppendConstant(output.constants, c, error));
+          uint16_t index = output.constants->numUsed - 1;
+          uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
+          throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+
+          uint8_t addCode[] = {I_CONS};
+          throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+        }
+        else {
+          throws(tryCompile(form, output, error));
+          uint8_t addCode[] = {I_SWAP, I_CONS};
+          throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+        }
+      }
+    }
+
+  }
   else {
     throwCompilerError(error, "unsupported builtin '%ls'", builtin->name.value);
   }

@@ -52,6 +52,7 @@ typedef enum InstType {
   I_DEF_VAR,         // (8), offset (16) | (name, value ->)
   I_LOAD_VAR,        // (8), offset (16) | (name -> value)
   I_LOAD_CLOSURE,    // (8), offset (16) | (captures... -> value)
+  I_SWAP,            // (8),             | (a, b -> b, a)
 
   I_CONS,            // (8),             | (x, seq -> newseq)
   I_FIRST,           // (8),             | (seq -> x)

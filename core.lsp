@@ -74,6 +74,28 @@
                       (cons name
                             (cons fullfn nil))))))
 (builtin :setmacro "defn")
+
+;(def list (fn (args) args))
+;(builtin :setmacro "list")
+
+;;(def when (fn (args)
+;;              (let ())
+;;              (concat 
+;;
+;;               (cons 'if (cons (first args) nil)
+;;                           )
+;;                          ()
+;;              (let (name (first args)
+;;                         fnargs (second args)
+;;                         forms (drop 2 args)
+;;                         fnlist (cons 'fn
+;;                                      (cons name
+;;                                            (cons fnargs nil)))
+;;                         fullfn (concat fnlist forms))
+;;                (cons 'def 
+;;                      (cons name
+;;                            (cons fullfn nil))))))
+;;(builtin :setmacro "defn")
                 
 
 ;;(defn name (args) forms)

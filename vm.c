@@ -1617,6 +1617,24 @@ RetVal tryLoadClosureEval(VM *vm, Frame *frame, Error *error) {
   return ret;
 }
 
+// (8)        | (a, b -> b, a)
+RetVal trySwapEval(VM *vm, Frame *frame, Error *error) {
+  RetVal ret;
+
+  Value a, b;
+  throws(tryOpStackPop(frame->opStack, &a, error));
+  throws(tryOpStackPop(frame->opStack, &b, error));
+
+  throws(tryOpStackPush(frame->opStack, a, error));
+  throws(tryOpStackPush(frame->opStack, b, error));
+
+  frame->pc = frame->pc + 1;
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 // (8),             | (x, seq -> newseq)
 RetVal tryConsEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
@@ -1804,6 +1822,7 @@ InstTable instTableCreate() {
       [I_DEF_VAR]          = { .name = "I_DEF_VAR",         .print = printInstAndIndex,  .tryEval = tryDefVarEval },
       [I_LOAD_VAR]         = { .name = "I_LOAD_VAR",        .print = printInstAndIndex,  .tryEval = tryLoadVarEval },
       [I_LOAD_CLOSURE]     = { .name = "I_LOAD_CLOSURE",    .print = printInstAndIndex,  .tryEval = tryLoadClosureEval },
+      [I_SWAP]             = { .name = "I_SWAP",            .print = printInst,          .tryEval = trySwapEval },
 
       [I_CONS]             = { .name = "I_CONS",            .print = printInst,          .tryEval = tryConsEval },
       [I_FIRST]            = { .name = "I_FIRST",           .print = printInst,          .tryEval = tryFirstEval},

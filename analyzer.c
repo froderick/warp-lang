@@ -1185,13 +1185,10 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *err
       throws(tryEnvRefAnalyze(ctx, expr, current->usedSpace - 1, &form->envRef, error));
     }
   }
-  else { // if ((var = resolveVar(analyzer, sym, expr->symbol.length)) != NULL) {
+  else {
     form->type = F_VAR_REF;
     throws(tryVarRefAnalyze(ctx, expr, &form->varRef, error));
   }
-//      else {
-//        throwSyntaxError(error, getExprPosition(expr), "cannot resolve symbol: '%ls'", sym);
-//      }
 
   return R_SUCCESS;
 

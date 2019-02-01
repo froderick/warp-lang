@@ -748,6 +748,8 @@ START_TEST(repl) {
                "    (builtin :setmacro \"foo\"))", L"nil");
 
     assertEval(L"(let () (def x 100) user/x)", L"100");
+
+    assertEval(L"(builtin :list 1 2)", L"(1 2)");
   }
 END_TEST
 
