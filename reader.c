@@ -361,7 +361,6 @@ RetVal tryNilRead(TokenStream_t stream, Expr **ptr, Error *error) {
 // Lists
 
 RetVal tryExprRead(TokenStream_t stream, Expr **ptr, Error *error);
-RetVal tryListAppend(ExprList *list, Expr *expr, Error *error);
 
 // Assume the opening paren has aready been read.
 // Allocate a list, continue to read expressions and add them to it until a
@@ -387,6 +386,12 @@ RetVal tryListMake(Expr **ptr, Error *error) {
 
   failure:
     return ret;
+}
+
+void listInitContents(ExprList *list) {
+  list->length = 0;
+  list->head = NULL;
+  list->tail = NULL;
 }
 
 RetVal tryListRead(TokenStream_t stream, Expr **ptr, Error *error) {
@@ -609,29 +614,31 @@ RetVal tryExprRead(TokenStream_t stream, Expr **ptr, Error *error) {
     return ret;
 }
 
+void exprFreeContents(Expr *expr) {
+  if (expr != NULL) {
+    if (expr->type == N_STRING) {
+      stringFreeContents(&expr->string);
+    } else if (expr->type == N_NUMBER) {
+      // nothing to do
+    } else if (expr->type == N_SYMBOL) {
+      symbolFreeContents(&expr->symbol);
+    } else if (expr->type == N_KEYWORD) {
+      keywordFreeContents(&expr->keyword);
+    } else if (expr->type == N_BOOLEAN) {
+      // nothing to do
+    } else if (expr->type == N_NIL) {
+      // nothing to do
+    } else if (expr->type == N_LIST) {
+      listFreeContents(&expr->list);
+    }
+  }
+}
+
 void exprFree(Expr *expr) {
-  if (expr->type == N_STRING) {
-    stringFreeContents(&expr->string);
+  if (expr != NULL) {
+    exprFreeContents(expr);
+    free(expr);
   }
-  else if (expr->type == N_NUMBER) {
-    // nothing to do
-  }
-  else if (expr->type == N_SYMBOL) {
-    symbolFreeContents(&expr->symbol);
-  }
-  else if (expr->type == N_KEYWORD) {
-    keywordFreeContents(&expr->keyword);
-  }
-  else if (expr->type == N_BOOLEAN) {
-    // nothing to do
-  }
-  else if (expr->type == N_NIL) {
-    // nothing to do
-  }
-  else if (expr->type == N_LIST) {
-    listFreeContents(&expr->list);
-  }
-  free(expr);
 }
 
 RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error) {

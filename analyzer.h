@@ -6,6 +6,7 @@
 
 #include "errors.h"
 #include "reader.h"
+#include "expander.h"
 
 typedef enum BindingSource {
   BS_NONE,
@@ -160,6 +161,13 @@ typedef struct FormRoot {
 } FormRoot;
 
 RetVal tryFormAnalyze(Expr* expr, FormRoot **form, Error *error);
+
+typedef struct AnalyzeOptions {
+  Expander_t expander;
+} AnalyzeOptions;
+
+void analyzeOptionsInitContents(AnalyzeOptions *options);
+RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, FormRoot **ptr, Error *error);
 
 void rootInitContents(FormRoot *root);
 void rootFreeContents(FormRoot *root);

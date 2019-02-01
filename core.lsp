@@ -20,3 +20,13 @@
                               (_fib prev2 (+ prev1 prev2) (- n 1)))))
                (_fib 0 1 n))))
 
+
+
+;;(defn name (args) forms)
+;;
+;;(def defn (fn (args)
+;;              (let (name (first args)
+;;                    fnargs (second args)
+;;                    forms (drop 2 args))
+;;                '(def `name '(fn `name `args @forms))))))
+;;(builtin :setmacro "defn")

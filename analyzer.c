@@ -4,6 +4,7 @@
 
 #include "analyzer.h"
 #include "utils.h"
+#include "expander.h"
 
 /*
  * TODO: is this env binding within my local scope, or am I capturing this from a parent scope?
@@ -140,6 +141,7 @@ typedef struct ResolverStack {
 } ResolverStack;
 
 typedef struct AnalyzerContext {
+  AnalyzeOptions options;
   BindingTables bindingTables;
   ResolverStack resolverStack;
   uint16_t fnCount;
@@ -1065,7 +1067,6 @@ RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Expr *expr, FormFnCall *fnCall, Er
 
   throws(_tryFormAnalyze(ctx, expr->list.head->expr, &fnCall->fnCallable, error));
   throws(assertFnCallable(fnCall->fnCallable, error));
-
   throws(tryFormsAllocate(&fnCall->args, expr->list.length - 1, error));
 
   ListElement *argExpr = expr->list.head->next;
@@ -1198,6 +1199,37 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *err
     return ret;
 }
 
+RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form **form, Error *error) {
+  RetVal ret;
+
+  if (expr->type != VT_LIST) {
+    throwInternalError(error, "the contents of a macro argumet must be a list: %u", expr->type);
+  }
+
+  ExprSymbol sym = expr->list.head->expr->symbol;
+
+  Text macroName;
+  macroName.length = sym.length;
+  macroName.value = sym.value;
+
+  Expr input;
+  input.type = N_LIST;
+  listInitContents(&input.list);
+  input.list.length = expr->list.length - 1;
+  input.list.head = expr->list.head->next;
+  input.list.tail = expr->list.tail;
+
+  Expr output;
+
+  throws(tryExpand(ctx->options.expander, macroName, &input, &output, error));
+  throws(_tryFormAnalyze(ctx, &output, form, error));
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Error *error) {
 
   // copy expression source metadata
@@ -1270,6 +1302,21 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
           form->type = F_BUILTIN;
           throws(tryBuiltinAnalyze(ctx, expr, &form->builtin, error));
           break;
+        }
+
+        /*
+         * macro expansion
+         */
+        if (ctx->options.expander != NULL) {
+          Text text;
+          text.length = wcslen(sym);
+          text.value = sym;
+          bool isMacro;
+          throws(tryIsMacro(ctx->options.expander, text, &isMacro, error));
+          if (isMacro) {
+            throws(tryExpandAnalyze(ctx, expr, &form, error));
+            break;
+          }
         }
       }
 
@@ -1378,6 +1425,7 @@ void analyzerContextInitContents(AnalyzerContext *ctx) {
   ctx->fnCount = 0;
   bindingTablesInitContents(&ctx->bindingTables);
   resolverStackInitContents(&ctx->resolverStack);
+  analyzeOptionsInitContents(&ctx->options);
 }
 
 void analyzerContextFreeContents(AnalyzerContext *ctx) {
@@ -1388,12 +1436,16 @@ void analyzerContextFreeContents(AnalyzerContext *ctx) {
   }
 }
 
-RetVal tryFormAnalyze(Expr* expr, FormRoot **ptr, Error *error) {
+void analyzeOptionsInitContents(AnalyzeOptions *options) {
+  options->expander = NULL;
+}
 
+RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, FormRoot **ptr, Error *error) {
   RetVal ret;
   AnalyzerContext ctx;
 
   analyzerContextInitContents(&ctx);
+  ctx.options = options;
 
   FormRoot *root = NULL;
   tryMalloc(root, sizeof(FormRoot), "FormRoot");
@@ -1409,9 +1461,15 @@ RetVal tryFormAnalyze(Expr* expr, FormRoot **ptr, Error *error) {
   return R_SUCCESS;
 
   failure:
-  rootFree(root);
-  analyzerContextFreeContents(&ctx);
-  return ret;
+    rootFree(root);
+    analyzerContextFreeContents(&ctx);
+    return ret;
+}
+
+RetVal tryFormAnalyze(Expr* expr, FormRoot **ptr, Error *error) {
+  AnalyzeOptions options;
+  analyzeOptionsInitContents(&options);
+  return tryFormAnalyzeOptions(options, expr, ptr, error);
 }
 
 // remove the duplication for init found in tryFormDeepCopy

@@ -71,10 +71,14 @@ typedef struct Expr {
 } Expr;
 
 RetVal tryExprRead(TokenStream_t stream, Expr **expr, Error *error);
+void exprFreeContents(Expr *expr);
 void exprFree(Expr *expr);
 
 RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error);
 
 RetVal tryExprPrn(Expr* expr, FILE *file, Error *error);
+
+void listInitContents(ExprList *list);
+RetVal tryListAppend(ExprList *list, Expr *expr, Error *error);
 
 #endif //WARP_LANG_READER_H
