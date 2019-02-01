@@ -15,7 +15,7 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
 
     codeUnitInitContents(&unit);
 
-    ret = tryReplCompile(stream, &unit, error);
+    ret = tryReplCompile(stream, vm, &unit, error);
     if (ret == R_EOF) {
       break;
     }
@@ -66,7 +66,7 @@ int main(void) {
     errorInitContents(&error);
     codeUnitInitContents(&unit);
 
-    ret = tryReplCompile(stream, &unit, &error);
+    ret = tryReplCompile(stream, vm, &unit, &error);
     if (ret == R_EOF) {
       break;
     }

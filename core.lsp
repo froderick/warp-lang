@@ -38,6 +38,43 @@
                  seq
                (loop (dec i) (rest seq)))))
 
+(def nil? (fn (x) (= nil x)))
+
+(def reverse (fn (seq)
+                 (let (_reverse (fn loop (old new)
+                                    (if (nil? old)
+                                        new
+                                      (let (n (first old)
+                                              old (rest old))
+                                        (loop old (cons n new))))))
+                   (_reverse seq nil))))
+
+(def concat (fn (seq-a seq-b)
+                (let (_concat (fn loop (seq-a seq-b)
+                                  (if (nil? seq-a)
+                                      seq-b
+                                      (loop (rest seq-a) (cons (first seq-a) seq-b)))))
+                  (_concat (reverse seq-a) seq-b))))
+
+(def adder (fn (args)
+               (cons '+
+                     (cons (first args)
+                           (cons (second args) nil)))))
+(builtin :setmacro "adder")
+
+(def defn (fn (args)
+              (let (name (first args)
+                    fnargs (second args)
+                    forms (drop 2 args)
+                    fnlist (cons 'fn
+                                 (cons name
+                                       (cons fnargs nil)))
+                    fullfn (concat fnlist forms))
+                (cons 'def 
+                      (cons name
+                            (cons fullfn nil))))))
+(builtin :setmacro "defn")
+                
 
 ;;(defn name (args) forms)
 ;;

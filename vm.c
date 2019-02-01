@@ -1757,14 +1757,14 @@ RetVal tryGetMacroEval(VM *vm, Frame *frame, Error *error) {
   String str;
   throws(tryDerefString(&vm->gc, strValue, &str, error));
 
-  Var *var;
-  if (!resolveVar(&vm->namespaces, str.value, str.length, &var)) {
-    throwRuntimeError(error, "no such var exists: %ls", str.value);
-  }
-
   Value result;
   result.type = VT_BOOL;
-  result.value = var->isMacro;
+  result.value = false;
+
+  Var *var;
+  if (resolveVar(&vm->namespaces, str.value, str.length, &var)) {
+    result.value = var->isMacro;
+  }
 
   throws(tryOpStackPush(frame->opStack, result, error));
 

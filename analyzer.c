@@ -1199,7 +1199,7 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *err
     return ret;
 }
 
-RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form **form, Error *error) {
+RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error) {
   RetVal ret;
 
   if (expr->type != VT_LIST) {
@@ -1222,7 +1222,7 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form **form, Error *er
   Expr output;
 
   throws(tryExpand(ctx->options.expander, macroName, &input, &output, error));
-  throws(_tryFormAnalyze(ctx, &output, form, error));
+  throws(tryFormAnalyzeContents(ctx, &output, form, error));
 
   return R_SUCCESS;
 
@@ -1314,7 +1314,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
           bool isMacro;
           throws(tryIsMacro(ctx->options.expander, text, &isMacro, error));
           if (isMacro) {
-            throws(tryExpandAnalyze(ctx, expr, &form, error));
+            throws(tryExpandAnalyze(ctx, expr, form, error));
             break;
           }
         }

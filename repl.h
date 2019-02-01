@@ -3,7 +3,7 @@
 
 #include "compiler.h"
 
-RetVal tryReplCompile(TokenStream_t stream, CodeUnit *codeUnit, Error *error);
+RetVal tryReplCompile(TokenStream_t stream, VM_t vm, CodeUnit *codeUnit, Error *error);
 
 RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error);
 

@@ -1,14 +1,21 @@
 #include "compiler.h"
 
-RetVal tryReplCompile(TokenStream_t stream, CodeUnit *codeUnit, Error *error) {
+RetVal tryReplCompile(TokenStream_t stream, VM_t vm, CodeUnit *codeUnit, Error *error) {
 
   RetVal ret;
 
   Expr *expr = NULL;
   FormRoot *form = NULL;
+  Expander_t expander = NULL;
+
+  AnalyzeOptions options;
+  analyzeOptionsInitContents(&options);
+
+  throws(tryMakeExpander(&expander, vm, error));
+  options.expander = expander;
 
   throws(tryExprRead(stream, &expr, error));
-  throws(tryFormAnalyze(expr, &form, error));
+  throws(tryFormAnalyzeOptions(options, expr, &form, error));
   throws(tryCompileTopLevel(form, codeUnit, error));
 
   ret = R_SUCCESS;
@@ -44,7 +51,7 @@ RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
   throws(tryStreamMake(source, &stream, error));
   throws(tryVMMake(&vm, error));
 
-  throws(tryReplCompile(stream, &unit, error));
+  throws(tryReplCompile(stream, vm, &unit, error));
   printCodeUnit(&unit);
 
   throws(tryVMEval(vm, &unit, &result, error));

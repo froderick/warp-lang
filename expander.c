@@ -70,7 +70,7 @@ RetVal tryIsMacro(Expander_t expander, Text sym, bool *isMacro, Error *error) {
   throws(tryCompileTopLevel(root, &codeUnit, error));
   throws(tryVMEvalRet(expander->vm, &codeUnit, &output, error));
 
-  if (output.type != VT_BOOL) {
+  if (output.type != N_BOOLEAN) {
     throwInternalError(error, "this should return a boolean");
   }
 
@@ -89,16 +89,27 @@ RetVal tryExpand(Expander *expander, Text sym, Expr *input, Expr *output, Error 
   }
 
   Expr macro;
-  macro.type = N_STRING;
+  macro.type = N_SYMBOL;
   macro.string.length = sym.length;
   macro.string.value = sym.value;
+
+  Expr quoteSym;
+  quoteSym.type = N_SYMBOL;
+  quoteSym.symbol.value = L"quote";
+  quoteSym.symbol.length = wcslen(L"quote");
+
+  Expr quote;
+  quote.type = N_LIST;
+  listInitContents(&quote.list);
+  throws(tryListAppend(&quote.list, &quoteSym, error)); // all macro functions take a single argument, a list of the supplied arguments
+  throws(tryListAppend(&quote.list, input, error)); // all macro functions take a single argument, a list of the supplied arguments
 
   Expr callExpr;
   callExpr.type = N_LIST;
   listInitContents(&callExpr.list);
 
   throws(tryListAppend(&callExpr.list, &macro, error));
-  throws(tryListAppend(&callExpr.list, input, error)); // all macro functions take a single argument, a list of the supplied arguments
+  throws(tryListAppend(&callExpr.list, &quote, error)); // all macro functions take a single argument, a list of the supplied arguments
 
   AnalyzeOptions options;
   analyzeOptionsInitContents(&options);
