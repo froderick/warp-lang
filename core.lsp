@@ -20,6 +20,23 @@
                               (_fib prev2 (+ prev1 prev2) (- n 1)))))
                (_fib 0 1 n))))
 
+(def second (fn (seq)
+                (first (rest seq))))
+
+(def zero? (fn (n) (= n 0)))
+
+(def inc (fn (n) (+ n 1)))
+(def dec (fn (n) (- n 1)))
+
+(def nth (fn loop (i seq)
+             (if (zero? i)
+                 (first seq)
+                 (loop (dec i) (rest seq)))))
+
+(def drop (fn loop (i seq)
+             (if (zero? i)
+                 seq
+               (loop (dec i) (rest seq)))))
 
 
 ;;(defn name (args) forms)
