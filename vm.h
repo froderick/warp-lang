@@ -7,6 +7,7 @@
 
 #include "source.h"
 #include "errors.h"
+#include "reader.h"
 
 // This is the basic representation of code that the virtual machine can accept as input for evaluation.
 
@@ -55,7 +56,8 @@ typedef enum InstType {
   I_CONS,            // (8),             | (x, seq -> newseq)
   I_FIRST,           // (8),             | (seq -> x)
   I_REST,            // (8),             | (seq -> seq)
-  I_SET_MACRO,       // (8),             | (name ->)
+  I_SET_MACRO,       // (8),             | (name -> nil)
+  I_GET_MACRO,       // (8),             | (name -> bool)
 
   // requires garbage collection
   I_NEW,         // (8), objlen (16) | (-> objectref)
@@ -198,6 +200,7 @@ RetVal tryVMMake(VM_t *ptr , Error *error);
 void vmFree(VM_t vm);
 
 RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, Value *result, Error *error);
+RetVal tryVMEvalRet(VM_t vm, CodeUnit *codeUnit, Expr *result, Error *error);
 
 RetVal tryVMPrn(VM_t vm, Value result, Error *error);
 

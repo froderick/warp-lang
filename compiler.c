@@ -747,6 +747,19 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     uint8_t addCode[] = { I_SET_MACRO };
     throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
   }
+  else if (wcscmp(builtin->name.value, L"getmacro") == 0) {
+
+    if (builtin->args.numForms != 1) {
+      throwCompilerError(error, "getmacro takes one argument, got %u", builtin->args.numForms);
+    }
+
+    for (int i=0; i < form->builtin.args.numForms; i++) {
+      throws(tryCompile(&form->builtin.args.forms[i], output, error));
+    }
+
+    uint8_t addCode[] = { I_GET_MACRO };
+    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+  }
   else {
     throwCompilerError(error, "unsupported builtin '%ls'", builtin->name.value);
   }

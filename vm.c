@@ -1708,7 +1708,7 @@ RetVal tryRestEval(VM *vm, Frame *frame, Error *error) {
     return ret;
 }
 
-// (8),             | (name ->)
+// (8),             | (name -> nil)
 RetVal trySetMacroEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
@@ -1735,6 +1735,38 @@ RetVal trySetMacroEval(VM *vm, Frame *frame, Error *error) {
   }
 
   throws(tryOpStackPush(frame->opStack, nil(), error));
+
+  frame->pc = frame->pc + 1;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+// (8),             | (name -> bool)
+RetVal tryGetMacroEval(VM *vm, Frame *frame, Error *error) {
+  RetVal ret;
+
+  Value strValue;
+  throws(tryOpStackPop(frame->opStack, &strValue, error));
+
+  if (strValue.type != VT_STR) {
+    throwRuntimeError(error, "only symbols can identify vars: %u", strValue.type);
+  }
+
+  String str;
+  throws(tryDerefString(&vm->gc, strValue, &str, error));
+
+  Var *var;
+  if (!resolveVar(&vm->namespaces, str.value, str.length, &var)) {
+    throwRuntimeError(error, "no such var exists: %ls", str.value);
+  }
+
+  Value result;
+  result.type = VT_BOOL;
+  result.value = var->isMacro;
+
+  throws(tryOpStackPush(frame->opStack, result, error));
 
   frame->pc = frame->pc + 1;
   return R_SUCCESS;
@@ -1777,6 +1809,7 @@ InstTable instTableCreate() {
       [I_FIRST]            = { .name = "I_FIRST",           .print = printInst,          .tryEval = tryFirstEval},
       [I_REST]             = { .name = "I_REST",            .print = printInst,          .tryEval = tryRestEval },
       [I_SET_MACRO]        = { .name = "I_SET_MACRO",       .print = printInst,          .tryEval = trySetMacroEval},
+      [I_GET_MACRO]        = { .name = "I_GET_MACRO",       .print = printInst,          .tryEval = tryGetMacroEval},
 
 
 //      [I_NEW]         = { .name = "I_NEW",         .print = printUnknown},
@@ -2231,6 +2264,109 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
 
   failure:
     topLevelFrameFreeContents(&topLevel);
+    return ret;
+}
+
+RetVal tryVMPrnRet(VM *vm, Value result, Expr *expr, Error *error) {
+  RetVal ret;
+
+  switch (result.type) {
+    case VT_NIL:
+      expr->type = N_NIL;
+      break;
+    case VT_UINT: {
+      expr->type = N_NUMBER;
+      expr->number.value = result.value;
+      break;
+    }
+    case VT_BOOL:
+      expr->type = N_BOOLEAN;
+      expr->boolean.value = result.value;
+      break;
+    case VT_FN: {
+      expr->type = N_STRING;
+      wchar_t function[] = L"<function>";
+      expr->string.length = wcslen(function);
+      throws(tryCopyText(function, &expr->string.value, expr->string.length, error));
+      break;
+    }
+    case VT_CLOSURE: {
+      expr->type = N_STRING;
+      wchar_t function[] = L"<closure>";
+      expr->string.length = wcslen(function);
+      throws(tryCopyText(function, &expr->string.value, expr->string.length, error));
+      break;
+    }
+    case VT_STR: {
+      String str;
+      throws(tryDerefString(&vm->gc, result, &str, error));
+
+      expr->type = N_STRING;
+      expr->string.length = str.length;
+      throws(tryCopyText(str.value, &expr->string.value, expr->string.length, error));
+      break;
+    }
+    case VT_SYMBOL: {
+      Symbol sym;
+      throws(tryDerefSymbol(&vm->gc, result, &sym, error));
+
+      expr->type = N_SYMBOL;
+      expr->symbol.length = sym.length;
+      throws(tryCopyText(sym.value, &expr->symbol.value, expr->string.length, error));
+      break;
+    }
+    case VT_KEYWORD: {
+      Keyword kw;
+      throws(tryDerefKeyword(&vm->gc, result, &kw, error));
+
+      expr->type = N_KEYWORD;
+      expr->keyword.length = kw.length;
+      throws(tryCopyText(kw.value, &expr->keyword.value, expr->string.length, error));
+      break;
+    }
+    case VT_LIST: {
+      Cons cons;
+      throws(tryDerefCons(&vm->gc, result, &cons, error));
+
+      expr->type = N_LIST;
+      listInitContents(&expr->list);
+      Expr *elem;
+
+      tryMalloc(elem, sizeof(Expr), "Expr");
+      throws(tryVMPrnRet(vm, cons.value, elem, error));
+      throws(tryListAppend(&expr->list, elem, error));
+
+      while (cons.next.type != VT_NIL) {
+        throws(tryDerefCons(&vm->gc, cons.next, &cons, error));
+        tryMalloc(elem, sizeof(Expr), "Expr");
+        throws(tryVMPrnRet(vm, cons.value, elem, error));
+        throws(tryListAppend(&expr->list, elem, error));
+      }
+
+      break;
+    }
+    default:
+      throwRuntimeError(error, "unsuported value type: %u", result.type);
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    exprFree(expr);
+    return ret;
+}
+
+RetVal tryVMEvalRet(VM *vm, CodeUnit *codeUnit, Expr *result, Error *error) {
+
+  RetVal ret;
+
+  Value value;
+  throws(tryVMEval(vm, codeUnit, &value, error));
+  throws(tryVMPrnRet(vm, value, result, error));
+
+  return R_SUCCESS;
+
+  failure:
     return ret;
 }
 
