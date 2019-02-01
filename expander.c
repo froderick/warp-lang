@@ -98,12 +98,7 @@ RetVal tryExpand(Expander *expander, Text sym, Expr *input, Expr *output, Error 
   listInitContents(&callExpr.list);
 
   throws(tryListAppend(&callExpr.list, &macro, error));
-
-  ListElement *elem = input->list.head;
-  while (elem != NULL) {
-    throws(tryListAppend(&callExpr.list, elem->expr, error));
-    elem = elem->next;
-  }
+  throws(tryListAppend(&callExpr.list, input, error)); // all macro functions take a single argument, a list of the supplied arguments
 
   AnalyzeOptions options;
   analyzeOptionsInitContents(&options);
