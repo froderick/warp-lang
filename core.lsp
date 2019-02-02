@@ -56,23 +56,11 @@
                                       (loop (rest seq-a) (cons (first seq-a) seq-b)))))
                   (_concat (reverse seq-a) seq-b))))
 
-(def adder (fn (args)
-               (cons '+
-                     (cons (first args)
-                           (cons (second args) nil)))))
-(builtin :setmacro "adder")
-
 (def defn (fn (args)
               (let (name (first args)
                     fnargs (second args)
-                    forms (drop 2 args)
-                    fnlist (cons 'fn
-                                 (cons name
-                                       (cons fnargs nil)))
-                    fullfn (concat fnlist forms))
-                (cons 'def 
-                      (cons name
-                            (cons fullfn nil))))))
+                    forms (drop 2 args))
+                (list 'def name (concat (list 'fn name fnargs) forms)))))
 (builtin :setmacro "defn")
 
 ;(def list (fn (args) args))

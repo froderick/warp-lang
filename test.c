@@ -750,6 +750,20 @@ START_TEST(repl) {
     assertEval(L"(let () (def x 100) user/x)", L"100");
 
     assertEval(L"(builtin :list 1 2)", L"(1 2)");
+
+    assertEval(L"(list 1 2)", L"(1 2)");
+
+//    (def adder (fn (args)
+//                    (cons '+
+//        (cons (first args)
+//    (cons (second args) nil)))))
+//    (builtin :setmacro "adder")
+
+//    assertEval(L"(let ()"
+//               "   (def adder (fn (args) (list 'builtin :add (list 'builtin :first args) (list 'builtin :first (list 'builtin :first args)))))"
+//               "   (builtin :setmacro \"adder\")"
+//               "   (adder 10 11))",
+//               L"21");
   }
 END_TEST
 

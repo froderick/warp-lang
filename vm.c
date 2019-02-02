@@ -1274,13 +1274,13 @@ RetVal tryInvokePopulateLocals(Frame *parent, Frame *child, Invocable invocable,
 RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
 
   RetVal ret;
-
   Invocable invocable;
-  throws(tryPopInvocable(vm, frame, &invocable, error));
 
   // clean up on return
   Frame child;
   frameInitContents(&child);
+
+  throws(tryPopInvocable(vm, frame, &invocable, error));
 
   child.parent = frame;
   child.numConstants = invocable.fn.numConstants;

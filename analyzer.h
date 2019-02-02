@@ -126,6 +126,10 @@ typedef struct FormBuiltin {
   Forms args;
 } FormBuiltin;
 
+typedef struct FormList {
+  Forms forms;
+} FormList;
+
 typedef enum FormType {
   F_NONE,
   F_CONST,
@@ -137,6 +141,7 @@ typedef enum FormType {
   F_FN,
   F_BUILTIN,
   F_FN_CALL,
+  F_LIST
 } FormType;
 
 typedef struct Form {
@@ -151,6 +156,7 @@ typedef struct Form {
     FormFn fn;
     FormFnCall fnCall;
     FormBuiltin builtin;
+    FormList list;
   };
   SourceLocation source;
 } Form;

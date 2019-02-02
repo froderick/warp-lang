@@ -839,6 +839,54 @@ RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
     return ret;
 }
 
+RetVal tryCompileList(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  Forms forms = form->list.forms;
+
+  if (forms.numForms == 0) {
+    {
+      Constant c;
+      c.type = CT_NIL;
+      throws(tryAppendConstant(output.constants, c, error));
+      uint16_t index = output.constants->numUsed - 1;
+      uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
+      throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+    }
+  }
+  else {
+    for (int i=0; i < forms.numForms; i++) {
+
+      uint16_t idx = forms.numForms - (i + 1);
+      Form *f = &forms.forms[idx];
+
+      if (i == 0) {
+        throws(tryCompile(f, output, error));
+
+        Constant c;
+        c.type = CT_NIL;
+        throws(tryAppendConstant(output.constants, c, error));
+        uint16_t index = output.constants->numUsed - 1;
+        uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
+        throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+
+        uint8_t addCode[] = {I_CONS};
+        throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+      }
+      else {
+        throws(tryCompile(f, output, error));
+        uint8_t addCode[] = {I_SWAP, I_CONS};
+        throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+      }
+    }
+  }
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 RetVal tryCompile(Form *form, Output output, Error *error) {
   RetVal ret;
 
@@ -878,6 +926,10 @@ RetVal tryCompile(Form *form, Output output, Error *error) {
 
     case F_FN_CALL:
       throws(tryCompileFnCall(form, output, error));
+      break;
+
+    case F_LIST:
+      throws(tryCompileList(form, output, error));
       break;
 
     case F_NONE:

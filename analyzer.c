@@ -977,6 +977,40 @@ void builtinFreeContents(FormBuiltin *builtin) {
   }
 }
 
+void _listInitContents(FormList *list) {
+  formsInitContents(&list->forms);
+}
+
+void _listFreeContents(FormList *list);
+
+RetVal tryListAnalyze(AnalyzerContext *ctx, Expr *expr, FormList *list, Error *error) {
+
+  RetVal ret;
+
+  _listInitContents(list);
+
+  throws(tryFormsAllocate(&list->forms, expr->list.length - 1, error));
+
+  ListElement *argExpr = expr->list.head->next;
+  for (int i=0; i<list->forms.numForms; i++) {
+    Form *arg = list->forms.forms + i;
+    throws(tryFormAnalyzeContents(ctx, argExpr->expr, arg, error));
+    argExpr = argExpr->next;
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    _listFreeContents(list);
+    return ret;
+}
+
+void _listFreeContents(FormList *list) {
+  if (list != NULL) {
+    formsFreeContents(&list->forms);
+  }
+}
+
 RetVal tryEnvRefAnalyze(AnalyzerContext *ctx, Expr *expr, uint16_t bindingIndex, FormEnvRef *envRef, Error *error) {
   envRef->bindingIndex = bindingIndex;
   return R_SUCCESS;
@@ -1295,6 +1329,12 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
           break;
         }
 
+        if (wcscmp(sym, L"list") == 0) {
+          form->type = F_LIST;
+          throws(tryListAnalyze(ctx, expr, &form->list, error));
+          break;
+        }
+
         if (wcscmp(sym, L"builtin") == 0) {
           form->type = F_BUILTIN;
           throws(tryBuiltinAnalyze(ctx, expr, &form->builtin, error));
@@ -1383,6 +1423,9 @@ void formFreeContents(Form* form) {
       case F_FN_CALL:
         fnCallFreeContents(&form->fnCall);
         break;
+      case F_LIST:
+        _listFreeContents(&form->list);
+        break;
       case F_NONE:
         break;
     }
@@ -1469,150 +1512,4 @@ RetVal tryFormAnalyze(Expr* expr, FormRoot **ptr, Error *error) {
   return tryFormAnalyzeOptions(options, expr, ptr, error);
 }
 
-// remove the duplication for init found in tryFormDeepCopy
-// do we really need the deep copy behavior now?
-// this is definitely out of date now, fields have changed at least for the lexical bindings
 
-//RetVal tryFormDeepCopy(Form *from, Form **ptr, Error *error) {
-//  RetVal ret;
-//
-//  Form *to;
-//  tryMalloc(to, sizeof(Form), "Form");
-//
-//  switch (from->type) {
-//    case F_CONST:
-//      throws(tryExprDeepCopy(from->constant, &to->constant, error));
-//      break;
-//
-//    case F_IF:
-//      throws(tryFormDeepCopy(from->iff.test, &to->iff.test, error));
-//      throws(tryFormDeepCopy(from->iff.ifBranch, &to->iff.ifBranch, error));
-//      if (from->iff.elseBranch != NULL) {
-//        throws(tryFormDeepCopy(from->iff.elseBranch, &to->iff.elseBranch, error));
-//      }
-//      break;
-//
-//    case F_LET:
-//      to->let.numBindings = from->let.numBindings;
-//      tryMalloc(to->let.bindings, sizeof(LetBinding) * to->let.numBindings, "LetBinding array");
-//
-//      for (int i=0; i<to->let.numBindings; i++) {
-//        LexicalBinding *fromBinding = &from->let.bindings[i];
-//        LexicalBinding *toBinding = &to->let.bindings[i];
-//
-//        toBinding->nameLength = fromBinding->nameLength;
-//        toBinding->source = fromBinding->source;
-//
-//        throws(tryCopyText(fromBinding->name, &toBinding->name, toBinding->nameLength, error));
-//        throws(tryFormDeepCopy(fromBinding->value, &toBinding->value, error));
-//      }
-//
-//      to->let.numForms = from->let.numForms;
-//      tryMalloc(to->let.bindings, sizeof(Form) * to->let.numForms, "Form array");
-//
-//      for (int i=0; i<to->let.numForms; i++) {
-//        Form *fromForm = &from->let.forms[i];
-//        Form *toForm = &to->let.forms[i];
-//        throws(tryFormDeepCopy(fromForm, &toForm, error));
-//      }
-//
-//      break;
-//
-//    case F_DEF:
-//      to->def.nameLength = from->def.nameLength;
-//      throws(tryCopyText(from->def.name, &to->def.name, to->def.nameLength, error));
-//      throws(tryFormDeepCopy(from->def.value, &to->def.value, error));
-//      break;
-//
-//    case F_ENV_REF:
-//      to->envRef.type = from->envRef.type;
-//      to->envRef.typeIndex = from->envRef.typeIndex;
-//      break;
-//
-//    case F_VAR_REF:
-//      // TODO
-//      break;
-//
-//    case F_FN:
-//      to->fn.numArgs = from->fn.numArgs;
-//      tryMalloc(to->fn.args, sizeof(FormFnArg) * to->fn.numArgs, "FormFnArg array");
-//
-//      for (int i=0; i<to->fn.numArgs; i++) {
-//        FormFnArg *fromArg = &from->fn.args[i];
-//        FormFnArg *toArg = &to->fn.args[i];
-//
-//        toArg->nameLength = fromArg->nameLength;
-//        toArg->source = fromArg->source;
-//
-//        throws(tryCopyText(fromArg->name, &toArg->name, toArg->nameLength, error));
-//      }
-//
-//      to->fn.numForms = from->fn.numForms;
-//      tryMalloc(to->fn.forms, sizeof(Form) * to->fn.numForms, "Form array");
-//
-//      for (int i=0; i<to->fn.numForms; i++) {
-//        Form *fromForm = &from->fn.forms[i];
-//        Form *toForm = &to->fn.forms[i];
-//        throws(tryFormDeepCopy(fromForm, &toForm, error));
-//      }
-//
-//      break;
-//
-//    case F_BUILTIN:
-//      to->builtin.nameLength = from->builtin.nameLength;
-//      throws(tryCopyText(from->builtin.name, &to->builtin.name, to->builtin.nameLength, error));
-//
-//      to->builtin.numArgs = from->builtin.numArgs;
-//      tryMalloc(to->builtin.args, sizeof(Form) * to->builtin.numArgs, "Form array");
-//
-//      for (int i=0; i<to->builtin.numArgs; i++) {
-//        Form *fromArg = &from->builtin.args[i];
-//        Form *toArg = &to->builtin.args[i];
-//        throws(tryFormDeepCopy(fromArg, &toArg, error));
-//      }
-//
-//      break;
-//
-//    case F_FN_CALL:
-//
-//      throws(tryFormDeepCopy(from->fnCall.fnCallable, &to->fnCall.fnCallable, error));
-//
-//      to->fnCall.numArgs = from->fnCall.numArgs;
-//      tryMalloc(to->fnCall.args, sizeof(Form) * to->fnCall.numArgs, "Form array");
-//
-//      for (int i=0; i<to->fnCall.numArgs; i++) {
-//        Form *fromForm = &from->fnCall.args[i];
-//        Form *toForm = &to->fnCall.args[i];
-//        throws(tryFormDeepCopy(fromForm, &toForm, error));
-//      }
-//
-//      break;
-//
-//    case F_NONE:
-//      break;
-//  }
-//
-//  to->type = from->type;
-//  to->source = from->source;
-//
-//  *ptr = to;
-//  return R_SUCCESS;
-//
-//  failure:
-//    if (to != NULL) {
-//      formFree(to);
-//    }
-//    return ret;
-//}
-
-
-// TODO: if we aren't doing variable capture yet, then it seems like we should start with a fresh binding stack here
-
-// TODO: there's nothing wrong with both remembering which bindings are arguments, and which are env bindings, but
-// TODO: but also tracking a uniform typeIndex for both from the perspective of them both being 'locals'. this would
-// allow us to stop being aware of this in the emitter. *this uniformity would include a single 'addBinding' function
-// that takes a struct which is always the same, regardless of the type of binding being added
-
-// TODO: if we were to do variable capture, the resolution would probably take into account both the 'new' stack
-// TODO: as well as falling back to the 'previous' one
-// this suggests that the binding stack is a parameter value, not a singleton
