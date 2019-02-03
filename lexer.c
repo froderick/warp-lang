@@ -29,6 +29,12 @@ const char* tokenName(TokenType type) {
       return "CPAREN";
     case T_QUOTE:
       return "QUOTE";
+    case T_SYNTAX_QUOTE:
+      return "SYNTAX_QUOTE";
+    case T_UNQUOTE:
+      return "UNQUOTE";
+    case T_SPLICING_UNQUOTE:
+      return "SPLICING_UNQUOTE";
     case T_SYMBOL:
       return "SYMBOL";
     case T_TRUE:
@@ -160,6 +166,31 @@ RetVal tryReadString(InputStream_t source, LexerState *s, wchar_t first, Token *
   while (!foundEnd);
 
   throws(tryTokenInitFromLexer(s, T_STRING, token, error));
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryReadUnquote(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
+  RetVal ret;
+
+  throws(tryStringBufferAppendChar(s->b, first, error));
+
+  // read a second char, pick one of the two unquotes, push back if it is not the two-character one
+
+  wint_t ch;
+  throws(tryInputStreamReadChar(source, &ch, error));
+
+  if (ch != L'@') {
+    throws(tryInputStreamUnreadChar(source, ch, error));
+    throws(tryTokenInitFromLexer(s, T_UNQUOTE, token, error));
+  }
+  else {
+    throws(tryStringBufferAppendChar(s->b, ch, error));
+    throws(tryTokenInitFromLexer(s, T_SPLICING_UNQUOTE, token, error));
+  }
 
   return R_SUCCESS;
 
@@ -421,8 +452,14 @@ RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *e
   else if (ch == L'\'') {
     throws(tryTokenInit(T_QUOTE, L"'", s->position, 1, s->lineNumber, s->colNumber, token, error));
   }
+  else if (ch == L'`') {
+    throws(tryTokenInit(T_SYNTAX_QUOTE, L"`", s->position, 1, s->lineNumber, s->colNumber, token, error));
+  }
 
-    // multi-character tokens
+  // multi-character tokens
+  else if (ch == L'~') {
+    throws(tryReadUnquote(source, s, ch, token, error));
+  }
   else if (iswdigit(ch)) {
     throws(tryReadNumber(source, s, ch, token, error));
   }

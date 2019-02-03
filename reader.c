@@ -511,7 +511,7 @@ RetVal tryQuoteRead(TokenStream_t stream, Expr **ptr, Error *error) {
   throws(tryStreamNext(stream, &token, error));
 
   if (token->type != T_QUOTE) {
-    throwSyntaxError(error, token->source.position, "Syntax quote must begin with '`': %u", token->type);
+    throwSyntaxError(error, token->source.position, "Quote must begin with ': %u", token->type);
   }
 
   throws(trySymbolMake(L"quote", wcslen(L"quote"), &quote, error));
@@ -545,6 +545,53 @@ RetVal tryQuoteRead(TokenStream_t stream, Expr **ptr, Error *error) {
       exprFree(expr);
     }
     return ret;
+}
+
+RetVal tryWrapperRead(TokenStream_t stream, wchar_t *symbolName, Expr **ptr, Error *error) {
+  RetVal ret;
+
+  Token *token;
+  Expr *quote;
+  Expr *subexpr;
+  Expr *expr;
+
+  throws(tryStreamNext(stream, &token, error));
+
+//  if (token->type != tokenType) {
+//    throwSyntaxError(error, token->source.position, "%ls must begin with %lc: %u", symbolName, startsWith, token->type);
+//  }
+
+  throws(trySymbolMake(symbolName, wcslen(symbolName), &quote, error));
+  quote->source = token->source;
+  token = NULL; // token is now a part of quote symbol
+
+  throws(tryExprRead(stream, &subexpr, error));
+
+  throws(tryListMake(&expr, error));
+
+  throws(tryListAppend(&expr->list, quote, error));
+  quote = NULL; // quote is now part of expr
+
+  throws(tryListAppend(&expr->list, subexpr, error));
+  // subexpr is now part of expr
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+  if (token != NULL) {
+    tokenFree(token);
+  }
+  if (quote != NULL) {
+    exprFree(quote);
+  }
+  if (subexpr != NULL) {
+    exprFree(subexpr);
+  }
+  if (expr != NULL) {
+    exprFree(expr);
+  }
+  return ret;
 }
 
 // read the first token off the stream
@@ -602,6 +649,15 @@ RetVal tryExprRead(TokenStream_t stream, Expr **ptr, Error *error) {
     // reader macros
     case T_QUOTE:
       throws(tryQuoteRead(stream, ptr, error));
+      break;
+    case T_SYNTAX_QUOTE:
+      throws(tryWrapperRead(stream, L"syntax-quote", ptr, error));
+      break;
+    case T_UNQUOTE:
+      throws(tryWrapperRead(stream, L"unquote", ptr, error));
+      break;
+    case T_SPLICING_UNQUOTE:
+      throws(tryWrapperRead(stream, L"splicing-unquote", ptr, error));
       break;
 
     default:

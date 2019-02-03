@@ -1160,6 +1160,113 @@ RetVal tryQuoteAnalyze(Expr* expr, Expr **constant, Error *error) {
     return ret;
 }
 
+RetVal _trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form, Error *error) {
+  RetVal ret;
+
+  switch (quoted->type) {
+
+    case N_STRING:
+    case N_NUMBER:
+    case N_KEYWORD:
+    case N_BOOLEAN:
+    case N_NIL:
+      form->type = F_CONST;
+      throws(tryConstantAnalyze(quoted, &form->constant, error));
+      break;
+
+    case N_SYMBOL:
+      form->type = F_CONST;
+      // TODO: this should namespace the symbol, but for that we'd have to know what the current namespace is
+      throws(tryConstantAnalyze(quoted, &form->constant, error));
+      break;
+
+    case N_LIST: {
+
+      bool unquoted =
+          quoted->list.length > 0
+          && quoted->list.head->expr->type == N_SYMBOL
+          && wcscmp(quoted->list.head->expr->symbol.value, L"unquote") == 0;
+
+      if (unquoted) {
+        if (quoted->list.length != 2) {
+          throwSyntaxError(error, quoted->source.position, "unquote takes 1 argument");
+        }
+        throws(tryFormAnalyzeContents(ctx, quoted->list.head->next->expr, form, error));
+      }
+      else {
+        form->type = F_LIST;
+
+        _listInitContents(&form->list);
+
+        throws(tryFormsAllocate(&form->list.forms, quoted->list.length, error));
+
+        ListElement *argExpr = quoted->list.head;
+        for (int i = 0; i < form->list.forms.numForms; i++) {
+          Form *arg = form->list.forms.forms + i;
+          throws(_trySyntaxQuoteAnalyze(ctx, argExpr->expr, arg, error));
+          argExpr = argExpr->next;
+        }
+      }
+
+//      bool splicingUnquoted =
+
+          // a spliced list is made up of the following
+          // - forms that are not wrapped in in splicing-unquote, and are just single elements
+          // - forms that are wrapped in splicing-unquote, and expand into a list
+          //
+          // if _any_ element of a list is splicing-unquoted:
+          //   wrap the entire list in a concat
+          //
+          //   iterate over each child node
+          //   if the child is splicing-unquoted, formAnalyze the child, assume it evals to a list
+          //
+
+          // quoted list must have length > 0
+          // check each element in the quoted list to see if it is a splicing-quote
+          // if it is
+//          quoted->list.length > 0
+//          && quoted->list.head->expr->type == N_SYMBOL
+//          && wcscmp(quoted->list.head->expr->symbol.value, L"splicing-unquote") == 0;
+//
+//      if (unquoted) {
+//      }
+//      else if (splicingUnquoted) {
+//        throws(tryFormAnalyzeContents(ctx, quoted->list.head->next->expr, form, error));
+//      }
+
+      break;
+    }
+
+    default:
+    throwSyntaxError(error, quoted->source.position, "unsupported expr type: %u", quoted->type);
+  }
+
+  done:
+    return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *error) {
+  RetVal ret;
+
+  if (expr->list.length != 2) {
+    throwSyntaxError(error, expr->source.position, "wrong number of args passed to syntax-quote (%llu instead of 1)",
+                     expr->list.length - 1);
+  }
+
+  Expr *quoted = expr->list.head->next->expr;
+
+  throws(_trySyntaxQuoteAnalyze(ctx, quoted, form, error));
+
+  return R_SUCCESS;
+
+  failure:
+    formFreeContents(form);
+    return ret;
+}
+
 RetVal trySymbolAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *error) {
   RetVal ret;
 
@@ -1326,6 +1433,11 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
         if (wcscmp(sym, L"quote") == 0) {
           form->type = F_CONST;
           throws(tryQuoteAnalyze(expr, &form->constant, error));
+          break;
+        }
+
+        if (wcscmp(sym, L"syntax-quote") == 0) {
+          throws(trySyntaxQuoteAnalyze(ctx, expr, form, error));
           break;
         }
 

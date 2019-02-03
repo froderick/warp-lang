@@ -753,6 +753,8 @@ START_TEST(repl) {
 
     assertEval(L"(list 1 2)", L"(1 2)");
 
+    assertEval(L"`(1 2 ~(builtin :add 3 1))", L"(1 2 4)");
+
 //    (def adder (fn (args)
 //                    (cons '+
 //        (cons (first args)
