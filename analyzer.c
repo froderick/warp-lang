@@ -1160,6 +1160,137 @@ RetVal tryQuoteAnalyze(Expr* expr, Expr **constant, Error *error) {
     return ret;
 }
 
+RetVal _trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form, Error *error);
+
+bool isSplicingUnquote(Expr *elem) {
+  return
+      elem->type == N_LIST
+      && elem->list.length > 0
+      && elem->list.head->expr->type == N_SYMBOL
+      && wcscmp(elem->list.head->expr->symbol.value, L"splicing-unquote") == 0;
+}
+
+
+uint16_t numSyntaxQuotedListArgs(Expr *quoted) {
+
+  uint16_t numArgs = 0;
+  uint16_t listElementsSeen = 0;
+
+  ListElement *argExpr = quoted->list.head;
+  for (int i = 0; i < quoted->list.length ; i++) {
+    Expr *elem = argExpr->expr;
+
+    if (isSplicingUnquote(elem)) {
+      if (listElementsSeen > 0) {
+        numArgs++;
+        listElementsSeen = 0;
+      }
+      numArgs++;
+    }
+    else {
+      listElementsSeen++;
+    }
+
+    argExpr = argExpr->next;
+  }
+
+  if (listElementsSeen > 0) {
+    numArgs++;
+  }
+
+  return numArgs;
+}
+
+// figure out how many arguments we'll have to concat
+// allocate those arguments
+//
+// make a counter indicating the 'next' element in the quoted list
+// iterate over the arguments we'll have to concat
+// - look at the 'next' element
+//   - if it is splicing-quoted
+//     - if the argument is initialized, move to the next argument
+//     - initialize the argument, analyzing the splicing-uquoted value as normal
+//     - move to the next argument
+//   - else
+//     - initialize the argument as a list if it isn't already initialized as one. if it is not a list or
+//       empty, explode
+//     - analyze the element as quoted and add it to the list argument
+
+/*
+ * TODO: if I made concat a macro, supporting var-args, this would probably work in the repl, but not the tests:
+ * `(1 2 ~(builtin :add 3 1))
+ *
+ * figure out how we're going to support this concat functionality, and finish testing this feature
+ */
+
+RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form, Error *error) {
+  RetVal ret;
+
+  uint16_t numArgs = numSyntaxQuotedListArgs(quoted);
+
+  { // init fn call to concat
+    FormVarRef ref;
+    varRefInitContents(&ref);
+    wchar_t *concat = L"concat";
+    throws(tryTextMake(concat, &ref.name, wcslen(concat), error));
+
+    Form *fnCallable;
+    tryMalloc(fnCallable, sizeof(FormFnCall), "FormFnCall");
+    fnCallable->type = F_VAR_REF;
+    fnCallable->varRef = ref;
+
+    form->type = F_FN_CALL;
+    fnCallInitContents(&form->fnCall);
+    form->fnCall.fnCallable = fnCallable;
+    throws(tryFormsAllocate(&form->fnCall.args, numArgs, error));
+  }
+
+  uint16_t nextArg = 0;
+  ListElement *elem= quoted->list.head;
+  while (elem != NULL) {
+
+    Expr *elemExpr = elem->expr;
+    Form *args = form->fnCall.args.forms;
+
+    bool argInitialized = args[nextArg].type != F_NONE;
+
+    if (isSplicingUnquote(elemExpr)) {
+      if (argInitialized) {
+        nextArg++;
+      }
+      throws(tryFormAnalyzeContents(ctx, elemExpr, &args[nextArg], error));
+      nextArg++;
+    } else {
+
+      Form *listContainer = &args[nextArg];
+
+      if (listContainer->type == F_NONE) {
+        listContainer->type = F_LIST;
+        _listInitContents(&listContainer->list);
+        throws(
+            tryFormsAllocate(&listContainer->list.forms, quoted->list.length, error)); // allocate max it could ever be
+        listContainer->list.forms.numForms = 0;                                           // pretend it is empty
+      }
+
+      if (args[nextArg].type != F_LIST) {
+        throwSyntaxError(error, quoted->source.position, "this argument should have been a list");
+      }
+
+      uint16_t index = listContainer->list.forms.numForms;
+      throws(_trySyntaxQuoteAnalyze(ctx, elemExpr, &listContainer->list.forms.forms[index], error));
+      listContainer->list.forms.numForms++;
+
+    }
+
+    elem = elem->next;
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 RetVal _trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form, Error *error) {
   RetVal ret;
 
@@ -1194,45 +1325,8 @@ RetVal _trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form, Er
         throws(tryFormAnalyzeContents(ctx, quoted->list.head->next->expr, form, error));
       }
       else {
-        form->type = F_LIST;
-
-        _listInitContents(&form->list);
-
-        throws(tryFormsAllocate(&form->list.forms, quoted->list.length, error));
-
-        ListElement *argExpr = quoted->list.head;
-        for (int i = 0; i < form->list.forms.numForms; i++) {
-          Form *arg = form->list.forms.forms + i;
-          throws(_trySyntaxQuoteAnalyze(ctx, argExpr->expr, arg, error));
-          argExpr = argExpr->next;
-        }
+        _trySyntaxQuoteListAnalyze(ctx, quoted, form, error);
       }
-
-//      bool splicingUnquoted =
-
-          // a spliced list is made up of the following
-          // - forms that are not wrapped in in splicing-unquote, and are just single elements
-          // - forms that are wrapped in splicing-unquote, and expand into a list
-          //
-          // if _any_ element of a list is splicing-unquoted:
-          //   wrap the entire list in a concat
-          //
-          //   iterate over each child node
-          //   if the child is splicing-unquoted, formAnalyze the child, assume it evals to a list
-          //
-
-          // quoted list must have length > 0
-          // check each element in the quoted list to see if it is a splicing-quote
-          // if it is
-//          quoted->list.length > 0
-//          && quoted->list.head->expr->type == N_SYMBOL
-//          && wcscmp(quoted->list.head->expr->symbol.value, L"splicing-unquote") == 0;
-//
-//      if (unquoted) {
-//      }
-//      else if (splicingUnquoted) {
-//        throws(tryFormAnalyzeContents(ctx, quoted->list.head->next->expr, form, error));
-//      }
 
       break;
     }
