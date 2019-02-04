@@ -722,6 +722,7 @@ void formFnInitContents(FormFn *fn) {
   fn->args = NULL;
   fn->numArgs = 0;
   formsInitContents(&fn->forms);
+  fn->usesVarArgs = false;
 }
 
 void fnArgInitContents(FormFnArg *arg) {
@@ -1258,7 +1259,7 @@ RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form
       if (argInitialized) {
         nextArg++;
       }
-      throws(tryFormAnalyzeContents(ctx, elemExpr, &args[nextArg], error));
+      throws(tryFormAnalyzeContents(ctx, elemExpr->list.head->next->expr, &args[nextArg], error));
       nextArg++;
     } else {
 
