@@ -51,7 +51,7 @@
 
 (def defn (fn defn (args)
               (let (name (first args)
-                         fnargs (second args)
-                         forms (drop 2 args))
-                (list 'def name (concat (list 'fn name fnargs) forms)))))
+                    fnargs (second args)
+                    forms (drop 2 args))
+                `(def ~name (fn ~name ~fnargs ~@forms)))))
 (builtin :setmacro "defn")

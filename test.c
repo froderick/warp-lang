@@ -770,6 +770,8 @@ START_TEST(repl) {
 
     assertEval(L"`(1 2 ~@(list 3 4))", L"(1 2 3 4)");
 
+    assertEval(L"(let () (defn x (y) (+ y 10)) (x 11))", L"21");
+
 //    (def adder (fn (args)
 //                    (cons '+
 //        (cons (first args)
