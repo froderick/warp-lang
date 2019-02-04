@@ -540,7 +540,7 @@ bool resolveVar(Namespaces *analyzer, wchar_t *symbolName, uint64_t symbolNameLe
   // find var within namespace
 
   for (int i=0; i<ns->localVars.length; i++) {
-    if (wcsncmp(searchName, ns->localVars.vars[i].name, searchNameLength) == 0) {
+    if (wcscmp(searchName, ns->localVars.vars[i].name) == 0) {
       *var = &ns->localVars.vars[i];
       return true;
     }
