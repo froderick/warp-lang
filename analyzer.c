@@ -737,6 +737,84 @@ void fnArgFreeContents(FormFnArg *arg) {
   }
 }
 
+RetVal tryFnValidateArgs(Expr *argsExpr, uint16_t *numArgsPtr, bool *varArgsPtr, Error *error) {
+  RetVal ret;
+
+  uint16_t numArgs = 0;
+  bool varArgs = false;
+
+  uint64_t pos = getExprPosition(argsExpr);
+
+  ListElement *argElem = argsExpr->list.head;
+  bool seenLast = false;
+  for (uint16_t i=0; i<argsExpr->list.length; i++) {
+
+    if (seenLast) {
+      throwSyntaxError(error, argsExpr->source.position, "unexpected argument: %ls", argElem->expr->symbol.value);
+    }
+
+    if (wcscmp(argElem->expr->symbol.value, L"&") == 0) { // var-args &
+      if (varArgs) {
+        throwSyntaxError(error, argsExpr->source.position, "unexpected argument: &");
+      }
+      varArgs = true;
+    }
+    else { // acutal argument
+      if (argElem->expr->type != N_SYMBOL) {
+        throwSyntaxError(error, pos, "only symbols can be used as function arguments");
+      }
+      if (varArgs) {
+        seenLast = true;
+      }
+      numArgs++;
+    }
+
+    argElem = argElem->next;
+  }
+
+  *numArgsPtr = numArgs;
+  *varArgsPtr = varArgs;
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+RetVal tryFnParseArgs(Expr *argsExpr, FormFn *fn, Error *error) {
+  RetVal ret;
+
+  uint64_t pos = getExprPosition(argsExpr);
+
+  if (argsExpr->type != N_LIST) {
+    throwSyntaxError(error, pos, "the 'fn' special form requires an argument list of the type N_LIST: %u",
+                     argsExpr->type);
+  }
+
+  throws(tryFnValidateArgs(argsExpr, &fn->numArgs, &fn->usesVarArgs, error));
+  tryMalloc(fn->args, sizeof(FormFnArg) * fn->numArgs, "FormFnArg array");
+
+  ListElement *argElem = argsExpr->list.head;
+  for (int i=0; i<fn->numArgs; i++) {
+
+    if (i + 1 == fn->numArgs && fn->usesVarArgs) {
+      argElem = argElem->next; // skip &
+    }
+
+    FormFnArg *arg = fn->args + i;
+    fnArgInitContents(arg);
+    throws(tryTextMake(argElem->expr->symbol.value, &arg->name, argElem->expr->symbol.length, error));
+    arg->source = argElem->expr->source;
+
+    argElem = argElem->next;
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 RetVal tryFnParse(Expr* fnExpr, FormFn *fn, Expr **formElements, Error *error) {
   RetVal ret;
 
@@ -760,28 +838,7 @@ RetVal tryFnParse(Expr* fnExpr, FormFn *fn, Expr **formElements, Error *error) {
   }
 
   Expr *argsExpr = itr->expr;
-  if (argsExpr->type != N_LIST) {
-    throwSyntaxError(error, pos, "the 'fn' special form requires an argument list of the type N_LIST: %u",
-                     argsExpr->type);
-  }
-
-  fn->numArgs = argsExpr->list.length;
-  tryMalloc(fn->args, sizeof(FormFnArg) * fn->numArgs, "FormFnArg array");
-
-  ListElement *argElem = argsExpr->list.head;
-  for (int i=0; i<fn->numArgs; i++) {
-
-    if (argElem->expr->type != N_SYMBOL) {
-      throwSyntaxError(error, pos, "only symbols can be used as function arguments");
-    }
-
-    FormFnArg *arg = fn->args + i;
-    fnArgInitContents(arg);
-    throws(tryTextMake(argElem->expr->symbol.value, &arg->name, argElem->expr->symbol.length, error));
-    arg->source = argElem->expr->source;
-
-    argElem = argElem->next;
-  }
+  throws(tryFnParseArgs(argsExpr, fn, error));
   itr = itr->next;
 
   uint16_t nonFormElems = 2; // 'fn' and 'args list'
@@ -1222,6 +1279,18 @@ uint16_t numSyntaxQuotedListArgs(Expr *quoted) {
  * `(1 2 ~(builtin :add 3 1))
  *
  * figure out how we're going to support this concat functionality, and finish testing this feature
+ *
+ * TODO: perhaps supporting var-args is easier than dealing with meta macros
+ * X lexer emits & as its own symbol
+ * X analyzer check for ampersand in arg list for fn definition
+ *   - must come immediately before last argument, or error
+ *   - mark var-arg with flag in form
+ * X compiler must emit fn code with var-arg flag
+ * - vm honors var-arg flag
+ *   - sees var-arg flag on invocable
+ *   - pops all static arguments into local slot
+ *   - pops number indicating number of extra arguments
+ *   - pops number of extra arguments into a list, sets as final argument in local slot
  */
 
 RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form, Error *error) {

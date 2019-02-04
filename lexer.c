@@ -456,6 +456,10 @@ RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *e
     throws(tryTokenInit(T_SYNTAX_QUOTE, L"`", s->position, 1, s->lineNumber, s->colNumber, token, error));
   }
 
+  else if (ch == L'&') {
+    throws(tryTokenInit(T_SYMBOL, L"&", s->position, 1, s->lineNumber, s->colNumber, token, error));
+  }
+
   // multi-character tokens
   else if (ch == L'~') {
     throws(tryReadUnquote(source, s, ch, token, error));

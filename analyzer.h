@@ -107,6 +107,8 @@ typedef struct FormFn {
   uint16_t numArgs;
   Forms forms;
 
+  bool usesVarArgs;
+
 } FormFn;
 
 typedef struct FormFnCall {

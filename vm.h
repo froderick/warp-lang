@@ -98,7 +98,10 @@ typedef struct StringConstant {
 
 typedef struct FnConstant {
   uint64_t fnId;
+  bool hasName;
+  Text name;
   uint64_t numArgs;
+  bool usesVarArgs;
   uint16_t numConstants;
   uint16_t numCaptures;
   Constant *constants;

@@ -371,6 +371,8 @@ START_TEST(compilerBasic) {
     {
       ck_assert_int_eq(tryTestCompile(L"(builtin :add 1 2)", &codeUnit, &e), R_SUCCESS);
 
+      printCodeUnit(&codeUnit);
+
       ck_assert_int_eq(codeUnit.numConstants, 2);
       ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
       ck_assert_int_eq(codeUnit.constants[0].integer, 1);
@@ -398,11 +400,11 @@ START_TEST(compilerBasic) {
     {
       ck_assert_int_eq(tryTestCompile(L"((fn (a b) (builtin :add a b)) 4 5)", &codeUnit, &e), R_SUCCESS);
 
-      //printCodeUnit(&codeUnit);
+      printCodeUnit(&codeUnit);
 
       // verify fn
 
-      FnConstant fn = codeUnit.constants[2].function;
+      FnConstant fn = codeUnit.constants[3].function;
       ck_assert_int_eq(fn.numArgs, 2);
       ck_assert_int_eq(fn.numConstants, 0);
       ck_assert_int_eq(fn.code.numLocals, 2);
@@ -421,11 +423,13 @@ START_TEST(compilerBasic) {
 
       // verify fnCall
 
-      ck_assert_int_eq(codeUnit.numConstants, 3);
+      ck_assert_int_eq(codeUnit.numConstants, 4);
       ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
       ck_assert_int_eq(codeUnit.constants[0].integer, 4);
       ck_assert_int_eq(codeUnit.constants[1].type, CT_INT);
       ck_assert_int_eq(codeUnit.constants[1].integer, 5);
+      ck_assert_int_eq(codeUnit.constants[2].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[2].integer, 2);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 0);
       ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
@@ -435,6 +439,7 @@ START_TEST(compilerBasic) {
           I_LOAD_CONST, 0, 0,
           I_LOAD_CONST, 0, 1,
           I_LOAD_CONST, 0, 2,
+          I_LOAD_CONST, 0, 3,
           I_INVOKE_DYN,
           I_RET,
       };
@@ -517,10 +522,14 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(tryTestCompile(L"(let (x (fn (y) (builtin :add y 50)))"
                                        "  (x 100))", &codeUnit, &e), R_SUCCESS);
 
-      ck_assert_int_eq(codeUnit.numConstants, 2);
+      printCodeUnit(&codeUnit);
+
+      ck_assert_int_eq(codeUnit.numConstants, 3);
       ck_assert_int_eq(codeUnit.constants[0].type, CT_FN);
       ck_assert_int_eq(codeUnit.constants[1].type, CT_INT);
       ck_assert_int_eq(codeUnit.constants[1].integer, 100);
+      ck_assert_int_eq(codeUnit.constants[2].type, CT_INT);
+      ck_assert_int_eq(codeUnit.constants[2].integer, 1);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 1);
       ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
@@ -530,14 +539,15 @@ START_TEST(compilerBasic) {
           I_LOAD_CONST,  0, 0,
           I_STORE_LOCAL, 0, 0,
           I_LOAD_CONST,  0, 1,
+          I_LOAD_CONST,  0, 2,
           I_LOAD_LOCAL,  0, 0,
           I_INVOKE_DYN,
           I_RET,
       };
 
-//      printCodeUnit(&codeUnit);
-//      printf("-------------\n");
-//      printCodeArray(expectedCode, sizeof(expectedCode));
+      printCodeUnit(&codeUnit);
+      printf("-------------\n");
+      printCodeArray(expectedCode, sizeof(expectedCode));
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
       ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
@@ -618,18 +628,21 @@ START_TEST(vmBasic) {
 
     uint8_t code[] = {
         I_LOAD_CONST, 0, 0,
+        I_LOAD_CONST, 0, 2,
         I_LOAD_CONST, 0, 1,
         I_INVOKE_DYN,
         I_RET
     };
 
     CodeUnit unit;
-    unit.numConstants = 2;
+    unit.numConstants = 3;
     unit.constants = malloc(sizeof(Constant) * unit.numConstants);
     unit.constants[0].type = CT_INT;
     unit.constants[0].integer = 10;
     unit.constants[1].type = CT_FN;
     unit.constants[1].function = fn;
+    unit.constants[2].type = CT_INT;
+    unit.constants[2].integer = 1;
     unit.code.numLocals = 0;
     unit.code.maxOperandStackSize = 10;
     unit.code.codeLength = sizeof(code);
@@ -754,6 +767,8 @@ START_TEST(repl) {
     assertEval(L"(list 1 2)", L"(1 2)");
 
     assertEval(L"`(1 2 ~(builtin :add 3 1))", L"(1 2 4)");
+
+    assertEval(L"`(1 2 ~@(list 3 4))", L"(1 2 3 4)");
 
 //    (def adder (fn (args)
 //                    (cons '+

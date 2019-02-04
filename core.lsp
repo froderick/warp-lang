@@ -1,96 +1,57 @@
-(def first (fn (seq) (builtin :first seq)))
-(def rest (fn (seq) (builtin :rest seq)))
-(def cons (fn (x seq) (builtin :cons x seq)))
-(def + (fn (a b) (builtin :add a b)))
-(def - (fn (a b) (builtin :subtract a b)))
-(def = (fn (a b) (builtin :compare a b)))
+(def first (fn first (seq) (builtin :first seq)))
+(def rest (fn rest (seq) (builtin :rest seq)))
+(def cons (fn cons (x seq) (builtin :cons x seq)))
+(def + (fn + (a b) (builtin :add a b)))
+(def - (fn - (a b) (builtin :subtract a b)))
+(def = (fn = (a b) (builtin :compare a b)))
 
-(def sum (fn (seq)
-  (let (_sum (fn foo (total remaining)
-            (if (= remaining nil)
-              total
-              (foo (+ total (first remaining)) (rest remaining)))))
-    (_sum 0 seq))))
+(def nil? (fn nil? (x) (= nil x)))
+(def zero? (fn zero? (n) (= n 0)))
+(def second (fn second (seq) (first (rest seq))))
+(def inc (fn inc (n) (+ n 1)))
+(def dec (fn dec (n) (- n 1)))
 
-
-(def fib (fn (n)
-             (let (_fib (fn _fib (prev1 prev2 n)
-                            (if (= n 0)
-                                prev2
-                              (_fib prev2 (+ prev1 prev2) (- n 1)))))
-               (_fib 0 1 n))))
-
-(def second (fn (seq)
-                (first (rest seq))))
-
-(def zero? (fn (n) (= n 0)))
-
-(def inc (fn (n) (+ n 1)))
-(def dec (fn (n) (- n 1)))
-
-(def nth (fn loop (i seq)
+(def nth (fn nth (i seq)
              (if (zero? i)
                  (first seq)
-                 (loop (dec i) (rest seq)))))
+                 (nth (dec i) (rest seq)))))
 
-(def drop (fn loop (i seq)
+(def drop (fn drop (i seq)
              (if (zero? i)
                  seq
-               (loop (dec i) (rest seq)))))
+               (drop (dec i) (rest seq)))))
 
-(def nil? (fn (x) (= nil x)))
 
-(def reverse (fn (seq)
-                 (let (_reverse (fn loop (old new)
+(def reverse (fn reverse (seq)
+                 (let (_reverse (fn _reverse (old new)
                                     (if (nil? old)
                                         new
                                       (let (n (first old)
                                               old (rest old))
-                                        (loop old (cons n new))))))
+                                        (_reverse old (cons n new))))))
                    (_reverse seq nil))))
 
-(def concat (fn (seq-a seq-b)
-                (let (_concat (fn loop (seq-a seq-b)
-                                  (if (nil? seq-a)
-                                      seq-b
-                                      (loop (rest seq-a) (cons (first seq-a) seq-b)))))
-                  (_concat (reverse seq-a) seq-b))))
 
-(def defn (fn (args)
+;; begin temporary concat
+(def concat-two (fn concat-two (seq-a seq-b)
+                    (if (nil? seq-a)
+                        seq-b
+                      (concat-two (rest seq-a) (cons (first seq-a) seq-b)))))
+
+(def concat-n (fn concat-fn (concated remaining)
+                  (if (nil? remaining)
+                      concated
+                    (let (next (first remaining)
+                               todo (rest remaining))
+                      (concat-n (concat-two (reverse concated) next) todo)))))
+
+(def concat (fn concat (& seqs)
+                (concat-n '() seqs)))
+;; end temporary concat
+
+(def defn (fn defn (args)
               (let (name (first args)
-                    fnargs (second args)
-                    forms (drop 2 args))
+                         fnargs (second args)
+                         forms (drop 2 args))
                 (list 'def name (concat (list 'fn name fnargs) forms)))))
 (builtin :setmacro "defn")
-
-;(def list (fn (args) args))
-;(builtin :setmacro "list")
-
-;;(def when (fn (args)
-;;              (let ())
-;;              (concat 
-;;
-;;               (cons 'if (cons (first args) nil)
-;;                           )
-;;                          ()
-;;              (let (name (first args)
-;;                         fnargs (second args)
-;;                         forms (drop 2 args)
-;;                         fnlist (cons 'fn
-;;                                      (cons name
-;;                                            (cons fnargs nil)))
-;;                         fullfn (concat fnlist forms))
-;;                (cons 'def 
-;;                      (cons name
-;;                            (cons fullfn nil))))))
-;;(builtin :setmacro "defn")
-                
-
-;;(defn name (args) forms)
-;;
-;;(def defn (fn (args)
-;;              (let (name (first args)
-;;                    fnargs (second args)
-;;                    forms (drop 2 args))
-;;                `(def ~name (fn ~name ~args ~@forms))))))
-;;(builtin :setmacro "defn")

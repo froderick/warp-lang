@@ -376,7 +376,13 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   constantFnInitContents(&fnConst);
 
   fnConst.fnId = form->fn.id;
+  fnConst.hasName = form->fn.hasName;
+  textInitContents(&fnConst.name);
+  if (fnConst.hasName) {
+    throws(tryTextCopy(&form->fn.name, &fnConst.name, error));
+  }
   fnConst.numArgs = form->fn.numArgs;
+  fnConst.usesVarArgs = form->fn.usesVarArgs;
   fnConst.numConstants = fnConstants.numUsed;
   fnConst.numCaptures = form->fn.numCaptures;
   fnConst.constants = fnConstants.constants;
@@ -816,6 +822,17 @@ RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
   // push the arguments in evaluation (left-to-right) order
   for (uint16_t i = 0; i<form->fnCall.args.numForms; i++) {
     throws(tryCompile(&form->fnCall.args.forms[i], output, error));
+  }
+
+  // push the number of arguments
+  {
+    Constant c;
+    c.type = CT_INT;
+    c.integer = form->fnCall.args.numForms;
+    throws(tryAppendConstant(output.constants, c, error));
+    uint16_t index = output.constants->numUsed - 1;
+    uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
+    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
   }
 
   // push the callable

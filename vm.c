@@ -56,8 +56,11 @@ void codeFreeContents(Code *code) {
 }
 
 void constantFnInitContents(FnConstant *fnConst) {
+  fnConst->fnId = 0;
   fnConst->numArgs = 0;
+  fnConst->usesVarArgs = false;
   fnConst->numConstants = 0;
+  fnConst->numCaptures = 0;
   fnConst->constants = NULL;
   codeInitContents(&fnConst->code);
 }
@@ -192,8 +195,11 @@ RetVal tryCodeDeepCopy(Code *from, Code *to, Error *error) {
  */
 
 typedef struct Fn {
+  bool hasName;
+  Text name;
   uint16_t numCaptures;
   uint16_t numArgs;
+  bool usesVarArgs;
   uint16_t numConstants;
   Value *constants;
   Code code;
@@ -1238,12 +1244,87 @@ RetVal tryPopInvocable(VM *vm, Frame *frame, Invocable *invocable, Error *error)
   return ret;
 }
 
-RetVal tryInvokePopulateLocals(Frame *parent, Frame *child, Invocable invocable, Error *error) {
+//* - vm honors var-arg flag
+//*   - sees var-arg flag on invocable
+//*   - pops all static arguments into local slot
+//*   - pops number indicating number of extra arguments
+//      TODO: do we have to start *aways* passing the number of arguments?
+//*   - pops number of extra arguments into a list, sets as final argument in local slot
+
+RetVal tryInvokePopulateLocals(VM *vm, Frame *parent, Frame *child, Invocable invocable, Error *error) {
   RetVal ret;
 
-  for (uint16_t i=0; i<invocable.fn.numArgs; i++) {
+  Value numArgsSupplied;
+  throws(tryOpStackPop(parent->opStack, &numArgsSupplied, error));
+
+  if (numArgsSupplied.type != VT_UINT) {
+    throwRuntimeError(error, "first argument must be number of arguments supplied: %u", numArgsSupplied.type);
+  }
+
+  if (numArgsSupplied.value > invocable.fn.numArgs) {
+
+    if (!invocable.fn.usesVarArgs) {
+      throwRuntimeError(error, "extra arguments supplied, expected %u but got %llu", invocable.fn.numArgs,
+          numArgsSupplied.value);
+    }
+
+    // read the extra args into a list, push it back on the stack
+
+    Value seq = nil();
+    uint16_t numVarArgs = (numArgsSupplied.value - invocable.fn.numArgs) + 1;
+    for (uint16_t i = 0; i < numVarArgs; i++) {
+
+      Value arg;
+      throws(tryOpStackPop(parent->opStack, &arg, error));
+
+      Cons cons;
+      cons.value = arg;
+      cons.next = seq;
+      throws(tryAllocateCons(&vm->gc, cons, &seq, error));
+    }
+
+    throws(tryOpStackPush(parent->opStack, seq, error));
+  }
+
+  if (numArgsSupplied.value == invocable.fn.numArgs && invocable.fn.usesVarArgs) {
+    // wrap the last arg in a list
+
     Value arg;
     throws(tryOpStackPop(parent->opStack, &arg, error));
+
+    Value seq = nil();
+
+    Cons cons;
+    cons.value = arg;
+    cons.next = nil();
+    throws(tryAllocateCons(&vm->gc, cons, &seq, error));
+
+    throws(tryOpStackPush(parent->opStack, seq, error));
+  }
+
+  if (numArgsSupplied.value < invocable.fn.numArgs) {
+
+    if (!invocable.fn.usesVarArgs) {
+      throwRuntimeError(error, "required arguments not supplied, expected %u but got %llu", invocable.fn.numArgs,
+                        numArgsSupplied.value);
+    }
+
+    // make sure the list is present on the stack
+
+    throws(tryOpStackPush(parent->opStack, nil(), error));
+  }
+
+  for (uint16_t i = 0; i < invocable.fn.numArgs; i++) {
+    Value arg;
+    throws(tryOpStackPop(parent->opStack, &arg, error));
+
+//    if (wcscmp(invocable.fn.name.value, L"reverse") == 0
+//        || wcscmp(invocable.fn.name.value, L"concat-two") == 0
+//        || wcscmp(invocable.fn.name.value, L"concat") == 0
+//        ) {
+//      throws(tryVMPrn(vm, arg, error));
+//    }
+
     uint16_t idx = invocable.fn.numArgs - (1 + i);
     child->locals[idx] = arg;
   }
@@ -1294,7 +1375,7 @@ RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
   tryOpStackInitContents(&childOpStack, invocable.fn.code.maxOperandStackSize, error);
   child.opStack = &childOpStack;
 
-  throws(tryInvokePopulateLocals(frame, &child, invocable, error));
+  throws(tryInvokePopulateLocals(vm, frame, &child, invocable, error));
   throws(tryFrameEval(vm, &child, error));
   throws(tryOpStackPush(frame->opStack, child.result, error));
 
@@ -1344,7 +1425,7 @@ RetVal tryInvokeDynTailEval(VM *vm, Frame *frame, Error *error) {
     frame->locals = resizedLocals;
   }
 
-  throws(tryInvokePopulateLocals(frame, frame, invocable, error));
+  throws(tryInvokePopulateLocals(vm, frame, frame, invocable, error));
 
   frame->result = nil();
   frame->resultAvailable = false;
@@ -1942,7 +2023,14 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 
   unresolvedFnRefsInitContents(&unresolved);
 
+  fn.hasName = fnConst->hasName;
+  textInitContents(&fn.name);
+  if (fn.hasName) {
+    throws(tryTextCopy(&fnConst->name, &fn.name, error));
+  }
+
   fn.numArgs = fnConst->numArgs;
+  fn.usesVarArgs = fnConst->usesVarArgs;
   fn.numConstants = fnConst->numConstants;
   fn.numCaptures = fnConst->numCaptures;
 
