@@ -7,4 +7,6 @@ RetVal tryReplCompile(TokenStream_t stream, VM_t vm, CodeUnit *codeUnit, Error *
 
 RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error);
 
+RetVal tryLoad(VM_t vm, char *filename, Error *error);
+
 #endif //WARP_LANG_REPL_H
