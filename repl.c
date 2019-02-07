@@ -52,7 +52,7 @@ RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
   throws(tryStreamMake(source, &stream, error));
   throws(tryVMMake(&vm, error));
 
-  char *stdLib = "/Users/ddcmhenry/dev/funtastic/branches/warp-lang/core.lsp";
+  char *stdLib = "/Users/ehenry/dev/funtastic/branches/warp-lang/core.lsp";
   throws(tryLoad(vm, stdLib, error));
 
   throws(tryReplCompile(stream, vm, &unit, error));

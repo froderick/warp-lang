@@ -4,7 +4,7 @@
 int main(void) {
   RetVal ret;
 
-  char *stdLib = "/Users/ddcmhenry/dev/funtastic/branches/warp-lang/core.lsp";
+  char *stdLib = "/Users/ehenry/dev/funtastic/branches/warp-lang/core.lsp";
 
   Error error;
   VM_t vm;
