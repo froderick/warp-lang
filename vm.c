@@ -1264,6 +1264,7 @@ RetVal tryInvokePopulateLocals(VM *vm, Frame *parent, Frame *child, Invocable in
   if (numArgsSupplied.value > invocable.fn.numArgs) {
 
     if (!invocable.fn.usesVarArgs) {
+      // fail: wrong number of arguments
       throwRuntimeError(error, "extra arguments supplied, expected %u but got %llu", invocable.fn.numArgs,
           numArgsSupplied.value);
     }
@@ -1305,6 +1306,7 @@ RetVal tryInvokePopulateLocals(VM *vm, Frame *parent, Frame *child, Invocable in
   if (numArgsSupplied.value < invocable.fn.numArgs) {
 
     if (!invocable.fn.usesVarArgs) {
+      // fail: wrong number of arguments
       throwRuntimeError(error, "required arguments not supplied, expected %u but got %llu", invocable.fn.numArgs,
                         numArgsSupplied.value);
     }
@@ -1361,8 +1363,10 @@ RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
   Frame child;
   frameInitContents(&child);
 
+  // fail: not all values are invocable
   throws(tryPopInvocable(vm, frame, &invocable, error));
 
+  // fail: allocating stack frame
   child.parent = frame;
   child.numConstants = invocable.fn.numConstants;
   child.constants = invocable.fn.constants;
@@ -1407,6 +1411,7 @@ RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
 RetVal tryInvokeDynTailEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
+  // fail: not all values are invocable
   Invocable invocable;
   throws(tryPopInvocable(vm, frame, &invocable, error));
 
@@ -1418,6 +1423,7 @@ RetVal tryInvokeDynTailEval(VM *vm, Frame *frame, Error *error) {
   if (invocable.fn.code.numLocals > frame->numLocals) {
     Value *resizedLocals = realloc(frame->locals, invocable.fn.code.numLocals * sizeof(Value));
     if (resizedLocals == NULL) {
+      // fail: reallocating stack frame space
       ret = memoryError(error, "realloc Value array");
       goto failure;
     }
@@ -1564,7 +1570,7 @@ RetVal tryAddEval(VM *vm, Frame *frame, Error *error) {
   throws(tryOpStackPop(frame->opStack, &a, error));
 
   if (a.type != VT_UINT || b.type != VT_UINT) {
-
+    // fail: not all values are addable
     throwRuntimeError(error, "can only add two integers");
   }
 
@@ -1590,8 +1596,8 @@ RetVal trySubEval(VM *vm, Frame *frame, Error *error) {
   throws(tryOpStackPop(frame->opStack, &a, error));
 
   if (a.type != VT_UINT || b.type != VT_UINT) {
-
-    throwRuntimeError(error, "can only add two integers");
+    // fail: not all values are subtractable
+    throwRuntimeError(error, "can only subtract two integers");
   }
 
   Value c;
@@ -1646,6 +1652,7 @@ RetVal tryLoadVarEval(VM *vm, Frame *frame, Error *error) {
 
   Var *var;
   if (!resolveVar(&vm->namespaces, str.value, str.length, &var)) {
+    // fail: not all vars exist
     throwRuntimeError(error, "no such var found: '%ls'", str.value);
   }
   else {
@@ -1733,6 +1740,7 @@ RetVal tryConsEval(VM *vm, Frame *frame, Error *error) {
   }
   else {
     // TODO: we need to print the actual type here, should make a metadata table for value types
+    // fail: not all types can be used as a seq
     throwRuntimeError(error, "cannot cons onto a value of type %u", seq.type);
   }
 
@@ -1764,6 +1772,7 @@ RetVal tryFirstEval(VM *vm, Frame *frame, Error *error) {
   }
   else {
     // TODO: we need to print the actual type here, should make a metadata table for value types
+    // fail: not all types can be used as a seq
     throwRuntimeError(error, "cannot get first from a value of type %u", seq.type);
   }
 
@@ -1794,6 +1803,7 @@ RetVal tryRestEval(VM *vm, Frame *frame, Error *error) {
     result = cons.next;
   }
   else {
+    // fail: not all types can be used as a seq
     // TODO: we need to print the actual type here, should make a metadata table for value types
     throwRuntimeError(error, "cannot get rest from a value of type %u", seq.type);
   }
@@ -1815,6 +1825,7 @@ RetVal trySetMacroEval(VM *vm, Frame *frame, Error *error) {
   throws(tryOpStackPop(frame->opStack, &strValue, error));
 
   if (strValue.type != VT_STR) {
+    // fail: not all types identify vars
     throwRuntimeError(error, "only symbols can identify vars: %u", strValue.type);
   }
 
@@ -1823,11 +1834,13 @@ RetVal trySetMacroEval(VM *vm, Frame *frame, Error *error) {
 
   Var *var;
   if (!resolveVar(&vm->namespaces, str.value, str.length, &var)) {
+    // fail: not all vars exist
     throwRuntimeError(error, "no such var exists: %ls", str.value);
   }
 
   if (!var->isMacro) {
     if (var->value.type != VT_FN) {
+      // fail: only vars referring to functions can be macros
       throwRuntimeError(error, "only vars referring to functions can be macros: %ls, %u", str.value, var->value.type);
     }
     var->isMacro = true;
@@ -1850,6 +1863,7 @@ RetVal tryGetMacroEval(VM *vm, Frame *frame, Error *error) {
   throws(tryOpStackPop(frame->opStack, &strValue, error));
 
   if (strValue.type != VT_STR) {
+    // fail: not all types identify vars
     throwRuntimeError(error, "only symbols can identify vars: %u", strValue.type);
   }
 
