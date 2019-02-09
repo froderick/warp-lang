@@ -786,27 +786,32 @@ RetVal tryFnParseArgs(Expr *argsExpr, FormFn *fn, Error *error) {
 
   uint64_t pos = getExprPosition(argsExpr);
 
-  if (argsExpr->type != N_LIST) {
-    throwSyntaxError(error, pos, "the 'fn' special form requires an argument list of the type N_LIST: %u",
-                     argsExpr->type);
-  }
+  if (argsExpr->type == N_LIST) {
 
-  throws(tryFnValidateArgs(argsExpr, &fn->numArgs, &fn->usesVarArgs, error));
-  tryMalloc(fn->args, sizeof(FormFnArg) * fn->numArgs, "FormFnArg array");
+    throws(tryFnValidateArgs(argsExpr, &fn->numArgs, &fn->usesVarArgs, error));
+    tryMalloc(fn->args, sizeof(FormFnArg) * fn->numArgs, "FormFnArg array");
 
-  ListElement *argElem = argsExpr->list.head;
-  for (int i=0; i<fn->numArgs; i++) {
+    ListElement *argElem = argsExpr->list.head;
+    for (int i=0; i<fn->numArgs; i++) {
 
-    if (i + 1 == fn->numArgs && fn->usesVarArgs) {
-      argElem = argElem->next; // skip &
+      if (i + 1 == fn->numArgs && fn->usesVarArgs) {
+        argElem = argElem->next; // skip &
+      }
+
+      FormFnArg *arg = fn->args + i;
+      fnArgInitContents(arg);
+      throws(tryTextMake(argElem->expr->symbol.value, &arg->name, argElem->expr->symbol.length, error));
+      arg->source = argElem->expr->source;
+
+      argElem = argElem->next;
     }
-
-    FormFnArg *arg = fn->args + i;
-    fnArgInitContents(arg);
-    throws(tryTextMake(argElem->expr->symbol.value, &arg->name, argElem->expr->symbol.length, error));
-    arg->source = argElem->expr->source;
-
-    argElem = argElem->next;
+  }
+  else if (argsExpr->type == N_NIL) {
+    // leave args empty
+  }
+  else {
+    throwSyntaxError(error, pos, "the 'fn' requires an arg list of the type N_LIST or N_NIL: %u",
+                     argsExpr->type);
   }
 
   return R_SUCCESS;
