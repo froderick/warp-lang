@@ -614,6 +614,7 @@ START_TEST(vmBasic) {
     };
 
     FnConstant fn;
+    constantFnInitContents(&fn);
     fn.numConstants = 1;
     fn.constants = malloc(sizeof(Constant) * fn.numConstants);
     fn.constants[0].type = CT_INT;
@@ -635,6 +636,7 @@ START_TEST(vmBasic) {
     };
 
     CodeUnit unit;
+    codeUnitInitContents(&unit);
     unit.numConstants = 3;
     unit.constants = malloc(sizeof(Constant) * unit.numConstants);
     unit.constants[0].type = CT_INT;
