@@ -1235,6 +1235,7 @@ RetVal tryPopInvocable(VM *vm, Frame *frame, Invocable *invocable, Error *error)
       break;
     }
     default:
+      // fail: not all values are invocable
       throwRuntimeError(error, "cannot invoke this value type as a function: %u", popVal.type);
   }
 
@@ -1357,41 +1358,41 @@ RetVal tryInvokePopulateLocals(VM *vm, Frame *parent, Frame *child, Invocable in
 RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
 
   RetVal ret;
-  Invocable invocable;
 
-  // clean up on return
+  // clean up on fail
+  Frame *parent = NULL;
+
+  Invocable invocable;
+  throws(tryPopInvocable(vm, frame, &invocable, error));
+
+  tryMalloc(parent, sizeof(Frame), "Frame");
+  memcpy(parent, frame, sizeof(Frame));
+
   Frame child;
   frameInitContents(&child);
 
-  // fail: not all values are invocable
-  throws(tryPopInvocable(vm, frame, &invocable, error));
-
   // fail: allocating stack frame
-  child.parent = frame;
+  child.parent = parent;
   child.numConstants = invocable.fn.numConstants;
   child.constants = invocable.fn.constants;
   child.code = invocable.fn.code;
   child.numLocals = invocable.fn.code.numLocals;
 
+  tryMalloc(child.opStack, sizeof(OpStack), "OpStack");
   tryMalloc(child.locals, sizeof(Value) * invocable.fn.code.numLocals, "Value array");
+  throws(tryOpStackInitContents(child.opStack, invocable.fn.code.maxOperandStackSize, error));
+  throws(tryInvokePopulateLocals(vm, parent, &child, invocable, error));
+//  throws(tryFrameEval(vm, &child, error));
+//  throws(tryOpStackPush(parent->opStack, child.result, error));
 
-  OpStack childOpStack;
-  tryOpStackInitContents(&childOpStack, invocable.fn.code.maxOperandStackSize, error);
-  child.opStack = &childOpStack;
-
-  throws(tryInvokePopulateLocals(vm, frame, &child, invocable, error));
-  throws(tryFrameEval(vm, &child, error));
-  throws(tryOpStackPush(frame->opStack, child.result, error));
-
-  frame->pc = frame->pc + 1;
-
-  ret = R_SUCCESS;
-  goto done;
+  *frame = child;
+  parent->pc = parent->pc + 1;
+  return R_SUCCESS;
 
   failure:
-    goto done;
-
-  done:
+    if (parent != NULL) {
+      free(parent);
+    }
     free(child.locals);
     opStackFreeContents(child.opStack);
     return ret;
@@ -2270,7 +2271,25 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
   uint8_t inst;
   TryEval tryEval;
 
-  while (!frame->resultAvailable) {
+  while (true) {
+
+    if (frame->resultAvailable) {
+      if (frame->parent == NULL) {
+        break;
+      }
+      else {
+
+        Frame *child = frame;
+        Frame *parent = frame->parent;
+
+        throws(tryOpStackPush(parent->opStack, child->result, error));
+        opStackFreeContents(child->opStack);
+        free(child->locals);
+
+        *frame = *parent;
+        free(parent);
+      }
+    }
 
     inst = frame->code.code[frame->pc];
     tryEval = vm->instTable.instructions[inst].tryEval;
