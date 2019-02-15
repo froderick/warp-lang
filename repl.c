@@ -44,7 +44,7 @@ RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
   VM_t vm;
   Value result;
 
-  printf("%ls\n", inputText);
+  //printf("%ls\n", inputText);
 
   codeUnitInitContents(&unit);
 
@@ -56,7 +56,7 @@ RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
   throws(tryLoad(vm, stdLib, error));
 
   throws(tryReplCompile(stream, vm, &unit, error));
-  printCodeUnit(&unit);
+  //printCodeUnit(&unit);
 
   throws(tryVMEval(vm, &unit, &result, error));
   throws(tryVMPrnStr(vm, result, outputText, error));
@@ -97,7 +97,7 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
         goto failure;
       }
     }
-    printCodeUnit(&unit);
+    //printCodeUnit(&unit);
 
     Value result;
     throws(tryVMEval(vm, &unit, &result, error));

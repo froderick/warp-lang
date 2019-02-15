@@ -371,7 +371,7 @@ START_TEST(compilerBasic) {
     {
       ck_assert_int_eq(tryTestCompile(L"(builtin :add 1 2)", &codeUnit, &e), R_SUCCESS);
 
-      printCodeUnit(&codeUnit);
+      //printCodeUnit(&codeUnit);
 
       ck_assert_int_eq(codeUnit.numConstants, 2);
       ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
@@ -400,7 +400,7 @@ START_TEST(compilerBasic) {
     {
       ck_assert_int_eq(tryTestCompile(L"((fn (a b) (builtin :add a b)) 4 5)", &codeUnit, &e), R_SUCCESS);
 
-      printCodeUnit(&codeUnit);
+      //printCodeUnit(&codeUnit);
 
       // verify fn
 
@@ -522,7 +522,7 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(tryTestCompile(L"(let (x (fn (y) (builtin :add y 50)))"
                                        "  (x 100))", &codeUnit, &e), R_SUCCESS);
 
-      printCodeUnit(&codeUnit);
+      //printCodeUnit(&codeUnit);
 
       ck_assert_int_eq(codeUnit.numConstants, 3);
       ck_assert_int_eq(codeUnit.constants[0].type, CT_FN);
@@ -545,9 +545,9 @@ START_TEST(compilerBasic) {
           I_RET,
       };
 
-      printCodeUnit(&codeUnit);
-      printf("-------------\n");
-      printCodeArray(expectedCode, sizeof(expectedCode));
+      //printCodeUnit(&codeUnit);
+      //printf("-------------\n");
+      //printCodeArray(expectedCode, sizeof(expectedCode));
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
       ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
