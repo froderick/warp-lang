@@ -1,0 +1,163 @@
+This is a scratch notes file, where I put notes to clean up or come back to.
+
+Profuse swearing guaranteed.
+
+----------------------------------------------------------------------------
+
+/*
+ * TODO: the value types need a common protocol struct to hold function impls for all the operations
+ * that are common between them so we don't end up with switch statements everywhere
+ *
+ * TODO: the instruction types need the same treatment
+ */
+
+/*
+ * Here begin scratch thoughts that are probably mostly invalid by the time anyone reads them.
+ */
+
+// hold a table of Value references to functions and constants defined internally within this function
+// this way this function can be hydrated from a CodeUnit once, and have all its inner functions
+// hydrated once as well.
+
+// functions should not have 'inner' functions. The bytecode format should require that all functions definittions
+// be hoisted to the top level. code that references functions expliclitly by value, and not indirectly, can use
+// the mechanism below:
+
+// going from a CodeUnit to a hydrated representation of a function should not result in a code rewrite
+// you can avoid a rewrite by having the bytecode say "load the value of this function reference", where the
+// reference is mapped in the header of the Fn to an actual object reference to the function in question. This can
+// be populated at the time that the Fn is loaded as a value for the first time.
+
+// a big part of my confusion has been conflating function loading with function invocation/execution
+
+// It must be a property of functions that they retain references to the values they explicitly reference
+// beyond a given function call, otherwise all these values have to be re-hydrated from the CodeUnit every time...
+
+//};
+
+// there are three concepts I'd like to separate:
+// 1. the CodeUnit that is generated for a function
+//    - this includes the actual instructions
+//    - this also includes source metadata and constants
+//    - this should live on the heap, and be gc-able
+// 2. the actual value that can be used to invoke that function
+//    - this should really be a singleton
+//    - this should live on the heap, and be gc-able
+//    - this should hold an object reference to its CodeUnit to prevent it from being gc-ed too soon
+// 3. the way this value is discovered by code that wants to invoke it
+//    - a literal function reference, returned as a value from another function call
+//    - a local
+//    - a var
+// and yet...
+// it would be much easier to duplicate the constants into the functions themselves where needed
+
+//;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; Value Spec ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+// In this machine, all values are represented by a 64-bit word.
+//
+// The leftmost 3 bits are used to encode the following types. The remaining 61
+// bits are interpreted on a per-type basis.
+//
+// :unsigned-int - an overflowable unsigned integer
+// :bool         - 0 for false, 1 for true
+// :nil          - constant, always 0
+// :char         - the lowest 32 bits represent a UTF-16 character
+// :object       - interpreted as an unsigned integer, the value is a pointer
+//                 offset to dynamically-allocated memory on the heap.
+//
+// Objects on the heap are represented this way:
+//
+// [56 bits - total object size in words][8 bits - specific type of object] [...]
+//
+// Here are the object types:
+//
+// :char-array (0)   - The first word is an unsigned integer containing the
+//                     number of characters in the string. Each subsequent word
+//                     contains up to two UTF-16 characters, one in the higher 32
+//                     bits and one in the lower 32 bits. This is an optimization
+//                     for representing Strings.
+//
+// :object-array (1) - The first word is an unsigned integer containing the
+//                     number of characters in the string. Each subsequent word
+//                     contains a value.
+//
+// :record-type (2)  - Describes the names of the fields in a record, and their
+//                     indexes.
+//
+// :record (3)       - The first word is the Value that describes the record-type
+//                     for a record. The rest of the words are values that
+//                     describe the record's fields.
+//
+// :function (5)     - The first word is the number of arguments the function
+//                     accepts. The second word is a string value that is the
+//                     source code for the function. The remainder of the words
+//                     are instructions, which are represented as word singles
+//                     or triples: main instruction, arg hint, arg
+//
+
+// TODO: how do we represent lists in the virtual machine? are they implemented on-top of arrays/records? (YES)
+// TODO: is a function reference represented differently from a lambda?
+// TODO: there appears to be no meaningful difference between args and locals within the vm, they are all just locals
+// though captured variables are different, since they may get boxed as part of a lambda
+
+
+/*
+ * When the vm is asked to evaluate code, it always evaluates it in the context of a specific namespace. The symbols
+ * defined in this namespace form the basis of the evaluation environment. Also part of the environment is
+ * pre-allocated space for the locals the code will introduce. Last, the code will require an operand stack to do
+ * anything useful, so one is pre-allocated based on the stack usage the code requires.
+ *
+ * When the vm evaluates code, it expects that the top-level expression will terminate in a `ret` instruction so it
+ * will know the result of the expression it evaluated. The compiler must detect that a form is a top-level
+ * form and generate this extra instruction as needed.
+ */
+
+//F_CONST,   -> I_LOAD_*
+//F_IF,      -> I_JMP_IF
+//F_LET,     -> I_STORE_LOCAL
+//F_DEF,     -> I_DEFINE
+//F_ENV_REF, -> I_LOAD_LOCAL
+//F_VAR_REF, -> I_LOAD_VAR
+//F_FN,     -> defined fns
+//F_BUILTIN,
+//F_FN_CALL -> I_INVOKE_DYN
+
+/*
+ * tryVMEval(vm, code, &result); // the result is a Value, which the caller can then introspect
+ *
+ * load code into VM as temporary zero-argument function within current namespace
+ * invoke function
+ * destroy function
+ */
+
+/*
+ * the virtual machine at minimum needs to have a main method that accepts a file with bytecode as input
+ * this file needs a format, which could just be a sequence of sexprs where each one represents either:
+ *
+ * - a function definition, containing instructions
+ * - an expression, which is just a bag of instructions with no
+ */
+
+/* notes transcription:
+ *
+ * What does a VM need to be useful?
+ *
+ * - It needs to expose access to the runtime from executing bytecode:
+ *
+ */
+
+/*
+ * So I've been thinking about how to proceed with this VM business...
+ *
+ * I'm thinking of:
+ * - doing the full virtual machine
+ * - except just using the current ast as an input
+ * - and also doing the vm as a repl, where basically you call an API in a single-threaded fashion to evaluate code
+ * - there will be a true, command-line repl, but there will also be an API-based repl for the compiler to use
+ * - if using the AST verbatim as the instruction format becomes hard, then I'll know how the bytecode should be different
+ *   from the AST.
+ * - other than the input format, everything else about the internals of the vm should be as if bytecode was fed in
+ *   instead of AST forms. this includes the registers, the operations on the registers, and the runtime.
+ *
+ * *PERHAPS*: I should just do the fucking instruction set and be done with it
+ */
