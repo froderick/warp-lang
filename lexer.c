@@ -493,8 +493,6 @@ RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *e
     s->colNumber = s->colNumber + (*token)->source.length;
   }
 
-  printf(">> read %ls\n", (*token)->text);
-
   return ret;
 
   failure:
