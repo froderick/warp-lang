@@ -203,12 +203,7 @@ void vmFreeContents(VM_t vm);
 RetVal tryVMMake(VM_t *ptr , Error *error);
 void vmFree(VM_t vm);
 
-RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, Value *result, Error *error);
-RetVal tryVMEvalRet(VM_t vm, CodeUnit *codeUnit, Expr *result, Error *error);
-
-RetVal tryVMPrn(VM_t vm, Value result, Error *error);
-
-RetVal tryVMPrnStr(VM_t vm, Value result, wchar_t **ptr, Error *error);
+RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, Expr *result, Error *error);
 
 #endif //WARP_LANG_VM_H
 

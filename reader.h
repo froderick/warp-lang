@@ -76,7 +76,8 @@ void exprFree(Expr *expr);
 
 RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error);
 
-RetVal tryExprPrn(Expr* expr, FILE *file, Error *error);
+RetVal tryExprPrnStr(Expr *expr, wchar_t **ptr, Error *error);
+RetVal tryExprPrn(Expr* expr, Error *error);
 
 void listInitContents(ExprList *list);
 RetVal tryListAppend(ExprList *list, Expr *expr, Error *error);

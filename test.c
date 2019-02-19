@@ -253,7 +253,7 @@ START_TEST(exprPrn)
 
     // constant
     ck_assert_int_eq(tryParse(L"(himom () '(one :two 102 nil true false) \"str\")", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryExprPrn(expr, stdin, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprPrn(expr, &e), R_SUCCESS);
     printf("\n");
     exprFree(expr);
   }
@@ -601,7 +601,7 @@ START_TEST(vmBasic) {
 
     Error error;
     VM_t vm;
-    Value result;
+    Expr result;
 
     errorInitContents(&error);
     ck_assert_int_eq(tryVMMake(&vm, &error), R_SUCCESS);
@@ -653,9 +653,10 @@ START_TEST(vmBasic) {
 
     ck_assert_int_eq(tryVMEval(vm, &unit, &result, &error), R_SUCCESS);
 
-    ck_assert_int_eq(result.type, VT_UINT);
-    ck_assert_int_eq(result.value, 110);
+    ck_assert_int_eq(result.type, N_NUMBER);
+    ck_assert_int_eq(result.number.value, 110);
 
+    exprFreeContents(&result);
     vmFree(vm);
   }
 END_TEST
@@ -736,7 +737,7 @@ START_TEST(repl) {
                L"nil");
 
     assertEval(L"(fn foo () 'x)",
-               L"<function>");
+               L"\"<function>\"");
 
     assertEval(L"(let (x (fn more (n)"
                "           (if (builtin :compare n 5)"
@@ -747,7 +748,7 @@ START_TEST(repl) {
 
     assertEval(L"(builtin :subtract 10 2)", L"8");
 
-    assertEval(L"(let (a 100) (fn () a))", L"<closure>");
+    assertEval(L"(let (a 100) (fn () a))", L"\"<closure>\"");
 
     assertEval(L"(let (a 100 b (fn () a)) (b))",
                L"100");

@@ -760,86 +760,103 @@ RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error) {
     return ret;
 }
 
-RetVal tryExprPrn(Expr* expr, FILE *file, Error *error) {
-
-  // TODO: allocate an expanding buffer, print into that, copy it into a malloced string, free the buffer, return the malloced string
-  // consider writing a twin to stream source called something like 'output stream' that can let you write to an abstraction
-
+RetVal _tryExprPrnStr(Expr *expr, StringBuffer_t b, Error *error) {
   RetVal ret;
 
   switch (expr->type) {
-
-    // atoms
-    case N_STRING:
-      printf("\"%ls\"", expr->string.value);
+    case N_NIL:
+    throws(tryStringBufferAppendStr(b, L"nil", error));
       break;
-    case N_NUMBER:
-      printf("%llu", expr->number.value);
-      break;
-    case N_SYMBOL:
-      printf("%ls", expr->symbol.value);
-      break;
-    case N_KEYWORD:
-      printf(":%ls", expr->keyword.value);
-      break;
-    case N_BOOLEAN: {
-      char *val;
-      if (expr->boolean.value) {
-        val = "true";
-      } else {
-        val = "false";
-      }
-      printf("%s", val);
+    case N_NUMBER: {
+      wchar_t text[256];
+      swprintf(text, sizeof(text), L"%llu", expr->number.value);
+      throws(tryStringBufferAppendStr(b, text, error));
       break;
     }
-    case N_NIL:
-      printf("nil");
+    case N_BOOLEAN:
+      if (expr->boolean.value == 0) {
+        throws(tryStringBufferAppendStr(b, L"false", error));
+      }
+      else {
+        throws(tryStringBufferAppendStr(b, L"true", error));
+      }
       break;
+    case N_STRING: {
+      throws(tryStringBufferAppendChar(b, L'"', error));
+      throws(tryStringBufferAppendStr(b, expr->string.value, error));
+      throws(tryStringBufferAppendChar(b, L'"', error));
+      break;
+    }
+    case N_SYMBOL: {
+      throws(tryStringBufferAppendStr(b, expr->symbol.value, error));
+      break;
+    }
+    case N_KEYWORD: {
+      throws(tryStringBufferAppendChar(b, L':', error));
+      throws(tryStringBufferAppendStr(b, expr->keyword.value, error));
+      break;
+    }
     case N_LIST: {
-      printf("(");
+      throws(tryStringBufferAppendChar(b, L'(', error));
+
       ListElement *elem = expr->list.head;
       for (int i=0; i<expr->list.length; i++) {
 
-        throws(tryExprPrn(elem->expr, file, error));
+        throws(_tryExprPrnStr(elem->expr, b, error));
 
         if (i + 1 < expr->list.length) {
-          printf(" ");
+          throws(tryStringBufferAppendChar(b, L' ', error));
         }
 
         elem = elem->next;
       }
-      printf(")");
+
+      throws(tryStringBufferAppendChar(b, L')', error));
       break;
     }
-
     default:
-      throwSyntaxError(error, expr->source.position, "Unknown expr type '%i'", expr->type);
+      throwRuntimeError(error, "unsuported value type: %u", expr->type);
   }
 
   return R_SUCCESS;
 
   failure:
-    return ret;
+  return ret;
 }
 
+RetVal tryExprPrnStr(Expr *expr, wchar_t **ptr, Error *error) {
+  RetVal ret;
 
+  // clean up on exit always
+  StringBuffer_t b = NULL;
 
+  throws(tryStringBufferMake(&b, error));
+  throws(_tryExprPrnStr(expr, b, error));
 
+  wchar_t *output;
+  throws(tryCopyText(stringBufferText(b), &output, stringBufferLength(b), error));
+  stringBufferFree(b);
 
+  *ptr = output;
+  return R_SUCCESS;
 
+  failure:
+  stringBufferFree(b);
+  return ret;
+}
 
+RetVal tryExprPrn(Expr *expr, Error *error) {
+  RetVal ret;
 
+  wchar_t *str = NULL;
+  throws(tryExprPrnStr(expr, &str, error));
+  printf("%ls", str);
+  free(str);
 
+  return R_SUCCESS;
 
-
-
-
-
-
-
-
-
-
-
+  failure:
+  return ret;
+}
 
 

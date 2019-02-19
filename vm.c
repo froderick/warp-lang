@@ -2380,7 +2380,7 @@ void topLevelFrameFreeContents(TopLevelFrame *topLevel) {
   }
 }
 
-RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
+RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
 
   RetVal ret;
 
@@ -2411,7 +2411,7 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
     return ret;
 }
 
-RetVal tryVMPrnRet(VM *vm, Value result, Expr *expr, Error *error) {
+RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
   RetVal ret;
 
   switch (result.type) {
@@ -2477,13 +2477,13 @@ RetVal tryVMPrnRet(VM *vm, Value result, Expr *expr, Error *error) {
       Expr *elem;
 
       tryMalloc(elem, sizeof(Expr), "Expr");
-      throws(tryVMPrnRet(vm, cons.value, elem, error));
+      throws(tryVMPrn(vm, cons.value, elem, error));
       throws(tryListAppend(&expr->list, elem, error));
 
       while (cons.next.type != VT_NIL) {
         throws(tryDerefCons(&vm->gc, cons.next, &cons, error));
         tryMalloc(elem, sizeof(Expr), "Expr");
-        throws(tryVMPrnRet(vm, cons.value, elem, error));
+        throws(tryVMPrn(vm, cons.value, elem, error));
         throws(tryListAppend(&expr->list, elem, error));
       }
 
@@ -2500,121 +2500,13 @@ RetVal tryVMPrnRet(VM *vm, Value result, Expr *expr, Error *error) {
     return ret;
 }
 
-RetVal tryVMEvalRet(VM *vm, CodeUnit *codeUnit, Expr *result, Error *error) {
+RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Expr *result, Error *error) {
 
   RetVal ret;
 
   Value value;
-  throws(tryVMEval(vm, codeUnit, &value, error));
-  throws(tryVMPrnRet(vm, value, result, error));
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
-RetVal _tryVMPrnStr(VM_t vm, Value result, StringBuffer_t b, Error *error) {
-  RetVal ret;
-
-  switch (result.type) {
-    case VT_NIL:
-      throws(tryStringBufferAppendStr(b, L"nil", error));
-      break;
-    case VT_UINT: {
-      wchar_t text[256];
-      swprintf(text, sizeof(text), L"%llu", result.value);
-      throws(tryStringBufferAppendStr(b, text, error));
-      break;
-    }
-    case VT_BOOL:
-      if (result.value == 0) {
-        throws(tryStringBufferAppendStr(b, L"false", error));
-      }
-      else {
-        throws(tryStringBufferAppendStr(b, L"true", error));
-      }
-      break;
-    case VT_FN:
-      throws(tryStringBufferAppendStr(b, L"<function>", error));
-      break;
-    case VT_CLOSURE:
-      throws(tryStringBufferAppendStr(b, L"<closure>", error));
-      break;
-    case VT_STR: {
-      String str;
-      throws(tryDerefString(&vm->gc, result, &str, error));
-      throws(tryStringBufferAppendChar(b, L'"', error));
-      throws(tryStringBufferAppendStr(b, str.value, error));
-      throws(tryStringBufferAppendChar(b, L'"', error));
-      break;
-    }
-    case VT_SYMBOL: {
-      Symbol sym;
-      throws(tryDerefSymbol(&vm->gc, result, &sym, error));
-      throws(tryStringBufferAppendStr(b, sym.value, error));
-      break;
-    }
-    case VT_KEYWORD: {
-      Keyword kw;
-      throws(tryDerefKeyword(&vm->gc, result, &kw, error));
-      throws(tryStringBufferAppendChar(b, L':', error));
-      throws(tryStringBufferAppendStr(b, kw.value, error));
-      break;
-    }
-    case VT_LIST: {
-      Cons cons;
-      throws(tryDerefCons(&vm->gc, result, &cons, error));
-      throws(tryStringBufferAppendChar(b, L'(', error));
-      throws(_tryVMPrnStr(vm, cons.value, b, error));
-
-      while (cons.next.type != VT_NIL) {
-        throws(tryDerefCons(&vm->gc, cons.next, &cons, error));
-        throws(tryStringBufferAppendChar(b, L' ', error));
-        throws(_tryVMPrnStr(vm, cons.value, b, error));
-      }
-
-      throws(tryStringBufferAppendChar(b, L')', error));
-      break;
-    }
-    default:
-      throwRuntimeError(error, "unsuported value type: %u", result.type);
-  }
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryVMPrnStr(VM_t vm, Value result, wchar_t **ptr, Error *error) {
-  RetVal ret;
-
-  // clean up on exit always
-  StringBuffer_t b = NULL;
-
-  throws(tryStringBufferMake(&b, error));
-  throws(_tryVMPrnStr(vm, result, b, error));
-
-  wchar_t *output;
-  throws(tryCopyText(stringBufferText(b), &output, stringBufferLength(b), error));
-  stringBufferFree(b);
-
-  *ptr = output;
-  return R_SUCCESS;
-
-  failure:
-    stringBufferFree(b);
-    return ret;
-}
-
-RetVal tryVMPrn(VM_t vm, Value result, Error *error) {
-  RetVal ret;
-
-  wchar_t *str = NULL;
-  throws(tryVMPrnStr(vm, result, &str, error));
-  printf("%ls", str);
-  free(str);
+  throws(_tryVMEval(vm, codeUnit, &value, error));
+  throws(tryVMPrn(vm, value, result, error));
 
   return R_SUCCESS;
 

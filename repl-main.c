@@ -38,7 +38,7 @@ int main(void) {
 
     printCodeUnit(&unit);
 
-    Value result;
+    Expr result;
     ret = tryVMEval(vm, &unit, &result, &error);
 
     if (ret != R_SUCCESS) {
@@ -47,7 +47,7 @@ int main(void) {
     }
 
     printf("> ");
-    throws(tryVMPrn(vm, result, &error));
+    throws(tryExprPrn(&result, &error));
     printf("\n");
 
     codeUnitFreeContents(&unit);

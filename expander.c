@@ -68,7 +68,7 @@ RetVal tryIsMacro(Expander_t expander, Text sym, bool *isMacro, Error *error) {
 
   throws(tryFormAnalyzeOptions(options, &callExpr, &root, error));
   throws(tryCompileTopLevel(root, &codeUnit, error));
-  throws(tryVMEvalRet(expander->vm, &codeUnit, &output, error));
+  throws(tryVMEval(expander->vm, &codeUnit, &output, error));
 
   if (output.type != N_BOOLEAN) {
     throwInternalError(error, "this should return a boolean");
@@ -120,7 +120,7 @@ RetVal tryExpand(Expander *expander, Text sym, Expr *input, Expr *output, Error 
 
   throws(tryFormAnalyzeOptions(options, &callExpr, &root, error));
   throws(tryCompileTopLevel(root, &codeUnit, error));
-  throws(tryVMEvalRet(expander->vm, &codeUnit, output, error));
+  throws(tryVMEval(expander->vm, &codeUnit, output, error));
 
   return R_SUCCESS;
 
