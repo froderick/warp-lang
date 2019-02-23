@@ -1566,21 +1566,35 @@ void printUnknown(int *i, const char* name, uint8_t *code) {
   printf("%i:\t<UNKNOWN>/%u\n", *i, code[*i]);
 }
 
-RetVal tryFrameEval(VM *vm, Frame *frame, Error *error);
+/*
+ * These mutate the frame, they read data from the code, starting from the pc.
+ * They increment the pc to the next unread instruction/index;
+ */
 
-uint16_t readIndex(uint8_t *code, uint16_t pc) {
-  return (code[pc + 1] << 8) | code[pc + 2];
+uint8_t readInstruction(Frame *frame) {
+  uint16_t inst = frame->code.code[frame->pc];
+  frame->pc += 1;
+  return inst;
+}
+
+uint16_t readIndex(Frame *frame) {
+
+  uint8_t *code = frame->code.code;
+  uint16_t pc = frame->pc;
+  uint16_t index = (code[pc] << 8) | code[pc + 1];
+
+  frame->pc += 2;
+  return index;
 }
 
 // (8), typeIndex (16) | (-> value)
 RetVal tryLoadConstEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
-  uint16_t constantIndex = readIndex(frame->code.code, frame->pc);
+  uint16_t constantIndex = readIndex(frame);
   Value constant = frame->constants[constantIndex];
   throws(tryOpStackPush(frame->opStack, constant, error));
 
-  frame->pc = frame->pc + 3;
   return R_SUCCESS;
 
   failure:
@@ -1591,11 +1605,10 @@ RetVal tryLoadConstEval(VM *vm, Frame *frame, Error *error) {
 RetVal tryLoadLocalEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
-  uint16_t localIndex = readIndex(frame->code.code, frame->pc);
+  uint16_t localIndex = readIndex(frame);
   Value v = frame->locals[localIndex];
   throws(tryOpStackPush(frame->opStack, v, error));
 
-  frame->pc = frame->pc + 3;
   return R_SUCCESS;
 
   failure:
@@ -1606,12 +1619,11 @@ RetVal tryLoadLocalEval(VM *vm, Frame *frame, Error *error) {
 RetVal tryStoreLocalEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
-  uint16_t localIndex = readIndex(frame->code.code, frame->pc);
+  uint16_t localIndex = readIndex(frame);
   Value v;
   throws(tryOpStackPop(frame->opStack, &v, error));
   frame->locals[localIndex] = v;
 
-  frame->pc = frame->pc + 3;
   return R_SUCCESS;
 
   failure:
@@ -1781,7 +1793,6 @@ RetVal tryInvokePopulateLocals(VM *vm, Frame *parent, Frame *child, Invocable in
 
 // (8)              | (objectref, args... -> ...)
 RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
-
   RetVal ret;
 
   // clean up on fail
@@ -1811,7 +1822,6 @@ RetVal tryInvokeDynEval(VM *vm, Frame *frame, Error *error) {
 //  throws(tryOpStackPush(parent->opStack, child.result, error));
 
   *frame = child;
-  parent->pc = parent->pc + 1;
   return R_SUCCESS;
 
   failure:
@@ -1903,7 +1913,6 @@ RetVal tryCmpEval(VM *vm, Frame *frame, Error *error) {
 
   throws(tryOpStackPush(frame->opStack, c, error));
 
-  frame->pc = frame->pc + 1;
   return R_SUCCESS;
 
   failure:
@@ -1912,7 +1921,7 @@ RetVal tryCmpEval(VM *vm, Frame *frame, Error *error) {
 
 // (8), offset (16) | (->)
 RetVal tryJmpEval(VM *vm, Frame *frame, Error *error) {
-  uint16_t newPc = readIndex(frame->code.code, frame->pc);
+  uint16_t newPc = readIndex(frame);
   frame->pc = newPc;
   return R_SUCCESS;
 }
@@ -1938,12 +1947,9 @@ RetVal tryJmpIfEval(VM *vm, Frame *frame, Error *error) {
     throwRuntimeError(error, "unhandled truth");
   }
 
+  uint16_t newPc = readIndex(frame);
   if (truthy) {
-    uint16_t newPc = readIndex(frame->code.code, frame->pc);
     frame->pc = newPc;
-  }
-  else {
-    frame->pc = frame->pc + 3;
   }
 
   return R_SUCCESS;
@@ -1973,12 +1979,9 @@ RetVal tryJmpIfNotEval(VM *vm, Frame *frame, Error *error) {
     throwRuntimeError(error, "unhandled truth");
   }
 
+  uint16_t newPc = readIndex(frame);
   if (!truthy) {
-    uint16_t newPc = readIndex(frame->code.code, frame->pc);
     frame->pc = newPc;
-  }
-  else {
-    frame->pc = frame->pc + 3;
   }
 
   return R_SUCCESS;
@@ -2006,7 +2009,6 @@ RetVal tryAddEval(VM *vm, Frame *frame, Error *error) {
 
   throws(tryOpStackPush(frame->opStack, c, error));
 
-  frame->pc = frame->pc + 1;
   return R_SUCCESS;
 
   failure:
@@ -2032,7 +2034,6 @@ RetVal trySubEval(VM *vm, Frame *frame, Error *error) {
 
   throws(tryOpStackPush(frame->opStack, c, error));
 
-  frame->pc = frame->pc + 1;
   return R_SUCCESS;
 
   failure:
@@ -2046,7 +2047,7 @@ RetVal tryDefVarEval(VM *vm, Frame *frame, Error *error) {
   Value value;
   throws(tryOpStackPop(frame->opStack, &value, error));
 
-  uint16_t constantIndex = readIndex(frame->code.code, frame->pc);
+  uint16_t constantIndex = readIndex(frame);
   Value varName = frame->constants[constantIndex];
 
   String str;
@@ -2059,7 +2060,6 @@ RetVal tryDefVarEval(VM *vm, Frame *frame, Error *error) {
   result.value = 0;
   throws(tryOpStackPush(frame->opStack, result, error));
 
-  frame->pc = frame->pc + 3;
   return R_SUCCESS;
 
   failure:
@@ -2070,7 +2070,7 @@ RetVal tryDefVarEval(VM *vm, Frame *frame, Error *error) {
 RetVal tryLoadVarEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
-  uint16_t constantIndex = readIndex(frame->code.code, frame->pc);
+  uint16_t constantIndex = readIndex(frame);
   Value varName = frame->constants[constantIndex];
 
   String str;
@@ -2085,7 +2085,6 @@ RetVal tryLoadVarEval(VM *vm, Frame *frame, Error *error) {
     throws(tryOpStackPush(frame->opStack, var->value, error));
   }
 
-  frame->pc = frame->pc + 3;
   return R_SUCCESS;
 
   failure:
@@ -2096,7 +2095,7 @@ RetVal tryLoadVarEval(VM *vm, Frame *frame, Error *error) {
 RetVal tryLoadClosureEval(VM *vm, Frame *frame, Error *error) {
   RetVal ret;
 
-  uint16_t constantIndex = readIndex(frame->code.code, frame->pc);
+  uint16_t constantIndex = readIndex(frame);
   Value fnValue = frame->constants[constantIndex];
 
   if (fnValue.type != VT_FN) {
@@ -2123,7 +2122,6 @@ RetVal tryLoadClosureEval(VM *vm, Frame *frame, Error *error) {
   throws(tryAllocateClosure(&vm->gc, closure, &closureValue, error));
   throws(tryOpStackPush(frame->opStack, closureValue, error));
 
-  frame->pc = frame->pc + 3;
   return R_SUCCESS;
 
   failure:
@@ -2142,7 +2140,6 @@ RetVal trySwapEval(VM *vm, Frame *frame, Error *error) {
   throws(tryOpStackPush(frame->opStack, a, error));
   throws(tryOpStackPush(frame->opStack, b, error));
 
-  frame->pc = frame->pc + 1;
   return R_SUCCESS;
 
   failure:
@@ -2172,7 +2169,6 @@ RetVal tryConsEval(VM *vm, Frame *frame, Error *error) {
 
   throws(tryOpStackPush(frame->opStack, result, error));
 
-  frame->pc = frame->pc + 1;
   return R_SUCCESS;
 
   failure:
@@ -2204,7 +2200,6 @@ RetVal tryFirstEval(VM *vm, Frame *frame, Error *error) {
 
   throws(tryOpStackPush(frame->opStack, result, error));
 
-  frame->pc = frame->pc + 1;
   return R_SUCCESS;
 
   failure:
@@ -2236,7 +2231,6 @@ RetVal tryRestEval(VM *vm, Frame *frame, Error *error) {
 
   throws(tryOpStackPush(frame->opStack, result, error));
 
-  frame->pc = frame->pc + 1;
   return R_SUCCESS;
 
   failure:
@@ -2274,7 +2268,6 @@ RetVal trySetMacroEval(VM *vm, Frame *frame, Error *error) {
 
   throws(tryOpStackPush(frame->opStack, nil(), error));
 
-  frame->pc = frame->pc + 1;
   return R_SUCCESS;
 
   failure:
@@ -2307,7 +2300,6 @@ RetVal tryGetMacroEval(VM *vm, Frame *frame, Error *error) {
 
   throws(tryOpStackPush(frame->opStack, result, error));
 
-  frame->pc = frame->pc + 1;
   return R_SUCCESS;
 
   failure:
@@ -2373,6 +2365,24 @@ InstTable instTableCreate() {
 
 /*
  * Loading and evaluating code within the VM
+ *
+ * pushFrame(ctx)
+ * popFrame(ctx)
+ * replaceFrame(ctx)
+ * currentFrame(ctx)
+ *
+ * parentFrame(frame)
+ * pushOperand(frame)
+ * popOperand(frame)
+ * currentPc(frame)
+ * setPc(frame)
+ * incPc(frame, n)
+ * getInst(frame, n)
+ * setResult(frame)
+ * hasResult(frame)
+ * getLocal(frame, index, *value, error)
+ * setLocal(frame, index, value, error)
+ * getConst(frame, index, *value, error)
  */
 
 RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
@@ -2401,7 +2411,7 @@ RetVal tryFrameEval(VM *vm, Frame *frame, Error *error) {
       }
     }
 
-    inst = frame->code.code[frame->pc];
+    inst = readInstruction(frame);
     tryEval = vm->instTable.instructions[inst].tryEval;
 
     if (tryEval == NULL) {
