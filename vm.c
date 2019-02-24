@@ -1,4 +1,4 @@
-#include <stdlib.h>
+  #include <stdlib.h>
 #include <string.h>
 #include "vm.h"
 #include "utils.h"
@@ -1428,74 +1428,22 @@ void namespacesFreeContents(Namespaces *namespaces) {
 }
 
 /*
- * The OpStack
+ * The ExecFrame and operations it supports
  */
 
-void opStackInitContents(OpStack *stack) {
-  stack->usedDepth = 0;
-  stack->maxDepth = 0;
-  stack->stack = NULL;
-}
-
-RetVal tryOpStackInitContents(OpStack *stack, uint64_t maxDepth, Error *error) {
-  RetVal ret;
-
-  stack->maxDepth = maxDepth;
-  stack->usedDepth = 0;
-  tryMalloc(stack->stack, sizeof(Value) * maxDepth, "Value array");
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-void opStackFreeContents(OpStack *stack) {
-  if (stack != NULL) {
-    stack->maxDepth = 0;
-    stack->usedDepth = 0;
-    if (stack->stack != NULL) {
-      free(stack->stack);
-      stack->stack = NULL;
-    }
-  }
-}
-
-RetVal tryOpStackPush(OpStack *stack, Value v, Error *error) {
-  RetVal ret;
-
-  if (stack->maxDepth == stack->usedDepth + 1) {
-    throwRuntimeError(error, "cannot allocate op stack greater than max %llu", stack->maxDepth);
-  }
-
-  stack->stack[stack->usedDepth] = v;
-  stack->usedDepth = stack->usedDepth + 1;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryOpStackPop(OpStack *stack, Value *ptr, Error *error) {
-
-  RetVal ret;
-
-  if (stack->usedDepth == 0) {
-    throwRuntimeError(error, "cannot pop from empty op stack")
-  }
-
-  stack->usedDepth = stack->usedDepth - 1;
-  *ptr = stack->stack[stack->usedDepth];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-/*
- * The ExecContext and operations it supports
- */
-
-typedef struct ExecContext *ExecContext_t;
+RetVal readInstruction(ExecFrame_t frame, uint8_t *ptr, Error *error);
+RetVal readIndex(ExecFrame_t frame, uint16_t *ptr, Error *error);
+RetVal setPc(ExecFrame_t frame, uint16_t newPc, Error *error);
+RetVal getConst(ExecFrame_t frame, uint16_t constantIndex, Value *ptr, Error *error);
+RetVal getLocal(ExecFrame_t frame, uint16_t localIndex, Value *ptr, Error *error);
+RetVal setLocal(ExecFrame_t frame, uint16_t localIndex, Value value, Error *error);
+uint16_t pushOperand(ExecFrame_t frame, Value value, Error *error);
+uint16_t popOperand(ExecFrame_t frame, Value *value, Error *error);
+bool hasResult(ExecFrame_t frame);
+bool hasParent(ExecFrame_t frame);
+RetVal getParent(ExecFrame_t frame, ExecFrame_t *ptr, Error *error);
+RetVal setResult(ExecFrame_t frame, Value result, Error *error);
+RetVal getResult(ExecFrame_t frame, Value *ptr, Error *error);
 
 typedef struct FrameParams {
   uint16_t numConstants;
@@ -1505,202 +1453,9 @@ typedef struct FrameParams {
   Code code;
 } FrameParams;
 
-RetVal pushFrame(ExecContext_t ctx, FrameParams params, Error *error);
-RetVal popFrame(ExecContext_t ctx, Error *error);
-RetVal replaceFrame(ExecContext_t ctx, FrameParams params, Error *error);
-RetVal currentFrame(ExecContext_t ctx, ExecFrame_t *ptr, Error *error);
-
-//RetVal readInstruction(ExecContext_t ctx, ExecFrame_t *ptr, Error *error);
-//RetVal readIndex(ExecContext_t ctx, ExecFrame_t *ptr, Error *error);
-
-RetVal parentFrame(ExecFrame_t *frame, ExecFrame_t *ptr, Error *error);
-//RetVal pushOperand(ExecFrame_t *frame, Value value, Error *error);
-//RetVal popOperand(ExecFrame_t *frame, Value *value, Error *error);
-int16_t currentPc(ExecFrame_t *frame);
-//int16_t setPc(ExecFrame_t *frame, uint16_t pc);
-int16_t incPc(ExecFrame_t *frame, uint16_t inc);
-int8_t currentInst(ExecFrame_t *frame);
-//RetVal setResult(ExecFrame_t *frame, Value result, Error *error);
-//RetVal getLocal(ExecFrame_t *frame, uint16_t index, Value *value, Error *error);
-//RetVal setLocal(ExecFrame_t *frame, uint16_t index, Value value, Error *error);
-//RetVal getConst(ExecFrame_t *frame, uint16_t index, Value *value, Error *error);
-
-typedef struct ExecFrame ExecFrame;
-
-typedef struct ExecFrame {
-  ExecFrame *parent;
-  uint16_t numConstants; // TODO: make a verifier so we can check these bounds at load time rather than compile time
-  Value *constants;
-  Code code;
-  uint16_t numLocals;
-  Value *locals;
-  OpStack *opStack;
-  Value result;
-  bool resultAvailable;
-  uint16_t pc;
-} ExecFrame;
-
-RetVal readInstruction(ExecFrame *frame, uint8_t *ptr, Error *error) {
-  RetVal ret;
-
-  if (frame->pc >= frame->code.codeLength) {
-    throwRuntimeError(error, "cannot read next instruction, no instructions left");
-  }
-
-  *ptr = frame->code.code[frame->pc];
-  frame->pc += 1;
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
-RetVal readIndex(ExecFrame *frame, uint16_t *ptr, Error *error) {
-  RetVal ret;
-
-  if (frame->pc + 1 >= frame->code.codeLength) {
-    throwRuntimeError(error, "cannot read next instruction, no instructions left");
-  }
-
-  uint8_t *code = frame->code.code;
-  uint16_t pc = frame->pc;
-  *ptr = (code[pc] << 8) | code[pc + 1];
-  frame->pc += 2;
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
-RetVal setPc(ExecFrame *frame, uint16_t newPc, Error *error) {
-  RetVal ret;
-
-  if (newPc >= frame->code.codeLength) {
-    throwRuntimeError(error, "no such instruction: %u", newPc);
-  }
-
-  frame->pc = newPc;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal getConst(ExecFrame *frame, uint16_t constantIndex, Value *ptr, Error *error) {
-  RetVal ret;
-
-  if (constantIndex >= frame->numConstants) {
-    throwRuntimeError(error, "no such constant: %u", constantIndex);
-  }
-
-  *ptr = frame->constants[constantIndex];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal getLocal(ExecFrame *frame, uint16_t localIndex, Value *ptr, Error *error) {
-  RetVal ret;
-
-  if (localIndex >= frame->numLocals) {
-    throwRuntimeError(error, "no such local: %u", localIndex);
-  }
-
-  *ptr = frame->locals[localIndex];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal setLocal(ExecFrame *frame, uint16_t localIndex, Value value, Error *error) {
-  RetVal ret;
-
-  if (localIndex >= frame->numLocals) {
-    throwRuntimeError(error, "no such local: %u", localIndex);
-  }
-
-  frame->locals[localIndex] = value;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-uint16_t pushOperand(ExecFrame *frame, Value value, Error *error) {
-  RetVal ret;
-
-  throws(tryOpStackPush(frame->opStack, value, error));
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-uint16_t popOperand(ExecFrame *frame, Value *value, Error *error) {
-  RetVal ret;
-
-  throws(tryOpStackPop(frame->opStack, value, error));
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-bool hasResult(ExecFrame *frame) {
-  return frame->resultAvailable;
-}
-
-bool hasParent(ExecFrame *frame) {
-  return frame->parent != NULL;
-}
-
-RetVal getParent(ExecFrame *frame, ExecFrame **ptr, Error *error) {
-  RetVal ret;
-
-  if (frame->parent == NULL) {
-    throwRuntimeError(error, "no parent available");
-  }
-
-  *ptr = frame->parent;
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
-RetVal setResult(ExecFrame *frame, Value result, Error *error) {
-  RetVal ret;
-
-  if (frame->resultAvailable) {
-    throwRuntimeError(error, "result already set");
-  }
-
-  frame->result = result;
-  frame->resultAvailable = true;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal getResult(ExecFrame *frame, Value *ptr, Error *error) {
-  RetVal ret;
-
-  if (!frame->resultAvailable) {
-    throwRuntimeError(error, "result not set");
-  }
-
-  *ptr = frame->result;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
+RetVal pushFrame(ExecFrame_t frame, FrameParams params, Error *error);
+RetVal replaceFrame(ExecFrame_t frame, FrameParams params, Error *error);
+void popFrame(ExecFrame_t frame);
 
 /*
  * Instruction Definitions
@@ -1755,20 +1510,6 @@ RetVal tryStoreLocalEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   failure:
   return ret;
-}
-
-void frameInitContents(ExecFrame *frame) {
-  frame->parent = NULL;
-  frame->numConstants = 0;
-  frame->constants = NULL;
-  codeInitContents(&frame->code);
-  frame->numLocals = 0;
-  frame->locals = NULL;
-  frame->opStack = NULL;
-  frame->resultAvailable = 0;
-  frame->result.type = VT_NIL;
-  frame->result.value = 0;
-  frame->pc = 0;
 }
 
 typedef struct Invocable {
@@ -1893,7 +1634,8 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
 //    }
 
     uint16_t idx = invocable.fn.numArgs - (1 + i);
-    child->locals[idx] = arg;
+    throws(setLocal(child, idx, arg, error));
+//    child->locals[idx] = arg;
   }
 
   if (invocable.fn.numCaptures > 0) {
@@ -1907,7 +1649,8 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
 
     uint16_t nextLocalIdx = invocable.fn.numArgs;
     for (uint16_t i=0; i<invocable.fn.numCaptures; i++) {
-      child->locals[nextLocalIdx] = invocable.closure.captures[i];
+      throws(setLocal(child, nextLocalIdx, invocable.closure.captures[i], error));
+//      child->locals[nextLocalIdx] = invocable.closure.captures[i];
       nextLocalIdx = nextLocalIdx + 1;
     }
   }
@@ -1922,41 +1665,33 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
 RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  // clean up on fail
-  ExecFrame *parent = NULL;
+  // for cleanup on failure
+  bool pushed = false;
 
   Invocable invocable;
   throws(tryPopInvocable(vm, frame, &invocable, error));
 
-  tryMalloc(parent, sizeof(ExecFrame), "Frame");
-  memcpy(parent, frame, sizeof(ExecFrame));
+  FrameParams p;
+  p.numConstants = invocable.fn.numConstants;
+  p.constants = invocable.fn.constants;
+  p.numLocals = invocable.fn.code.numLocals;
+  p.opStackSize = invocable.fn.code.maxOperandStackSize;
+  p.code = invocable.fn.code;
 
-  ExecFrame child;
-  frameInitContents(&child);
+  throws(pushFrame(frame, p, error));
+  pushed = true;
 
-  // fail: allocating stack frame
-  child.parent = parent;
-  child.numConstants = invocable.fn.numConstants;
-  child.constants = invocable.fn.constants;
-  child.code = invocable.fn.code;
-  child.numLocals = invocable.fn.code.numLocals;
+  ExecFrame_t parent;
+  throws(getParent(frame, &parent, error));
 
-  tryMalloc(child.opStack, sizeof(OpStack), "OpStack");
-  tryMalloc(child.locals, sizeof(Value) * invocable.fn.code.numLocals, "Value array");
-  throws(tryOpStackInitContents(child.opStack, invocable.fn.code.maxOperandStackSize, error));
-  throws(tryInvokePopulateLocals(vm, parent, &child, invocable, error));
-//  throws(tryFrameEval(vm, &child, error));
-//  throws(tryOpStackPush(parent->opStack, child.result, error));
+  throws(tryInvokePopulateLocals(vm, parent, frame, invocable, error));
 
-  *frame = child;
   return R_SUCCESS;
 
   failure:
-    if (parent != NULL) {
-      free(parent);
+    if (pushed) {
+      popFrame(frame);
     }
-    free(child.locals);
-    opStackFreeContents(child.opStack);
     return ret;
 }
 
@@ -1971,34 +1706,22 @@ RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
  */
 
 // (8)              | (objectref, args... -> ...)
-RetVal tryInvokeDynTailEval(VM *vm, ExecFrame *frame, Error *error) {
+RetVal tryInvokeDynTailEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
   // fail: not all values are invocable
   Invocable invocable;
   throws(tryPopInvocable(vm, frame, &invocable, error));
 
-  frame->numConstants = invocable.fn.numConstants;
-  frame->constants = invocable.fn.constants;
-  frame->code = invocable.fn.code;
+  FrameParams p;
+  p.numConstants = invocable.fn.numConstants;
+  p.constants = invocable.fn.constants;
+  p.code = invocable.fn.code;
+  p.numLocals = invocable.fn.code.numLocals;
+  p.opStackSize = invocable.fn.code.maxOperandStackSize;
 
-  // resize locals if needed
-  if (invocable.fn.code.numLocals > frame->numLocals) {
-    Value *resizedLocals = realloc(frame->locals, invocable.fn.code.numLocals * sizeof(Value));
-    if (resizedLocals == NULL) {
-      // fail: reallocating stack frame space
-      ret = memoryError(error, "realloc Value array");
-      goto failure;
-    }
-    frame->numLocals = invocable.fn.code.numLocals;
-    frame->locals = resizedLocals;
-  }
-
+  throws(replaceFrame(frame, p, error));
   throws(tryInvokePopulateLocals(vm, frame, frame, invocable, error));
-
-  frame->result = nil();
-  frame->resultAvailable = false;
-  frame->pc = 0;
 
   return R_SUCCESS;
 
@@ -2559,28 +2282,6 @@ void _printCodeUnit(InstTable *table, CodeUnit *unit) {
   _printCodeArray(table, unit->code.code, unit->code.codeLength);
 }
 
-/*
- * Loading and evaluating code within the VM
- *
- * pushFrame(ctx)
- * popFrame(ctx)
- * replaceFrame(ctx)
- * currentFrame(ctx)
- *
- * parentFrame(frame)
- * pushOperand(frame)
- * popOperand(frame)
- * currentPc(frame)
- * setPc(frame)
- * incPc(frame, n)
- * getInst(frame, n)
- * setResult(frame)
- * hasResult(frame)
- * getLocal(frame, index, *value, error)
- * setLocal(frame, index, value, error)
- * getConst(frame, index, *value, error)
- */
-
 RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
@@ -2594,16 +2295,14 @@ RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Error *error) {
         break;
       }
       else {
+        Value result;
+        ExecFrame_t parent;
 
-        ExecFrame *child = frame;
-        ExecFrame *parent = frame->parent;
+        throws(getResult(frame, &result, error));
+        throws(getParent(frame, &parent, error));
+        throws(pushOperand(parent, result, error));
 
-        throws(pushOperand(parent, child->result, error));
-        opStackFreeContents(child->opStack);
-        free(child->locals);
-
-        *frame = *parent;
-        free(parent);
+        popFrame(frame);
       }
     }
 
@@ -2621,6 +2320,341 @@ RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   failure:
   return ret;
+}
+
+/*
+ * The OpStack
+ */
+
+void opStackInitContents(OpStack *stack) {
+  stack->usedDepth = 0;
+  stack->maxDepth = 0;
+  stack->stack = NULL;
+}
+
+RetVal tryOpStackInitContents(OpStack *stack, uint64_t maxDepth, Error *error) {
+  RetVal ret;
+
+  stack->maxDepth = maxDepth;
+  stack->usedDepth = 0;
+  tryMalloc(stack->stack, sizeof(Value) * maxDepth, "Value array");
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+void opStackFreeContents(OpStack *stack) {
+  if (stack != NULL) {
+    stack->maxDepth = 0;
+    stack->usedDepth = 0;
+    if (stack->stack != NULL) {
+      free(stack->stack);
+      stack->stack = NULL;
+    }
+  }
+}
+
+RetVal tryOpStackPush(OpStack *stack, Value v, Error *error) {
+  RetVal ret;
+
+  if (stack->maxDepth == stack->usedDepth + 1) {
+    throwRuntimeError(error, "cannot allocate op stack greater than max %llu", stack->maxDepth);
+  }
+
+  stack->stack[stack->usedDepth] = v;
+  stack->usedDepth = stack->usedDepth + 1;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryOpStackPop(OpStack *stack, Value *ptr, Error *error) {
+
+  RetVal ret;
+
+  if (stack->usedDepth == 0) {
+    throwRuntimeError(error, "cannot pop from empty op stack")
+  }
+
+  stack->usedDepth = stack->usedDepth - 1;
+  *ptr = stack->stack[stack->usedDepth];
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+/*
+ * ExecFrame Implementation
+ */
+
+typedef struct ExecFrame ExecFrame;
+
+typedef struct ExecFrame {
+  ExecFrame *parent;
+  uint16_t numConstants; // TODO: make a verifier so we can check these bounds at load time rather than compile time
+  Value *constants;
+  Code code;
+  uint16_t numLocals;
+  Value *locals;
+  OpStack *opStack;
+  Value result;
+  bool resultAvailable;
+  uint16_t pc;
+} ExecFrame;
+
+void frameInitContents(ExecFrame *frame) {
+  frame->parent = NULL;
+  frame->numConstants = 0;
+  frame->constants = NULL;
+  codeInitContents(&frame->code);
+  frame->numLocals = 0;
+  frame->locals = NULL;
+  frame->opStack = NULL;
+  frame->resultAvailable = 0;
+  frame->result.type = VT_NIL;
+  frame->result.value = 0;
+  frame->pc = 0;
+}
+
+RetVal readInstruction(ExecFrame *frame, uint8_t *ptr, Error *error) {
+  RetVal ret;
+
+  if (frame->pc >= frame->code.codeLength) {
+    throwRuntimeError(error, "cannot read next instruction, no instructions left");
+  }
+
+  *ptr = frame->code.code[frame->pc];
+  frame->pc += 1;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal readIndex(ExecFrame *frame, uint16_t *ptr, Error *error) {
+  RetVal ret;
+
+  if (frame->pc + 1 >= frame->code.codeLength) {
+    throwRuntimeError(error, "cannot read next instruction, no instructions left");
+  }
+
+  uint8_t *code = frame->code.code;
+  uint16_t pc = frame->pc;
+  *ptr = (code[pc] << 8) | code[pc + 1];
+  frame->pc += 2;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal setPc(ExecFrame *frame, uint16_t newPc, Error *error) {
+  RetVal ret;
+
+  if (newPc >= frame->code.codeLength) {
+    throwRuntimeError(error, "no such instruction: %u", newPc);
+  }
+
+  frame->pc = newPc;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal getConst(ExecFrame *frame, uint16_t constantIndex, Value *ptr, Error *error) {
+  RetVal ret;
+
+  if (constantIndex >= frame->numConstants) {
+    throwRuntimeError(error, "no such constant: %u", constantIndex);
+  }
+
+  *ptr = frame->constants[constantIndex];
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal getLocal(ExecFrame *frame, uint16_t localIndex, Value *ptr, Error *error) {
+  RetVal ret;
+
+  if (localIndex >= frame->numLocals) {
+    throwRuntimeError(error, "no such local: %u", localIndex);
+  }
+
+  *ptr = frame->locals[localIndex];
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal setLocal(ExecFrame *frame, uint16_t localIndex, Value value, Error *error) {
+  RetVal ret;
+
+  if (localIndex >= frame->numLocals) {
+    throwRuntimeError(error, "no such local: %u", localIndex);
+  }
+
+  frame->locals[localIndex] = value;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+uint16_t pushOperand(ExecFrame *frame, Value value, Error *error) {
+  RetVal ret;
+
+  throws(tryOpStackPush(frame->opStack, value, error));
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+uint16_t popOperand(ExecFrame *frame, Value *value, Error *error) {
+  RetVal ret;
+
+  throws(tryOpStackPop(frame->opStack, value, error));
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+bool hasResult(ExecFrame *frame) {
+  return frame->resultAvailable;
+}
+
+bool hasParent(ExecFrame *frame) {
+  return frame->parent != NULL;
+}
+
+RetVal getParent(ExecFrame *frame, ExecFrame **ptr, Error *error) {
+  RetVal ret;
+
+  if (frame->parent == NULL) {
+    throwRuntimeError(error, "no parent available");
+  }
+
+  *ptr = frame->parent;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal setResult(ExecFrame *frame, Value result, Error *error) {
+  RetVal ret;
+
+  if (frame->resultAvailable) {
+    throwRuntimeError(error, "result already set");
+  }
+
+  frame->result = result;
+  frame->resultAvailable = true;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal getResult(ExecFrame *frame, Value *ptr, Error *error) {
+  RetVal ret;
+
+  if (!frame->resultAvailable) {
+    throwRuntimeError(error, "result not set");
+  }
+
+  *ptr = frame->result;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal pushFrame(ExecFrame *frame, FrameParams p, Error *error) {
+  RetVal ret;
+
+  // clean up on fail
+  ExecFrame_t parent = NULL;
+
+  tryMalloc(parent, sizeof(ExecFrame), "ExecFrame");
+  memcpy(parent, frame, sizeof(ExecFrame));
+
+  ExecFrame child;
+  frameInitContents(&child);
+
+  child.parent = parent;
+  child.numConstants = p.numConstants;
+  child.constants = p.constants;
+  child.code = p.code;
+  child.numLocals = p.numLocals;
+
+  tryMalloc(child.opStack, sizeof(OpStack), "OpStack");
+  tryMalloc(child.locals, sizeof(Value) * child.numLocals, "Value array");
+  throws(tryOpStackInitContents(child.opStack, p.opStackSize, error));
+
+  *frame = child;
+  return R_SUCCESS;
+
+  failure:
+    if (parent != NULL) {
+      free(parent);
+    }
+    free(child.locals);
+    opStackFreeContents(child.opStack);
+    return ret;
+}
+
+RetVal replaceFrame(ExecFrame_t frame, FrameParams p, Error *error) {
+  RetVal ret;
+
+  frame->numConstants = p.numConstants;
+  frame->constants = p.constants;
+  frame->code = p.code;
+
+  // resize locals if needed
+  if (p.numLocals > frame->numLocals) {
+    Value *resizedLocals = realloc(frame->locals, p.numLocals * sizeof(Value));
+    if (resizedLocals == NULL) {
+      ret = memoryError(error, "realloc Value array");
+      goto failure;
+    }
+    frame->numLocals = p.numLocals;
+    frame->locals = resizedLocals;
+  }
+
+  // TODO: resize op stack if needed
+
+  frame->result = nil();
+  frame->resultAvailable = false;
+  frame->pc = 0;
+
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+void popFrame(ExecFrame *frame) {
+
+  ExecFrame *child = frame;
+  ExecFrame *parent = frame->parent;
+
+  opStackFreeContents(child->opStack);
+  free(child->locals);
+
+  *frame = *parent;
+  free(parent);
 }
 
 void topLevelFrameInit(TopLevelFrame *frame) {
