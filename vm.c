@@ -2369,6 +2369,28 @@ RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Error *error) {
   return ret;
 }
 
+  // create an exception
+  // - allocate it
+  // - set its payload with the error message
+  // - initialize its stack trace information
+  // - the entire exception is just lists of lists (payload, trace)
+  // walk up the stack until we find an error handler
+  // if no error handler is found, print the stack trace and goto failure
+  // if an error handler is found
+  // - pop the stack until the frame with the error handler is the current frame
+  // - set the exception as the local index for the handler's exception binding
+  // - jump to the error handler's jump address
+
+  /*
+   * TODO: how exception handling should work, revised
+   * - analyzer defines a try/catch form, where the catch introduces a binding in the binding table + some forms to eval
+   * - compiler computes the jumpAddress for the catch block
+   * - compiler emits I_SET_HANDLER with 2 index parameters (jumpAddress and exceptionLocalIndex)
+   * - vm makes use of error handlers *here* as needed
+   *
+   * this means no need for lambda/closure execution at error handling time
+   */
+
 /*
  * The OpStack
  */
