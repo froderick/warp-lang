@@ -2626,14 +2626,20 @@ RetVal replaceFrame(ExecFrame_t frame, FrameParams p, Error *error) {
   if (p.numLocals > frame->numLocals) {
     Value *resizedLocals = realloc(frame->locals, p.numLocals * sizeof(Value));
     if (resizedLocals == NULL) {
-      ret = memoryError(error, "realloc Value array");
-      goto failure;
+      throwMemoryError(error, "realloc Value array");
     }
     frame->numLocals = p.numLocals;
     frame->locals = resizedLocals;
   }
 
-  // TODO: resize op stack if needed
+  if (p.opStackSize > frame->opStack->maxDepth) {
+    Value *resizedStack = realloc(frame->opStack->stack, p.opStackSize * sizeof(Value));
+    if (resizedStack == NULL) {
+      throwMemoryError(error, "realloc Value array");
+    }
+    frame->opStack->maxDepth = p.opStackSize;
+    frame->opStack->stack = resizedStack;
+  }
 
   frame->result = nil();
   frame->resultAvailable = false;
