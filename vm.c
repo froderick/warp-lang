@@ -1455,12 +1455,17 @@ RetVal getHandler(ExecFrame_t frame, ExceptionHandler *ptr, Error *error);
 void setHandler(ExecFrame_t frame, ExceptionHandler handler);
 void clearHandler(ExecFrame_t frame);
 
+bool hasFnName(ExecFrame_t frame);
+RetVal getFnName(ExecFrame_t frame, Text *name, Error *error);
+
 typedef struct FrameParams {
   uint16_t numConstants;
   Value *constants;
   uint16_t numLocals;
   uint16_t opStackSize;
   Code code;
+  Text fnName;
+  bool hasFnName;
 } FrameParams;
 
 RetVal pushFrame(ExecFrame_t frame, FrameParams params, Error *error);
@@ -1671,6 +1676,16 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
   return ret;
 }
 
+void frameParamsInitContents(FrameParams *p) {
+  p->numConstants = 0;
+  p->constants = NULL;
+  p->numLocals = 0;
+  p->opStackSize = 0;
+  codeInitContents(&p->code);
+  textInitContents(&p->fnName);
+  p->hasFnName = false;
+}
+
 // (8)              | (objectref, args... -> ...)
 RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
@@ -1682,11 +1697,14 @@ RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(tryPopInvocable(vm, frame, &invocable, error));
 
   FrameParams p;
+  frameParamsInitContents(&p);
   p.numConstants = invocable.fn.numConstants;
   p.constants = invocable.fn.constants;
   p.numLocals = invocable.fn.code.numLocals;
   p.opStackSize = invocable.fn.code.maxOperandStackSize;
   p.code = invocable.fn.code;
+  p.fnName = invocable.fn.name;
+  p.hasFnName = true;
 
   throws(pushFrame(frame, p, error));
   pushed = true;
@@ -1724,11 +1742,14 @@ RetVal tryInvokeDynTailEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(tryPopInvocable(vm, frame, &invocable, error));
 
   FrameParams p;
+  frameParamsInitContents(&p);
   p.numConstants = invocable.fn.numConstants;
   p.constants = invocable.fn.constants;
   p.code = invocable.fn.code;
   p.numLocals = invocable.fn.code.numLocals;
   p.opStackSize = invocable.fn.code.maxOperandStackSize;
+  p.fnName = invocable.fn.name;
+  p.hasFnName = true;
 
   throws(replaceFrame(frame, p, error));
   throws(tryInvokePopulateLocals(vm, frame, frame, invocable, error));
@@ -2329,6 +2350,41 @@ void _printCodeUnit(InstTable *table, CodeUnit *unit) {
   _printCodeArray(table, unit->code.code, unit->code.codeLength);
 }
 
+void printEvalError(ExecFrame_t frame, Error *error) {
+
+  printf("unhandled error: %ls", error->message);
+
+  ExecFrame_t current = frame;
+  while (true) {
+
+    wchar_t *fnName;
+    if (hasFnName(current)) {
+      Text text;
+      textInitContents(&text);
+      if (getFnName(current, &text, error) != R_SUCCESS) {
+        break;
+      }
+      fnName = text.value;
+    }
+    else {
+      fnName = L"<root>";
+    }
+
+    wchar_t *file = L"core.lsp";
+    uint16_t lineNo = 100;
+    printf("\t%ls(%ls:%u)\n", fnName, file, lineNo);
+
+    if (!hasParent(current)) {
+      break;
+    }
+    else {
+      if (getParent(current, &current, error) != R_SUCCESS) {
+        break;
+      }
+    }
+  }
+}
+
 RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
@@ -2360,7 +2416,12 @@ RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Error *error) {
       throwRuntimeError(error, "instruction unimplemented: %s (%u)", getInstName(&vm->instTable, inst), inst);
     }
 
-    throws(tryEval(vm, frame, error));
+    ret = tryEval(vm, frame, error);
+
+    if (ret != R_SUCCESS) {
+      printEvalError(frame, error);
+      goto failure;
+    }
   }
 
   return R_SUCCESS;
@@ -2472,8 +2533,12 @@ typedef struct ExecFrame {
   Value result;
   bool resultAvailable;
   uint16_t pc;
+
   ExceptionHandler handler;
   bool handlerSet;
+
+  Text fnName;
+  bool hasFnName;
 } ExecFrame;
 
 void handlerInitContents(ExceptionHandler *h) {
@@ -2495,6 +2560,8 @@ void frameInitContents(ExecFrame *frame) {
   frame->pc = 0;
   handlerInitContents(&frame->handler);
   frame->handlerSet = false;
+  textInitContents(&frame->fnName);
+  frame->hasFnName = false;
 }
 
 RetVal readInstruction(ExecFrame *frame, uint8_t *ptr, Error *error) {
@@ -2687,6 +2754,24 @@ void clearHandler(ExecFrame_t frame) {
   frame->handlerSet = false;
 }
 
+bool hasFnName(ExecFrame *frame) {
+  return frame->hasFnName;
+}
+
+RetVal getFnName(ExecFrame_t frame, Text *name, Error *error) {
+  RetVal ret;
+
+  if (!frame->hasFnName) {
+    throwRuntimeError(error, "no fn name found");
+  }
+
+  *name = frame->fnName;
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 RetVal pushFrame(ExecFrame *frame, FrameParams p, Error *error) {
   RetVal ret;
 
@@ -2704,6 +2789,8 @@ RetVal pushFrame(ExecFrame *frame, FrameParams p, Error *error) {
   child.constants = p.constants;
   child.code = p.code;
   child.numLocals = p.numLocals;
+  child.hasFnName = p.hasFnName;
+  child.fnName = p.fnName;
 
   tryMalloc(child.opStack, sizeof(OpStack), "OpStack");
   tryMalloc(child.locals, sizeof(Value) * child.numLocals, "Value array");
@@ -2727,6 +2814,8 @@ RetVal replaceFrame(ExecFrame_t frame, FrameParams p, Error *error) {
   frame->numConstants = p.numConstants;
   frame->constants = p.constants;
   frame->code = p.code;
+  frame->hasFnName = p.hasFnName;
+  frame->fnName = p.fnName;
 
   // resize locals if needed
   if (p.numLocals > frame->numLocals) {
