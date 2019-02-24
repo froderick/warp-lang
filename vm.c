@@ -1445,6 +1445,16 @@ RetVal getParent(ExecFrame_t frame, ExecFrame_t *ptr, Error *error);
 RetVal setResult(ExecFrame_t frame, Value result, Error *error);
 RetVal getResult(ExecFrame_t frame, Value *ptr, Error *error);
 
+typedef struct ExceptionHandler {
+  uint16_t jumpAddress;
+  uint16_t localIndex;
+} ExceptionHandler;
+
+bool hasHandler(ExecFrame_t frame);
+RetVal getHandler(ExecFrame_t frame, ExceptionHandler *ptr, Error *error);
+void setHandler(ExecFrame_t frame, ExceptionHandler handler);
+void clearHandler(ExecFrame_t frame);
+
 typedef struct FrameParams {
   uint16_t numConstants;
   Value *constants;
@@ -2010,6 +2020,34 @@ RetVal trySwapEval(VM *vm, ExecFrame_t frame, Error *error) {
     return ret;
 }
 
+// (8)        | (jumpAddr, handler ->)
+RetVal trySetHandlerEval(VM *vm, ExecFrame_t frame, Error *error) {
+  RetVal ret;
+
+  ExceptionHandler handler;
+
+  throws(readIndex(frame, &handler.jumpAddress, error));
+  throws(readIndex(frame, &handler.localIndex, error));
+
+  setHandler(frame, handler);
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+// (8)        | (->)
+RetVal tryClearHandlerEval(VM *vm, ExecFrame_t frame, Error *error) {
+  RetVal ret;
+
+  clearHandler(frame);
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 // (8),             | (x, seq -> newseq)
 RetVal tryConsEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
@@ -2179,6 +2217,13 @@ void printInstAndIndex(int *i, const char* name, uint8_t *code) {
   *i = *i + 2;
 }
 
+void printInstAndIndex2x(int *i, const char* name, uint8_t *code) {
+  uint16_t index1 = code[*i + 1] << 8 | code[*i + 2];
+  uint16_t index2 = code[*i + 3] << 8 | code[*i + 4];
+  printf("%i:\t%s\t%u, %u\n", *i, name, index1, index2);
+  *i = *i + 4;
+}
+
 void printUnknown(int *i, const char* name, uint8_t *code) {
   printf("%i:\t<UNKNOWN>/%u\n", *i, code[*i]);
 }
@@ -2196,28 +2241,30 @@ InstTable instTableCreate() {
 
   // init with known instructions
   Inst instructions[]      = {
-      [I_LOAD_CONST]       = { .name = "I_LOAD_CONST",      .print = printInstAndIndex,  .tryEval = tryLoadConstEval },
-      [I_LOAD_LOCAL]       = { .name = "I_LOAD_LOCAL",      .print = printInstAndIndex,  .tryEval = tryLoadLocalEval },
-      [I_STORE_LOCAL]      = { .name = "I_STORE_LOCAL",     .print = printInstAndIndex,  .tryEval = tryStoreLocalEval },
-      [I_INVOKE_DYN]       = { .name = "I_INVOKE_DYN",      .print = printInst,          .tryEval = tryInvokeDynEval },
-      [I_INVOKE_DYN_TAIL]  = { .name = "I_INVOKE_DYN_TAIL", .print = printInst,          .tryEval = tryInvokeDynTailEval },
-      [I_RET]              = { .name = "I_RET",             .print = printInst,          .tryEval = tryRetEval },
-      [I_CMP]              = { .name = "I_CMP",             .print = printInst,          .tryEval = tryCmpEval },
-      [I_JMP]              = { .name = "I_JMP",             .print = printInstAndIndex,  .tryEval = tryJmpEval },
-      [I_JMP_IF]           = { .name = "I_JMP_IF",          .print = printInstAndIndex,  .tryEval = tryJmpIfEval },
-      [I_JMP_IF_NOT]       = { .name = "I_JMP_IF_NOT",      .print = printInstAndIndex,  .tryEval = tryJmpIfNotEval },
-      [I_ADD]              = { .name = "I_ADD",             .print = printInst,          .tryEval = tryAddEval },
-      [I_SUB]              = { .name = "I_SUB",             .print = printInst,          .tryEval = trySubEval },
-      [I_DEF_VAR]          = { .name = "I_DEF_VAR",         .print = printInstAndIndex,  .tryEval = tryDefVarEval },
-      [I_LOAD_VAR]         = { .name = "I_LOAD_VAR",        .print = printInstAndIndex,  .tryEval = tryLoadVarEval },
-      [I_LOAD_CLOSURE]     = { .name = "I_LOAD_CLOSURE",    .print = printInstAndIndex,  .tryEval = tryLoadClosureEval },
-      [I_SWAP]             = { .name = "I_SWAP",            .print = printInst,          .tryEval = trySwapEval },
+      [I_LOAD_CONST]       = { .name = "I_LOAD_CONST",      .print = printInstAndIndex,   .tryEval = tryLoadConstEval },
+      [I_LOAD_LOCAL]       = { .name = "I_LOAD_LOCAL",      .print = printInstAndIndex,   .tryEval = tryLoadLocalEval },
+      [I_STORE_LOCAL]      = { .name = "I_STORE_LOCAL",     .print = printInstAndIndex,   .tryEval = tryStoreLocalEval },
+      [I_INVOKE_DYN]       = { .name = "I_INVOKE_DYN",      .print = printInst,           .tryEval = tryInvokeDynEval },
+      [I_INVOKE_DYN_TAIL]  = { .name = "I_INVOKE_DYN_TAIL", .print = printInst,           .tryEval = tryInvokeDynTailEval },
+      [I_RET]              = { .name = "I_RET",             .print = printInst,           .tryEval = tryRetEval },
+      [I_CMP]              = { .name = "I_CMP",             .print = printInst,           .tryEval = tryCmpEval },
+      [I_JMP]              = { .name = "I_JMP",             .print = printInstAndIndex,   .tryEval = tryJmpEval },
+      [I_JMP_IF]           = { .name = "I_JMP_IF",          .print = printInstAndIndex,   .tryEval = tryJmpIfEval },
+      [I_JMP_IF_NOT]       = { .name = "I_JMP_IF_NOT",      .print = printInstAndIndex,   .tryEval = tryJmpIfNotEval },
+      [I_ADD]              = { .name = "I_ADD",             .print = printInst,           .tryEval = tryAddEval },
+      [I_SUB]              = { .name = "I_SUB",             .print = printInst,           .tryEval = trySubEval },
+      [I_DEF_VAR]          = { .name = "I_DEF_VAR",         .print = printInstAndIndex,   .tryEval = tryDefVarEval },
+      [I_LOAD_VAR]         = { .name = "I_LOAD_VAR",        .print = printInstAndIndex,   .tryEval = tryLoadVarEval },
+      [I_LOAD_CLOSURE]     = { .name = "I_LOAD_CLOSURE",    .print = printInstAndIndex,   .tryEval = tryLoadClosureEval },
+      [I_SWAP]             = { .name = "I_SWAP",            .print = printInst,           .tryEval = trySwapEval },
+      [I_SET_HANDLER]      = { .name = "I_SET_HANDLER",     .print = printInstAndIndex2x, .tryEval = trySetHandlerEval },
+      [I_CLEAR_HANDLER]    = { .name = "I_CLEAR_HANDLER",   .print = printInst,           .tryEval = tryClearHandlerEval },
 
-      [I_CONS]             = { .name = "I_CONS",            .print = printInst,          .tryEval = tryConsEval },
-      [I_FIRST]            = { .name = "I_FIRST",           .print = printInst,          .tryEval = tryFirstEval},
-      [I_REST]             = { .name = "I_REST",            .print = printInst,          .tryEval = tryRestEval },
-      [I_SET_MACRO]        = { .name = "I_SET_MACRO",       .print = printInst,          .tryEval = trySetMacroEval},
-      [I_GET_MACRO]        = { .name = "I_GET_MACRO",       .print = printInst,          .tryEval = tryGetMacroEval},
+      [I_CONS]             = { .name = "I_CONS",            .print = printInst,           .tryEval = tryConsEval },
+      [I_FIRST]            = { .name = "I_FIRST",           .print = printInst,           .tryEval = tryFirstEval},
+      [I_REST]             = { .name = "I_REST",            .print = printInst,           .tryEval = tryRestEval },
+      [I_SET_MACRO]        = { .name = "I_SET_MACRO",       .print = printInst,           .tryEval = trySetMacroEval},
+      [I_GET_MACRO]        = { .name = "I_GET_MACRO",       .print = printInst,           .tryEval = tryGetMacroEval},
 
 
 //      [I_NEW]         = { .name = "I_NEW",         .print = printUnknown},
@@ -2403,7 +2450,14 @@ typedef struct ExecFrame {
   Value result;
   bool resultAvailable;
   uint16_t pc;
+  ExceptionHandler handler;
+  bool handlerSet;
 } ExecFrame;
+
+void handlerInitContents(ExceptionHandler *h) {
+  h->localIndex = 0;
+  h->jumpAddress = 0;
+}
 
 void frameInitContents(ExecFrame *frame) {
   frame->parent = NULL;
@@ -2417,6 +2471,8 @@ void frameInitContents(ExecFrame *frame) {
   frame->result.type = VT_NIL;
   frame->result.value = 0;
   frame->pc = 0;
+  handlerInitContents(&frame->handler);
+  frame->handlerSet = false;
 }
 
 RetVal readInstruction(ExecFrame *frame, uint8_t *ptr, Error *error) {
@@ -2579,6 +2635,34 @@ RetVal getResult(ExecFrame *frame, Value *ptr, Error *error) {
 
   failure:
   return ret;
+}
+
+bool hasHandler(ExecFrame *frame) {
+  return frame->handlerSet;
+}
+
+RetVal getHandler(ExecFrame_t frame, ExceptionHandler *ptr, Error *error) {
+  RetVal ret;
+
+  if (!frame->handlerSet) {
+    throwRuntimeError(error, "handler not set");
+  }
+
+  *ptr = frame->handler;
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
+void setHandler(ExecFrame_t frame, ExceptionHandler handler) {
+  frame->handler = handler;
+  frame->handlerSet = true;
+}
+
+void clearHandler(ExecFrame_t frame) {
+  handlerInitContents(&frame->handler);
+  frame->handlerSet = false;
 }
 
 RetVal pushFrame(ExecFrame *frame, FrameParams p, Error *error) {
