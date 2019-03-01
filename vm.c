@@ -57,6 +57,8 @@ void codeFreeContents(Code *code) {
 
 void constantFnInitContents(FnConstant *fnConst) {
   fnConst->fnId = 0;
+  fnConst->hasName = 0;
+  textInitContents(&fnConst->name);
   fnConst->numArgs = 0;
   fnConst->usesVarArgs = false;
   fnConst->numConstants = 0;
