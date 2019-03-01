@@ -161,3 +161,59 @@ Profuse swearing guaranteed.
  *
  * *PERHAPS*: I should just do the fucking instruction set and be done with it
  */
+
+
+/*
+ * Thinking about macro expansion
+ *
+ * I don't want to write an interpreter, as well as a virtual machine and a compiler that compiles to it, just to be
+ * able to execute macros at compile time. I'd rather write the compiler/vm and then do incremental compilation to
+ * handle executing the macros at compile time.
+ *
+ * I'd do this by passing in a VM handle to the compiler as a parameter. The compiler can compile all forms, including
+ * macros, and load them into the VM as it discovers them. Every form gets macro-expanded as a part of compilation.
+ * When the compiler encounters a reference to a macro, it could take the arguments and feed them into a call to the
+ * compiled macro inside the VM, and then use the result for compilation.
+ *
+ * TODO: think about this: one of the benefits of this model is that it allows us to handle resolving Vars with
+ * // the actual virtual machine itself, rather than having to duplicate this in the compiler/analyzer itself.
+ * // of course, this suggests that the var resolution should perhaps not be done in the analyzer at all...
+ * // rather, the VarRef can just be the name of the symbol, unqualified. the compiler can inspect the symbols in
+ * // the namespaces and do compile-time resolution based on what it finds in the virtual machine.
+ */
+
+
+// TODO: first, rest, cons
+/*
+ * loading the first field on an object via an object reference
+ * cons - this can work by calling I_NEW
+ */
+
+// emit I_DUP so we have two copies of the arg on the stack
+// emit I_TYPE_ASSERT to verify value type is a Cons
+// emit I_LOAD_FIELD to load the first field from the Cons
+
+// emit I_DUP so we have two copies of the arg on the stack
+// emit I_TYPE_ASSERT to verify value type is a Cons
+// emit I_LOAD_FIELD to load the second field from the Cons
+
+/*
+ * newcons
+ * arg1
+ * arg0
+ */
+
+// emit I_DUP so we have two copies of the second arg on the stack
+// emit I_TYPE_ASSERT to verify the second arg's value type is a Cons
+// emit I_NEW to create a new cons object
+// emit I_DUP1
+// emit I_STORE_FIELD to set the cons 'value' field with the first argument
+// emit I_DUP1
+// emit I_STORE_FIELD to set the cons 'next'field with the second argument
+
+/*
+
+ * the compiler taking knowlege of the record layout of Cons.
+ *
+ * TODO: are lists builtins the VM supplies, or things that are implemented on top of it?
+ */

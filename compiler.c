@@ -127,12 +127,67 @@ void codesClear(Codes *codes) {
   codes->numUsed = 0;
 }
 
+typedef struct LineNumbers {
+  uint16_t numAllocated;
+  uint16_t numUsed;
+  LineNumber *numbers;
+} LineNumbers;
+
+void lineNumbersInitContents(LineNumbers *numbers) {
+  numbers->numAllocated = 0;
+  numbers->numUsed = 0;
+  numbers->numbers = NULL;
+}
+
+void lineNumbersFreeContents(LineNumbers *numbers) {
+  if (numbers != NULL) {
+    numbers->numAllocated = 0;
+    numbers->numUsed = 0;
+    if (numbers->numbers != NULL) {
+      free(numbers->numbers);
+      numbers->numbers = NULL;
+    }
+  }
+}
+
+RetVal tryLineNumbersAppend(LineNumbers *numbers, LineNumber number, Error *error) {
+  RetVal ret;
+
+  if (numbers->numbers == NULL) {
+    uint16_t len = 16;
+    tryMalloc(numbers->numbers, len * sizeof(LineNumber), "LineNumber array");
+    numbers->numAllocated = len;
+  }
+  else if (numbers->numUsed == numbers->numAllocated) {
+    uint16_t newAllocatedLength = numbers->numAllocated * 2;
+
+    LineNumber *resized = realloc(numbers->numbers, sizeof(LineNumber) * newAllocatedLength);
+    if (resized == NULL) {
+      ret = memoryError(error, "realloc LineNumber array");
+      goto failure;
+    }
+
+    numbers->numAllocated = newAllocatedLength;
+    numbers->numbers = resized;
+  }
+
+  uint16_t index = numbers->numUsed;
+  numbers->numbers [index] = number;
+  numbers->numUsed = index + 1;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 // compiler behavior that emits constants and code
 
 typedef struct Output {
   Constants *constants;
   Codes *codes;
   uint16_t *slotsTable; // maps binding table indexes to slot indexes for storing locals
+  LineNumbers *lineNumbers;
 } Output;
 
 RetVal tryCompile(Form *form, Output output, Error *error);
@@ -965,11 +1020,13 @@ RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
   Constants constants;
   Codes codes;
   uint16_t *slotsTable;
+  LineNumbers lineNumbers;
 
   constantsInitContents(&constants);
   codesInitContents(&codes);
   codeUnitInitContents(codeUnit);
   slotsTable = NULL;
+  lineNumbersInitContents(&lineNumbers);
 
   throws(trySlotsTableBuild(&root->table, &slotsTable, error));
 
@@ -978,6 +1035,7 @@ RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
     output.constants = &constants;
     output.codes = &codes;
     output.slotsTable = slotsTable;
+    output.lineNumbers = &lineNumbers;
 
     throws(tryCompile(root->form, output, error));
 
@@ -1013,94 +1071,9 @@ RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
     if (slotsTable != NULL) {
       free(slotsTable);
     }
+    lineNumbersFreeContents(&lineNumbers);
     return ret;
 }
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/*
- * Thinking about macro expansion
- *
- * I don't want to write an interpreter, as well as a virtual machine and a compiler that compiles to it, just to be
- * able to execute macros at compile time. I'd rather write the compiler/vm and then do incremental compilation to
- * handle executing the macros at compile time.
- *
- * I'd do this by passing in a VM handle to the compiler as a parameter. The compiler can compile all forms, including
- * macros, and load them into the VM as it discovers them. Every form gets macro-expanded as a part of compilation.
- * When the compiler encounters a reference to a macro, it could take the arguments and feed them into a call to the
- * compiled macro inside the VM, and then use the result for compilation.
- *
- * TODO: think about this: one of the benefits of this model is that it allows us to handle resolving Vars with
- * // the actual virtual machine itself, rather than having to duplicate this in the compiler/analyzer itself.
- * // of course, this suggests that the var resolution should perhaps not be done in the analyzer at all...
- * // rather, the VarRef can just be the name of the symbol, unqualified. the compiler can inspect the symbols in
- * // the namespaces and do compile-time resolution based on what it finds in the virtual machine.
- */
-
-
-// TODO: first, rest, cons
-/*
- * loading the first field on an object via an object reference
- * cons - this can work by calling I_NEW
- */
-
-// emit I_DUP so we have two copies of the arg on the stack
-// emit I_TYPE_ASSERT to verify value type is a Cons
-// emit I_LOAD_FIELD to load the first field from the Cons
-
-// emit I_DUP so we have two copies of the arg on the stack
-// emit I_TYPE_ASSERT to verify value type is a Cons
-// emit I_LOAD_FIELD to load the second field from the Cons
-
-/*
- * newcons
- * arg1
- * arg0
- */
-
-// emit I_DUP so we have two copies of the second arg on the stack
-// emit I_TYPE_ASSERT to verify the second arg's value type is a Cons
-// emit I_NEW to create a new cons object
-// emit I_DUP1
-// emit I_STORE_FIELD to set the cons 'value' field with the first argument
-// emit I_DUP1
-// emit I_STORE_FIELD to set the cons 'next'field with the second argument
-
-/*
-
- * the compiler taking knowlege of the record layout of Cons.
- *
- * TODO: are lists builtins the VM supplies, or things that are implemented on top of it?
- */
