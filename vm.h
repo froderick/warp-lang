@@ -205,7 +205,45 @@ void vmFreeContents(VM_t vm);
 RetVal tryVMMake(VM_t *ptr , Error *error);
 void vmFree(VM_t vm);
 
-RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, Expr *result, Error *error);
+typedef struct VMExceptionFrame {
+  Text fileName;
+  uint64_t lineNumber;
+  Text functionName;
+} VMExceptionFrame;
+
+typedef struct VMExceptionFrames {
+  uint64_t length;
+  VMExceptionFrame *elements;
+} VMExceptionFrames;
+
+typedef struct VMException {
+  Text message;
+  VMExceptionFrames frames;
+} VMException;
+
+typedef enum VMEvalResultType {
+  RT_NONE,
+  RT_RESULT,
+  RT_EXCEPTION
+} VMEvalResultType;
+
+typedef struct VMEvalResult {
+  VMEvalResultType type;
+  union {
+    Expr result;
+    VMException exception;
+  };
+} VMEvalResult;
+
+void exceptionInitContents(VMException *e);
+void exceptionFreeContents(VMException *e);
+void evalResultInitContents(VMEvalResult *r);
+void evalResultFreeContents(VMEvalResult *r);
+
+RetVal tryExceptionPrint(VMException *e, wchar_t **ptr, Error *error);
+RetVal tryExceptionPrintf(VMException *e, Error *error);
+
+RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, VMEvalResult *result, Error *error);
 
 #endif //WARP_LANG_VM_H
 

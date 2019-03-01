@@ -1526,12 +1526,21 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *err
   input.list.head = expr->list.head->next;
   input.list.tail = expr->list.tail;
 
-  Expr output;
+  VMEvalResult output;
 
   throws(tryExpand(ctx->options.expander, macroName, &input, &output, error));
-  throws(tryFormAnalyzeContents(ctx, &output, form, error));
 
-  return R_SUCCESS;
+  if (output.type == RT_RESULT) {
+    throws(tryFormAnalyzeContents(ctx, &output.result, form, error));
+    return R_SUCCESS;
+  }
+  else if (output.type == RT_EXCEPTION) {
+    throws(tryExceptionPrintf(&output.exception, error));
+    throwInternalError(error, "encountered exception while processing macro: %ls", macroName.value);
+  }
+  else {
+    throwInternalError(error, "unhandled eval result type");
+  }
 
   failure:
   return ret;

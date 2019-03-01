@@ -38,7 +38,7 @@ int main(void) {
 
     printCodeUnit(&unit);
 
-    Expr result;
+    VMEvalResult result;
     ret = tryVMEval(vm, &unit, &result, &error);
 
     if (ret != R_SUCCESS) {
@@ -46,9 +46,18 @@ int main(void) {
       continue;
     }
 
-    printf("> ");
-    throws(tryExprPrn(&result, &error));
-    printf("\n");
+    if (result.type == RT_RESULT) {
+      printf("> ");
+      throws(tryExprPrn(&result.result, &error));
+      printf("\n");
+    }
+    else if (result.type == RT_EXCEPTION) {
+      printf("> encountered exception:\n\n");
+      throws(tryExceptionPrintf(&result.exception, &error));
+    }
+    else {
+      printf("> encountered unhandled eval result type\n\n");
+    }
 
     codeUnitFreeContents(&unit);
   }

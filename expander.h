@@ -27,6 +27,6 @@ void freeExpander(Expander_t expander);
 
 RetVal tryIsMacro(Expander_t expander, Text sym, bool *isMacro, Error *error);
 
-RetVal tryExpand(Expander_t expander, Text sym, Expr *input, Expr *output, Error *error);
+RetVal tryExpand(Expander_t expander, Text sym, Expr *input, VMEvalResult *output, Error *error);
 
 #endif //WARP_LANG_EXPANDER_H

@@ -600,8 +600,8 @@ END_TEST
 START_TEST(vmBasic) {
 
     Error error;
-    VM_t vm;
-    Expr result;
+    VM_t vm = NULL;
+    VMEvalResult result;
 
     errorInitContents(&error);
     ck_assert_int_eq(tryVMMake(&vm, &error), R_SUCCESS);
@@ -652,11 +652,12 @@ START_TEST(vmBasic) {
     unit.code.hasSourceTable = false;
 
     ck_assert_int_eq(tryVMEval(vm, &unit, &result, &error), R_SUCCESS);
+    ck_assert_int_eq(result.type, RT_RESULT);
 
-    ck_assert_int_eq(result.type, N_NUMBER);
-    ck_assert_int_eq(result.number.value, 110);
+    ck_assert_int_eq(result.result.type, N_NUMBER);
+    ck_assert_int_eq(result.result.number.value, 110);
 
-    exprFreeContents(&result);
+    evalResultFreeContents(&result);
     vmFree(vm);
   }
 END_TEST

@@ -64,24 +64,32 @@ RetVal tryIsMacro(Expander_t expander, Text sym, bool *isMacro, Error *error) {
 
   FormRoot *root = NULL;
   CodeUnit codeUnit;
-  Expr output;
+  VMEvalResult output;
 
   throws(tryFormAnalyzeOptions(options, &callExpr, &root, error));
   throws(tryCompileTopLevel(root, &codeUnit, error));
   throws(tryVMEval(expander->vm, &codeUnit, &output, error));
 
-  if (output.type != N_BOOLEAN) {
-    throwInternalError(error, "this should return a boolean");
+  if (output.type == RT_RESULT) {
+    if (output.result.type != N_BOOLEAN) {
+      throwInternalError(error, "this should return a boolean");
+    }
+    *isMacro = output.result.boolean.value;
+    return R_SUCCESS;
   }
-
-  *isMacro = output.boolean.value;
-  return R_SUCCESS;
+  else if (output.type == RT_EXCEPTION) {
+    throws(tryExceptionPrintf(&output.exception, error));
+    throwInternalError(error, "encountered exception while processing macro: getmacro");
+  }
+  else {
+    throwInternalError(error, "unhandled eval result type");
+  }
 
   failure:
     return ret;
 }
 
-RetVal tryExpand(Expander *expander, Text sym, Expr *input, Expr *output, Error *error) {
+RetVal tryExpand(Expander *expander, Text sym, Expr *input, VMEvalResult *output, Error *error) {
   RetVal ret;
 
   if (input->type != N_LIST) {

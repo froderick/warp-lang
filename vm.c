@@ -1,5 +1,6 @@
   #include <stdlib.h>
 #include <string.h>
+#include <libgen.h>
 #include "vm.h"
 #include "utils.h"
 
@@ -183,6 +184,70 @@ RetVal tryCodeDeepCopy(Code *from, Code *to, Error *error) {
   failure:
   codeFreeContents(to);
   return ret;
+}
+
+void exFrameInitContents(VMExceptionFrame *f) {
+  textInitContents(&f->functionName);
+  f->lineNumber = 0;
+  textInitContents(&f->fileName);
+}
+
+void exFrameFreeContents(VMExceptionFrame *f) {
+  if (f != NULL) {
+    textFreeContents(&f->functionName);
+    f->lineNumber = 0;
+    textFreeContents(&f->fileName);
+  }
+}
+
+void framesInitContents(VMExceptionFrames *f) {
+  f->length = 0;
+  f->elements = NULL;
+}
+
+void framesFreeContents(VMExceptionFrames *f) {
+  if (f != NULL) {
+    if (f->elements != NULL) {
+      for (uint64_t i = 0; i < f->length; i++) {
+        VMExceptionFrame *fr = &f->elements[i];
+        exFrameFreeContents(fr);
+      }
+      free(f->elements);
+      f->length = 0;
+      f->elements = NULL;
+    }
+  }
+}
+
+void exceptionInitContents(VMException *e) {
+  textInitContents(&e->message);
+  framesInitContents(&e->frames);
+}
+
+void exceptionFreeContents(VMException *e) {
+  if (e != NULL) {
+    textFreeContents(&e->message);
+    framesFreeContents(&e->frames);
+  }
+}
+
+void evalResultInitContents(VMEvalResult *r) {
+  r->type = RT_NONE;
+}
+
+void evalResultFreeContents(VMEvalResult *r) {
+  if (r != NULL) {
+    switch (r->type){
+      case RT_RESULT:
+        exprFreeContents(&r->result);
+        break;
+      case RT_EXCEPTION:
+        exceptionFreeContents(&r->exception);
+        break;
+      case RT_NONE:
+        break;
+    }
+  }
 }
 
 /*
@@ -1010,22 +1075,22 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
       v.value = 0;
       break;
     case CT_FN:
-    throws(tryFnHydrate(vm, &c.function, &v, error));
+      throws(tryFnHydrate(vm, &c.function, &v, error));
       break;
     case CT_VAR_REF:
-    throws(tryVarRefHydrate(vm, c.varRef, &v, error));
+      throws(tryVarRefHydrate(vm, c.varRef, &v, error));
       break;
     case CT_STR:
-    throws(tryStringHydrate(vm, c.string, &v, error));
+      throws(tryStringHydrate(vm, c.string, &v, error));
       break;
     case CT_SYMBOL:
-    throws(trySymbolHydrate(vm, c.symbol, &v, error));
+      throws(trySymbolHydrate(vm, c.symbol, &v, error));
       break;
     case CT_KEYWORD:
-    throws(tryKeywordHydrate(vm, c.keyword, &v, error));
+      throws(tryKeywordHydrate(vm, c.keyword, &v, error));
       break;
     case CT_LIST:
-    throws(tryListHydrate(vm, alreadyHydratedConstants, c.list, &v, error));
+      throws(tryListHydrate(vm, alreadyHydratedConstants, c.list, &v, error));
       break;
     case CT_FN_REF: {
 
@@ -1043,7 +1108,7 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
     }
     case CT_NONE:
     default:
-    throwInternalError(error, "invalid constant: %u", c.type);
+      throwInternalError(error, "invalid constant: %u", c.type);
   }
 
   *ptr = v;
@@ -1076,10 +1141,8 @@ RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, 
   return R_SUCCESS;
 
   failure:
-  if (values != NULL) {
     free(values);
-  }
-  return ret;
+    return ret;
 }
 
 RetVal tryHydrateConstants(VM *vm, Value **constants, CodeUnit *codeUnit, Error *error) {
@@ -1101,8 +1164,8 @@ RetVal tryHydrateConstants(VM *vm, Value **constants, CodeUnit *codeUnit, Error 
   goto done;
 
   done:
-  unresolvedFnRefsFreeContents(&unresolved);
-  return ret;
+    unresolvedFnRefsFreeContents(&unresolved);
+    return ret;
 }
 
 /*
@@ -1441,6 +1504,7 @@ RetVal getLocal(ExecFrame_t frame, uint16_t localIndex, Value *ptr, Error *error
 RetVal setLocal(ExecFrame_t frame, uint16_t localIndex, Value value, Error *error);
 uint16_t pushOperand(ExecFrame_t frame, Value value, Error *error);
 uint16_t popOperand(ExecFrame_t frame, Value *value, Error *error);
+
 bool hasResult(ExecFrame_t frame);
 bool hasParent(ExecFrame_t frame);
 RetVal getParent(ExecFrame_t frame, ExecFrame_t *ptr, Error *error);
@@ -1459,6 +1523,13 @@ void clearHandler(ExecFrame_t frame);
 
 bool hasFnName(ExecFrame_t frame);
 RetVal getFnName(ExecFrame_t frame, Text *name, Error *error);
+
+bool getLineNumber(ExecFrame_t frame, uint64_t *lineNumber);
+bool getFileName(ExecFrame_t frame, Text *fileName);
+
+bool hasException(ExecFrame_t frame);
+void setException(ExecFrame_t frame, VMException e);
+RetVal getException(ExecFrame_t frame, VMException *e, Error *error);
 
 typedef struct FrameParams {
   uint16_t numConstants;
@@ -2387,6 +2458,138 @@ void printEvalError(ExecFrame_t frame, Error *error) {
   }
 }
 
+RetVal tryExceptionMake(ExecFrame_t frame, VMException *exception, Error *error) {
+  RetVal ret;
+
+  Error reference = *error;
+
+  wchar_t msg[ERROR_MSG_LENGTH];
+  exceptionInitContents(exception);
+
+  swprintf(msg, ERROR_MSG_LENGTH, L"unhandled error: %ls", reference.message);
+  throws(tryTextMake(msg, &exception->message, wcslen(msg), error));
+
+  uint64_t numFrames = 0;
+  {
+    ExecFrame_t current = frame;
+    while (true) {
+      numFrames++;
+      if (!hasParent(current)) {
+        break;
+      }
+      else {
+        throws(getParent(current, &current, error) != R_SUCCESS);
+      }
+    }
+  }
+
+  // native frame
+  numFrames++;
+
+  exception->frames.length = numFrames;
+  tryMalloc(exception->frames.elements, sizeof(VMExceptionFrame) * numFrames, "VMExceptionFrame array");
+
+  { // native frame
+
+    VMExceptionFrame *f = &exception->frames.elements[0];
+    exFrameInitContents(f);
+
+    f->functionName.length = strlen(reference.functionName) + 1;
+    tryMalloc(f->functionName.value, f->functionName.length * sizeof(wchar_t), "wide string");
+    swprintf(f->functionName.value, f->functionName.length, L"%s", reference.functionName);
+
+    char* fileName = basename((char *) reference.fileName);
+    f->fileName.length = strlen(fileName) + 1;
+    tryMalloc(f->fileName.value, f->fileName.length * sizeof(wchar_t), "wide string");
+    swprintf(f->fileName.value, f->fileName.length, L"%s", fileName);
+
+    f->lineNumber = reference.lineNumber;
+  }
+
+  ExecFrame_t current = frame;
+  for (uint64_t i=1; i<numFrames; i++) {
+
+    VMExceptionFrame *f = &exception->frames.elements[i];
+    exFrameInitContents(f);
+
+    if (false) {
+
+    }
+    else {
+      if (hasFnName(current)) {
+        Text text;
+        throws(getFnName(current, &text, error));
+        throws(tryTextCopy(&text, &f->functionName, error));
+      }
+      else {
+        wchar_t *name = L"<root>\0";
+        throws(tryTextMake(name, &f->functionName, wcslen(name), error));
+      }
+
+      wchar_t *file = L"core.lsp\0";
+      throws(tryTextMake(file, &f->fileName, wcslen(file), error));
+
+      getFileName(frame, &f->fileName);
+      getLineNumber(frame, &f->lineNumber);
+
+      if (hasParent(current)) {
+        throws(getParent(current, &current, error));
+      }
+    }
+
+  }
+
+  return R_SUCCESS;
+
+  failure:
+    exceptionFreeContents(exception);
+    return ret;
+}
+
+RetVal tryExceptionPrint(VMException *e, wchar_t **ptr, Error *error) {
+  RetVal ret;
+
+  // clean up on exit always
+  StringBuffer_t b = NULL;
+
+  throws(tryStringBufferMake(&b, error));
+
+  throws(tryStringBufferAppendStr(b, error->message, error));
+
+  wchar_t msg[ERROR_MSG_LENGTH];
+
+  for (uint64_t i=0; i<e->frames.length; i++) {
+    VMExceptionFrame *f = &e->frames.elements[i];
+    swprintf(msg, ERROR_MSG_LENGTH, L"\t%ls(%ls:%llu)\n", f->functionName.value, f->fileName.value, f->lineNumber);
+    throws(tryStringBufferAppendStr(b, msg, error));
+  }
+
+  wchar_t *output;
+  throws(tryCopyText(stringBufferText(b), &output, stringBufferLength(b), error));
+  stringBufferFree(b);
+
+  *ptr = output;
+  return R_SUCCESS;
+
+  failure:
+  stringBufferFree(b);
+  return ret;
+}
+
+RetVal tryExceptionPrintf(VMException *e, Error *error) {
+  RetVal ret;
+
+  wchar_t *msg;
+  throws(tryExceptionPrint(e, &msg, error));
+  printf("%ls\n", msg);
+  free(msg);
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
@@ -2421,8 +2624,10 @@ RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Error *error) {
     ret = tryEval(vm, frame, error);
 
     if (ret != R_SUCCESS) {
-      printEvalError(frame, error);
-      goto failure;
+      VMException ex;
+      throws(tryExceptionMake(frame, &ex, error));
+      setException(frame, ex);
+      break;
     }
   }
 
@@ -2541,6 +2746,9 @@ typedef struct ExecFrame {
 
   Text fnName;
   bool hasFnName;
+
+  VMException exception;
+  bool exceptionSet;
 } ExecFrame;
 
 void handlerInitContents(ExceptionHandler *h) {
@@ -2564,6 +2772,8 @@ void frameInitContents(ExecFrame *frame) {
   frame->handlerSet = false;
   textInitContents(&frame->fnName);
   frame->hasFnName = false;
+  exceptionInitContents(&frame->exception);
+  frame->exceptionSet = false;
 }
 
 RetVal readInstruction(ExecFrame *frame, uint8_t *ptr, Error *error) {
@@ -2774,6 +2984,52 @@ RetVal getFnName(ExecFrame_t frame, Text *name, Error *error) {
     return ret;
 }
 
+bool getLineNumber(ExecFrame *frame, uint64_t *lineNumber) {
+  if (frame->code.hasSourceTable) {
+    SourceTable *t = &frame->code.sourceTable;
+    for (uint64_t i=0; i<t->numLineNumbers; i++) {
+      LineNumber *l = &t->lineNumbers[i];
+      if (l->startInstructionIndex >= frame->pc) {
+        *lineNumber = l->lineNumber;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool getFileName(ExecFrame_t frame, Text *fileName) {
+  if (frame->code.hasSourceTable) {
+    fileName->length = frame->code.sourceTable.fileNameLength;
+    fileName->value = frame->code.sourceTable.fileName;
+    return true;
+  }
+  return false;
+}
+
+bool hasException(ExecFrame_t frame) {
+  return frame->exceptionSet;
+}
+
+void setException(ExecFrame_t frame, VMException e) {
+  frame->exception = e;
+  frame->exceptionSet = true;
+}
+
+RetVal getException(ExecFrame_t frame, VMException *e, Error *error) {
+  RetVal ret;
+
+  if (!frame->exceptionSet) {
+    throwRuntimeError(error, "handler not set");
+  }
+
+  *e = frame->exception;
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 RetVal pushFrame(ExecFrame *frame, FrameParams p, Error *error) {
   RetVal ret;
 
@@ -2917,7 +3173,7 @@ void topLevelFrameFreeContents(TopLevelFrame *topLevel) {
   }
 }
 
-RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
+RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, VMException *exception, bool *exceptionThrown,  Error *error) {
 
   RetVal ret;
 
@@ -2938,9 +3194,16 @@ RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
 
   throws(tryFrameEval(vm, &frame, error));
 
+  if (frame.exceptionSet) {
+    *exceptionThrown = true;
+    *exception = frame.exception;
+  }
+  else {
+    *result = frame.result;
+  }
+
   topLevelFrameFreeContents(&topLevel);
 
-  *result = frame.result;
   return R_SUCCESS;
 
   failure:
@@ -2948,13 +3211,24 @@ RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, Error *error) {
     return ret;
 }
 
-RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Expr *result, Error *error) {
+RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, VMEvalResult *result, Error *error) {
 
   RetVal ret;
 
   Value value;
-  throws(_tryVMEval(vm, codeUnit, &value, error));
-  throws(tryVMPrn(vm, value, result, error));
+  VMException exception;
+  bool exceptionThrown = false;
+
+  throws(_tryVMEval(vm, codeUnit, &value, &exception, &exceptionThrown, error));
+
+  if (exceptionThrown) {
+    result->type = RT_EXCEPTION;
+    result->exception = exception;
+  }
+  else {
+    result->type = RT_RESULT;
+    throws(tryVMPrn(vm, value, &result->result, error));
+  }
 
   return R_SUCCESS;
 

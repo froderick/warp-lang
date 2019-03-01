@@ -1,7 +1,5 @@
 #include "compiler.h"
 
-// utilities for accumulating constants and code as the result of compilation
-
 typedef struct Constants {
   uint16_t numAllocated;
   uint16_t numUsed;
@@ -995,6 +993,14 @@ RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
 
   // TODO: we don't populate these yet
   codeUnit->code.maxOperandStackSize = 10;
+
+  /*
+   * TODO: How to populate the source table:
+   *
+   * When emitting code for a form that has source location info, append LineNumbers to the table
+   * Remove the duplicate LineNumbers
+   * This has to be done for all the compile functions
+   */
   codeUnit->code.hasSourceTable = false;
 
   free(slotsTable);

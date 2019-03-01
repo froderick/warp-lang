@@ -42,7 +42,7 @@ RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
   InputStream_t source = NULL;
   TokenStream_t stream = NULL;
   VM_t vm = NULL;
-  Expr result;
+  VMEvalResult result;
 
   //printf("%ls\n", inputText);
 
@@ -59,7 +59,13 @@ RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
   //printCodeUnit(&unit);
 
   throws(tryVMEval(vm, &unit, &result, error));
-  throws(tryExprPrnStr(&result, outputText, error));
+
+  if (result.type == RT_RESULT) {
+    throws(tryExprPrnStr(&result.result, outputText, error));
+  }
+  else {
+
+  }
 
   ret = R_SUCCESS;
   goto done;
@@ -68,7 +74,7 @@ RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
   goto done;
 
   done:
-    exprFreeContents(&result);
+    evalResultFreeContents(&result);
     tryStreamFree(stream, error); // frees input stream also
     vmFreeContents(vm);
     codeUnitFreeContents(&unit);
@@ -85,7 +91,7 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
   throws(tryStreamMake(source, &stream, error));
 
   CodeUnit unit;
-  Expr result;
+  VMEvalResult result;
   while (true) {
 
     codeUnitInitContents(&unit);
@@ -104,7 +110,7 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
     throws(tryVMEval(vm, &unit, &result, error));
 
     codeUnitFreeContents(&unit);
-    exprFreeContents(&result);
+    evalResultFreeContents(&result);
   }
 
   ret = R_SUCCESS;
@@ -115,7 +121,7 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
 
   done:
     codeUnitFreeContents(&unit);
-    exprFreeContents(&result);
+    evalResultFreeContents(&result);
     return ret;
 }
 
