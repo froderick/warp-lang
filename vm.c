@@ -188,6 +188,7 @@ RetVal tryCodeDeepCopy(Code *from, Code *to, Error *error) {
 
 void exFrameInitContents(VMExceptionFrame *f) {
   textInitContents(&f->functionName);
+  f->unknownSource = true;
   f->lineNumber = 0;
   textInitContents(&f->fileName);
 }
@@ -217,6 +218,13 @@ void framesFreeContents(VMExceptionFrames *f) {
       f->elements = NULL;
     }
   }
+}
+
+void _frameInitContents(VMExceptionFrame *f) {
+  textInitContents(&f->functionName);
+  f->unknownSource = true;
+  f->lineNumber = 0;
+  textInitContents(&f->fileName);
 }
 
 void exceptionInitContents(VMException *e) {
@@ -1524,6 +1532,7 @@ void clearHandler(ExecFrame_t frame);
 bool hasFnName(ExecFrame_t frame);
 RetVal getFnName(ExecFrame_t frame, Text *name, Error *error);
 
+bool hasSourceTable(ExecFrame_t frame);
 bool getLineNumber(ExecFrame_t frame, uint64_t *lineNumber);
 bool getFileName(ExecFrame_t frame, Text *fileName);
 
@@ -2498,6 +2507,8 @@ RetVal tryExceptionMake(ExecFrame_t frame, VMException *exception, Error *error)
     tryMalloc(f->functionName.value, f->functionName.length * sizeof(wchar_t), "wide string");
     swprintf(f->functionName.value, f->functionName.length, L"%s", reference.functionName);
 
+    f->unknownSource = false;
+
     char* fileName = basename((char *) reference.fileName);
     f->fileName.length = strlen(fileName) + 1;
     tryMalloc(f->fileName.value, f->fileName.length * sizeof(wchar_t), "wide string");
@@ -2512,31 +2523,25 @@ RetVal tryExceptionMake(ExecFrame_t frame, VMException *exception, Error *error)
     VMExceptionFrame *f = &exception->frames.elements[i];
     exFrameInitContents(f);
 
-    if (false) {
-
+    if (hasFnName(current)) {
+      Text text;
+      throws(getFnName(current, &text, error));
+      throws(tryTextCopy(&text, &f->functionName, error));
     }
     else {
-      if (hasFnName(current)) {
-        Text text;
-        throws(getFnName(current, &text, error));
-        throws(tryTextCopy(&text, &f->functionName, error));
-      }
-      else {
-        wchar_t *name = L"<root>\0";
-        throws(tryTextMake(name, &f->functionName, wcslen(name), error));
-      }
-
-      wchar_t *file = L"core.lsp\0";
-      throws(tryTextMake(file, &f->fileName, wcslen(file), error));
-
-      getFileName(frame, &f->fileName);
-      getLineNumber(frame, &f->lineNumber);
-
-      if (hasParent(current)) {
-        throws(getParent(current, &current, error));
-      }
+      wchar_t *name = L"<root>\0";
+      throws(tryTextMake(name, &f->functionName, wcslen(name), error));
     }
 
+    if (hasSourceTable(current)) {
+      f->unknownSource = false;
+      getFileName(current, &f->fileName);
+      getLineNumber(current, &f->lineNumber);
+    }
+
+    if (hasParent(current)) {
+      throws(getParent(current, &current, error));
+    }
   }
 
   return R_SUCCESS;
@@ -2560,7 +2565,13 @@ RetVal tryExceptionPrint(VMException *e, wchar_t **ptr, Error *error) {
 
   for (uint64_t i=0; i<e->frames.length; i++) {
     VMExceptionFrame *f = &e->frames.elements[i];
-    swprintf(msg, ERROR_MSG_LENGTH, L"\t%ls(%ls:%llu)\n", f->functionName.value, f->fileName.value, f->lineNumber);
+
+    if (f->unknownSource) {
+      swprintf(msg, ERROR_MSG_LENGTH, L"\t%at ls(Unknown Source)\n", f->functionName.value);
+    }
+    else {
+      swprintf(msg, ERROR_MSG_LENGTH, L"\t%at ls(%ls:%llu)\n", f->functionName.value, f->fileName.value, f->lineNumber);
+    }
     throws(tryStringBufferAppendStr(b, msg, error));
   }
 
@@ -2982,6 +2993,10 @@ RetVal getFnName(ExecFrame_t frame, Text *name, Error *error) {
 
   failure:
     return ret;
+}
+
+bool hasSourceTable(ExecFrame *frame) {
+  return frame->code.hasSourceTable;
 }
 
 bool getLineNumber(ExecFrame *frame, uint64_t *lineNumber) {

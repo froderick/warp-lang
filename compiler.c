@@ -428,6 +428,8 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
     fnOutput.codes = &fnCodes;
     fnOutput.slotsTable = slotsTable;
     fnOutput.lineNumbers = &lineNumbers;
+    fnOutput.hasFileName = output.hasFileName;
+    fnOutput.fileName = output.fileName;
 
     // create fn ref constant, emit code to load it and store it at local[0]
     if (form->fn.hasName) {

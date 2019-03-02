@@ -206,9 +206,10 @@ RetVal tryVMMake(VM_t *ptr , Error *error);
 void vmFree(VM_t vm);
 
 typedef struct VMExceptionFrame {
+  Text functionName;
+  bool unknownSource;
   Text fileName;
   uint64_t lineNumber;
-  Text functionName;
 } VMExceptionFrame;
 
 typedef struct VMExceptionFrames {

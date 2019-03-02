@@ -1,4 +1,5 @@
 #include <string.h>
+#include <libgen.h>
 #include "repl.h"
 #include "compiler.h"
 
@@ -125,8 +126,9 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
   throws(tryStreamMake(source, &stream, error));
 
   fileInfoInitContents(&fileInfo);
+  char* baseFileName = basename(filename);
   fileInfo.hasFileName = true;
-  throws(tryTextMakeFromChar(filename, &fileInfo.fileName, error));
+  throws(tryTextMakeFromChar(baseFileName, &fileInfo.fileName, error));
 
   CodeUnit unit;
   VMEvalResult result;
