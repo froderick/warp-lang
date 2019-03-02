@@ -188,7 +188,32 @@ typedef struct Output {
   Codes *codes;
   uint16_t *slotsTable; // maps binding table indexes to slot indexes for storing locals
   LineNumbers *lineNumbers;
+  bool hasFileName;
+  Text fileName;
 } Output;
+
+/*
+ * If present, appends the source line number from the form to the
+ * *next* code index to be appended.
+ */
+RetVal tryAppendSource(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  if (form->source.isSet) {
+
+    LineNumber lineNumber;
+    lineNumberInitContents(&lineNumber);
+    lineNumber.lineNumber = form->source.lineNumber;
+    lineNumber.startInstructionIndex = output.codes->numUsed;
+
+    throws(tryLineNumbersAppend(output.lineNumbers, lineNumber, error));
+  }
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
 
 RetVal tryCompile(Form *form, Output output, Error *error);
 
@@ -386,12 +411,14 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   // clean up on failure
   Constants fnConstants;
   Codes fnCodes;
+  LineNumbers lineNumbers;
 
   // clean up always
   uint16_t *slotsTable = NULL;
 
   constantsInitContents(&fnConstants);
   codesInitContents(&fnCodes);
+  lineNumbersInitContents(&lineNumbers);
 
   {
     throws(trySlotsTableBuild(&form->fn.table, &slotsTable, error));
@@ -400,6 +427,7 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
     fnOutput.constants = &fnConstants;
     fnOutput.codes = &fnCodes;
     fnOutput.slotsTable = slotsTable;
+    fnOutput.lineNumbers = &lineNumbers;
 
     // create fn ref constant, emit code to load it and store it at local[0]
     if (form->fn.hasName) {
@@ -443,7 +471,19 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   fnConst.code.maxOperandStackSize = 100; // TODO: need to compute this
   fnConst.code.codeLength = fnCodes.numUsed;
   fnConst.code.code = fnCodes.codes;
-  fnConst.code.hasSourceTable = false;
+
+  if (output.hasFileName) {
+    fnConst.code.hasSourceTable = true;
+
+    SourceTable *table = &fnConst.code.sourceTable;
+    sourceTableInitContents(table);
+    throws(tryTextCopy(&output.fileName, &table->fileName, error));
+    table->numLineNumbers = lineNumbers.numUsed;
+    table->lineNumbers = lineNumbers.numbers;
+  }
+  else {
+    lineNumbersFreeContents(&lineNumbers);
+  }
 
   Constant c;
   c.type = CT_FN;
@@ -457,6 +497,7 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   failure:
     constantsFreeContents(&fnConstants);
     codesFreeContents(&fnCodes);
+    lineNumbersFreeContents(&lineNumbers);
     if (slotsTable != NULL) {
       free(slotsTable);
     }
@@ -626,7 +667,6 @@ RetVal tryCompileConst(Form *form, Output output, Error *error) {
 
   uint16_t index = output.constants->numUsed - 1;
   uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-
   throws(tryCodeAppend(output.codes, sizeof(code), code, error));
 
   return R_SUCCESS;
@@ -960,6 +1000,8 @@ RetVal tryCompileList(Form *form, Output output, Error *error) {
 RetVal tryCompile(Form *form, Output output, Error *error) {
   RetVal ret;
 
+  throws(tryAppendSource(form, output, error));
+
   switch (form->type) {
 
     case F_CONST:
@@ -1036,6 +1078,8 @@ RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
     output.codes = &codes;
     output.slotsTable = slotsTable;
     output.lineNumbers = &lineNumbers;
+    output.hasFileName = root->hasFileName;
+    output.fileName = root->fileName;
 
     throws(tryCompile(root->form, output, error));
 
@@ -1049,17 +1093,29 @@ RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
   codeUnit->code.codeLength = codes.numUsed;
   codeUnit->code.code = codes.codes;
 
-  // TODO: we don't populate these yet
-  codeUnit->code.maxOperandStackSize = 10;
-
   /*
-   * TODO: How to populate the source table:
+   * TODO: finish populating the source table
    *
    * When emitting code for a form that has source location info, append LineNumbers to the table
    * Remove the duplicate LineNumbers
    * This has to be done for all the compile functions
    */
-  codeUnit->code.hasSourceTable = false;
+  if (root->hasFileName) {
+    codeUnit->code.hasSourceTable = true;
+
+    SourceTable *table = &codeUnit->code.sourceTable;
+    sourceTableInitContents(table);
+
+    throws(tryTextCopy(&root->fileName, &table->fileName, error));
+    table->numLineNumbers = lineNumbers.numUsed;
+    table->lineNumbers = lineNumbers.numbers;
+  }
+  else {
+    lineNumbersFreeContents(&lineNumbers);
+  }
+
+  // TODO: we don't populate these yet
+  codeUnit->code.maxOperandStackSize = 10;
 
   free(slotsTable);
 

@@ -8,19 +8,19 @@
  * CodeUnit init/free functions
  */
 
+void lineNumberInitContents(LineNumber *n) {
+  n->lineNumber = 0;
+  n->startInstructionIndex = 0;
+}
+
 void sourceTableInitContents(SourceTable *t) {
   t->lineNumbers = NULL;
   t->numLineNumbers = 0;
-  t->fileName = NULL;
-  t->fileNameLength = 0;
+  textInitContents(&t->fileName);
 }
 
 void sourceTableFreeContents(SourceTable *t) {
-  t->fileNameLength = 0;
-  if (t->fileName != NULL) {
-    free(t->fileName);
-    t->fileName = NULL;
-  }
+  textFreeContents(&t->fileName);
   t->numLineNumbers = 0;
   if (t->lineNumbers != NULL) {
     free(t->lineNumbers);
@@ -170,13 +170,13 @@ RetVal tryCodeDeepCopy(Code *from, Code *to, Error *error) {
   memcpy(to->code, from->code, to->codeLength);
 
   to->hasSourceTable = from->hasSourceTable;
-
   if (to->hasSourceTable) {
-    to->sourceTable.fileNameLength = from->sourceTable.fileNameLength;
-    throws(tryCopyText(from->sourceTable.fileName, &to->sourceTable.fileName, to->sourceTable.fileNameLength, error));
+    throws(tryTextCopy(&from->sourceTable.fileName, &to->sourceTable.fileName, error));
 
     to->sourceTable.numLineNumbers = from->sourceTable.numLineNumbers;
-    tryMalloc(to->sourceTable.lineNumbers, sizeof(LineNumber) * to->sourceTable.numLineNumbers, "LineNumber array");
+    uint64_t numbersSize = sizeof(LineNumber) * to->sourceTable.numLineNumbers;
+    tryMalloc(to->sourceTable.lineNumbers, numbersSize, "LineNumber array");
+    memcpy(to->sourceTable.lineNumbers, from->sourceTable.lineNumbers, numbersSize);
   }
 
   return R_SUCCESS;
@@ -2990,8 +2990,10 @@ bool getLineNumber(ExecFrame *frame, uint64_t *lineNumber) {
     for (uint64_t i=0; i<t->numLineNumbers; i++) {
       LineNumber *l = &t->lineNumbers[i];
       if (l->startInstructionIndex >= frame->pc) {
+        break;
+      }
+      else {
         *lineNumber = l->lineNumber;
-        return true;
       }
     }
   }
@@ -3000,8 +3002,7 @@ bool getLineNumber(ExecFrame *frame, uint64_t *lineNumber) {
 
 bool getFileName(ExecFrame_t frame, Text *fileName) {
   if (frame->code.hasSourceTable) {
-    fileName->length = frame->code.sourceTable.fileNameLength;
-    fileName->value = frame->code.sourceTable.fileName;
+    *fileName = frame->code.sourceTable.fileName;
     return true;
   }
   return false;

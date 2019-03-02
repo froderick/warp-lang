@@ -3,7 +3,15 @@
 
 #include "compiler.h"
 
-RetVal tryReplCompile(TokenStream_t stream, VM_t vm, CodeUnit *codeUnit, Error *error);
+typedef struct {
+  bool hasFileName;
+  Text fileName;
+} FileInfo;
+
+void fileInfoInitContents(FileInfo *f);
+void fileInfoFreeContents(FileInfo *f);
+
+RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit *codeUnit, Error *error);
 
 RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error);
 

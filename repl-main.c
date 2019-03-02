@@ -19,6 +19,9 @@ int main(void) {
   throws(tryFileInputStreamMake(stdin, &source, &error));
   throws(tryStreamMake(source, &stream, &error));
 
+  FileInfo fileInfo;
+  fileInfoInitContents(&fileInfo);
+
   while (1) {
 
     CodeUnit unit;
@@ -26,7 +29,7 @@ int main(void) {
     errorInitContents(&error);
     codeUnitInitContents(&unit);
 
-    ret = tryReplCompile(stream, vm, &unit, &error);
+    ret = tryReplCompile(stream, fileInfo, vm, &unit, &error);
     if (ret == R_EOF) {
       break;
     }
@@ -68,40 +71,5 @@ int main(void) {
     printf("encountered terminal errors\n");
     return -1;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

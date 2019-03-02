@@ -166,12 +166,16 @@ typedef struct Form {
 typedef struct FormRoot {
   BindingTable table;
   Form *form;
+  Text fileName;
+  bool hasFileName;
 } FormRoot;
 
 RetVal tryFormAnalyze(Expr* expr, FormRoot **form, Error *error);
 
 typedef struct AnalyzeOptions {
   Expander_t expander;
+  bool hasFileName;
+  Text fileName;
 } AnalyzeOptions;
 
 void analyzeOptionsInitContents(AnalyzeOptions *options);

@@ -1732,6 +1732,8 @@ void formFree(Form* form) {
 void rootInitContents(FormRoot *root) {
   bindingTableInitContents(&root->table);
   root->form = NULL;
+  textInitContents(&root->fileName);
+  root->hasFileName = false;
 }
 
 void rootFreeContents(FormRoot *root) {
@@ -1768,6 +1770,8 @@ void analyzerContextFreeContents(AnalyzerContext *ctx) {
 
 void analyzeOptionsInitContents(AnalyzeOptions *options) {
   options->expander = NULL;
+  options->hasFileName = false;
+  textInitContents(&options->fileName);
 }
 
 RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, FormRoot **ptr, Error *error) {
@@ -1786,6 +1790,11 @@ RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, FormRoot **ptr,
 
   throws(tryPopBindingTable(&ctx.bindingTables, error));
   analyzerContextFreeContents(&ctx);
+
+  if (options.hasFileName) {
+    root->hasFileName = true;
+    throws(tryTextCopy(&options.fileName, &root->fileName, error));
+  }
 
   *ptr = root;
   return R_SUCCESS;

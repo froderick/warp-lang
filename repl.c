@@ -1,7 +1,18 @@
+#include <string.h>
 #include "repl.h"
 #include "compiler.h"
 
-RetVal tryReplCompile(TokenStream_t stream, VM_t vm, CodeUnit *codeUnit, Error *error) {
+void fileInfoInitContents(FileInfo *f) {
+  f->hasFileName = false;
+  textInitContents(&f->fileName);
+}
+
+void fileInfoFreeContents(FileInfo *f) {
+  f->hasFileName = false;
+  textFreeContents(&f->fileName);
+}
+
+RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit *codeUnit, Error *error) {
 
   RetVal ret;
 
@@ -14,6 +25,11 @@ RetVal tryReplCompile(TokenStream_t stream, VM_t vm, CodeUnit *codeUnit, Error *
 
   throws(tryMakeExpander(&expander, vm, error));
   options.expander = expander;
+
+  if (fileInfo.hasFileName) {
+    options.hasFileName = true;
+    options.fileName = fileInfo.fileName;
+  }
 
   throws(tryExprRead(stream, &expr, error));
   throws(tryFormAnalyzeOptions(options, expr, &form, error));
@@ -55,7 +71,10 @@ RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
   char *stdLib = "/Users/ddcmhenry/dev/funtastic/branches/warp-lang/core.lsp";
   throws(tryLoad(vm, stdLib, error));
 
-  throws(tryReplCompile(stream, vm, &unit, error));
+  FileInfo fileInfo;
+  fileInfoInitContents(&fileInfo);
+
+  throws(tryReplCompile(stream, fileInfo, vm, &unit, error));
   //printCodeUnit(&unit);
 
   throws(tryVMEval(vm, &unit, &result, error));
@@ -81,14 +100,33 @@ RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
     return ret;
 }
 
+RetVal tryTextMakeFromChar(char *filename, Text *to, Error *error) {
+  RetVal ret;
+
+  textInitContents(to);
+
+  to->length = strlen(filename) + 1;
+  tryMalloc(to->value, to->length * sizeof(wchar_t), "wide string");
+  swprintf(to->value, to->length, L"%s", filename);
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
 RetVal tryLoad(VM_t vm, char *filename, Error *error) {
   RetVal ret;
 
   InputStream_t source;
   TokenStream_t stream;
+  FileInfo fileInfo;
 
   throws(tryFileInputStreamMakeFilename(filename, &source, error));
   throws(tryStreamMake(source, &stream, error));
+
+  fileInfoInitContents(&fileInfo);
+  fileInfo.hasFileName = true;
+  throws(tryTextMakeFromChar(filename, &fileInfo.fileName, error));
 
   CodeUnit unit;
   VMEvalResult result;
@@ -96,7 +134,7 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
 
     codeUnitInitContents(&unit);
 
-    ret = tryReplCompile(stream, vm, &unit, error);
+    ret = tryReplCompile(stream, fileInfo, vm, &unit, error);
     if (ret == R_EOF) {
       break;
     }
@@ -122,6 +160,7 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
   done:
     codeUnitFreeContents(&unit);
     evalResultFreeContents(&result);
+    fileInfoFreeContents(&fileInfo);
     return ret;
 }
 

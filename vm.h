@@ -17,8 +17,7 @@ typedef struct LineNumber {
 } LineNumber;
 
 typedef struct SourceTable {
-  uint64_t fileNameLength;
-  wchar_t *fileName;
+  Text fileName;
   uint64_t numLineNumbers;
   LineNumber *lineNumbers;
 } SourceTable;
@@ -156,6 +155,7 @@ typedef struct CodeUnit {
 } CodeUnit;
 
 
+void lineNumberInitContents(LineNumber *n);
 void sourceTableInitContents(SourceTable *t);
 
 void codeInitContents(Code *code);
