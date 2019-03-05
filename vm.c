@@ -417,6 +417,148 @@ Value nil() {
 }
 
 /*
+ * NEW alloc/gc impl
+ */
+
+typedef struct GC1 {
+
+  // the total memory allocated
+  uint64_t heapMemorySize;
+  void *heapMemory;
+
+  // the actual heaps
+  uint64_t heapSize;
+  void *heapA; // the first half of the memory
+  void *heapB; // the second half of the memory
+
+  // the current heap
+  void *currentHeap; // the heap to use for allocation
+  void *allocPtr;    // the offset within the heap to use for allocation
+
+} GC1;
+
+void GC1FreeContents(GC1 *gc) {
+  free(gc->heapMemory);
+  gc->heapMemory = NULL;
+  gc->heapA = NULL;
+  gc->heapB = NULL;
+  gc->currentHeap = NULL;
+  gc->allocPtr = NULL;
+}
+
+void GC1InitContents(GC1 *gc) {
+  gc->heapMemorySize = 0;
+  gc->heapMemory = NULL;
+  gc->heapSize = 0;
+  gc->heapA = NULL;
+  gc->heapB = NULL;
+  gc->currentHeap = NULL;
+  gc->allocPtr = NULL;
+}
+
+RetVal tryGC1InitContents(GC1 *gc, uint64_t maxHeapSize, Error *error) {
+  RetVal ret;
+
+  GC1InitContents(gc);
+
+  gc->heapSize = maxHeapSize;
+  gc->heapMemorySize = gc->heapSize * 2;
+
+  tryMalloc(gc->heapMemory, gc->heapMemorySize, "GC memory");
+  memset(gc->heapMemory, 0, gc->heapMemorySize);
+
+  gc->heapA = gc->heapMemory;
+  gc->heapB = gc->heapA + gc->heapSize;
+  gc->currentHeap = gc->heapA;
+  gc->allocPtr = gc->currentHeap;
+
+  return R_SUCCESS;
+  failure:
+    return ret;
+}
+
+/*
+ * if heap has space for allocated value, allocate:
+ *   write object at allocPtr
+ *   save allocPtr as new value location
+ *   increase allocPtr by length of object
+ *
+ * else
+ *   collect
+ *   if heap has space for allocated value, allocate
+ *   else fail
+ */
+RetVal alloc(GC1 *gc, void *ptr, uint64_t length, void **valueAddr, Error *error) {
+  RetVal ret;
+
+  uint64_t heapAvailable = gc->currentHeap - gc->allocPtr;
+  if (heapAvailable + length < gc->heapSize) {
+    memcpy(gc->allocPtr, ptr, length);
+    *valueAddr = gc->allocPtr;
+    gc->allocPtr += length;
+  }
+  else {
+    throwRuntimeError(error, "collect() not supported yet");
+  }
+
+  return R_SUCCESS;
+  failure:
+    return ret;
+}
+
+/*
+ * [ hasName, *nameValue] nameValue, constants, code, lineNumbers
+ */
+
+typedef struct Fn1 {
+  bool hasName;
+  wchar_t *nameValue;
+  uint64_t nameLength;
+  uint16_t numCaptures;
+  uint16_t numArgs;
+  bool usesVarArgs;
+  uint16_t numConstants;
+  Value *constants;
+
+  uint16_t numLocals;           // the number of local bindings this code unit uses
+  uint64_t maxOperandStackSize; // the maximum number of items this code pushes onto the operand stack at one time
+  uint64_t codeLength;          // the number of bytes in this code block
+  uint8_t *code;                // this code block's actual instructions
+
+  bool hasSourceTable;
+  Text fileName;
+  uint64_t numLineNumbers;
+  LineNumber *lineNumbers;
+
+} Fn1;
+
+RetVal tryAllocateFn1(GC1 *gc, Fn fn, Value *value, Error *error) {
+  RetVal ret;
+
+  Fn1 fn1;
+
+//  value->type = VT_FN;
+//  value->value = index;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal collect(GC1 *gc, Namespaces *namespaces, ExecFrame_t frame, Error *error) {
+  RetVal ret;
+
+  void *scanptr;
+  void *allocptr;
+
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+/*
  * gc/runtime implementation
  */
 
