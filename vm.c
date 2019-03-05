@@ -271,13 +271,24 @@ void evalResultFreeContents(VMEvalResult *r) {
 
 typedef struct Fn {
   bool hasName;
-  Text name;
+  uint64_t nameLength;
+  wchar_t *name;
   uint16_t numCaptures;
   uint16_t numArgs;
   bool usesVarArgs;
   uint16_t numConstants;
   Value *constants;
-  Code code;
+
+  uint16_t numLocals;           // the number of local bindings this code unit uses
+  uint64_t maxOperandStackSize; // the maximum number of items this code pushes onto the operand stack at one time
+  uint64_t codeLength;          // the number of bytes in this code block
+  uint8_t *code;                // this code block's actual instructions
+
+  bool hasSourceTable;
+  uint64_t sourceFileNameLength;
+  wchar_t *sourceFileName;
+  uint64_t numLineNumbers;
+  LineNumber *lineNumbers;
 } Fn;
 
 typedef struct Closure {
@@ -300,8 +311,6 @@ typedef struct Keyword {
   uint64_t length;
   wchar_t *value;
 } Keyword;
-
-typedef struct Cons Cons;
 
 typedef struct Cons {
   Value value;
@@ -335,6 +344,23 @@ typedef struct GC {
   Cons *conses;
 
 } GC;
+
+typedef struct GC1 {
+
+  // the total memory allocated
+  uint64_t heapMemorySize;
+  void *heapMemory;
+
+  // the actual heaps
+  uint64_t heapSize;
+  void *heapA; // the first half of the memory
+  void *heapB; // the second half of the memory
+
+  // the current heap
+  void *currentHeap; // the heap to use for allocation
+  void *allocPtr;    // the offset within the heap to use for allocation
+
+} GC1;
 
 // namespaces
 
@@ -384,6 +410,7 @@ typedef struct InstTable {
 
 typedef struct VM {
   GC gc;
+  GC1 gc1;
   Namespaces namespaces;
   InstTable instTable;
 } VM;
@@ -419,23 +446,6 @@ Value nil() {
 /*
  * NEW alloc/gc impl
  */
-
-typedef struct GC1 {
-
-  // the total memory allocated
-  uint64_t heapMemorySize;
-  void *heapMemory;
-
-  // the actual heaps
-  uint64_t heapSize;
-  void *heapA; // the first half of the memory
-  void *heapB; // the second half of the memory
-
-  // the current heap
-  void *currentHeap; // the heap to use for allocation
-  void *allocPtr;    // the offset within the heap to use for allocation
-
-} GC1;
 
 void GC1FreeContents(GC1 *gc) {
   free(gc->heapMemory);
@@ -488,60 +498,35 @@ RetVal tryGC1InitContents(GC1 *gc, uint64_t maxHeapSize, Error *error) {
  *   if heap has space for allocated value, allocate
  *   else fail
  */
-RetVal alloc(GC1 *gc, void *ptr, uint64_t length, void **valueAddr, Error *error) {
+RetVal alloc(GC1 *gc, uint64_t length, void **ptr, uint64_t *offset, Error *error) {
   RetVal ret;
 
   uint64_t heapAvailable = gc->currentHeap - gc->allocPtr;
   if (heapAvailable + length < gc->heapSize) {
-    memcpy(gc->allocPtr, ptr, length);
-    *valueAddr = gc->allocPtr;
+    *ptr = gc->allocPtr;
     gc->allocPtr += length;
   }
   else {
     throwRuntimeError(error, "collect() not supported yet");
   }
 
+  *offset = *ptr - gc->currentHeap;
+
   return R_SUCCESS;
   failure:
     return ret;
 }
 
-/*
- * [ hasName, *nameValue] nameValue, constants, code, lineNumbers
- */
-
-typedef struct Fn1 {
-  bool hasName;
-  wchar_t *nameValue;
-  uint64_t nameLength;
-  uint16_t numCaptures;
-  uint16_t numArgs;
-  bool usesVarArgs;
-  uint16_t numConstants;
-  Value *constants;
-
-  uint16_t numLocals;           // the number of local bindings this code unit uses
-  uint64_t maxOperandStackSize; // the maximum number of items this code pushes onto the operand stack at one time
-  uint64_t codeLength;          // the number of bytes in this code block
-  uint8_t *code;                // this code block's actual instructions
-
-  bool hasSourceTable;
-  Text fileName;
-  uint64_t numLineNumbers;
-  LineNumber *lineNumbers;
-
-} Fn1;
-
-RetVal tryAllocateFn1(GC1 *gc, Fn fn, Value *value, Error *error) {
+RetVal deref(GC1 *gc, void **ptr, uint64_t offset, Error *error) {
   RetVal ret;
 
-  Fn1 fn1;
+  if (offset > gc->heapSize) {
+    throwRuntimeError(error, "invalid memory address");
+  }
 
-//  value->type = VT_FN;
-//  value->value = index;
+  *ptr = gc->currentHeap + offset;
 
   return R_SUCCESS;
-
   failure:
   return ret;
 }
@@ -564,10 +549,6 @@ RetVal collect(GC1 *gc, Namespaces *namespaces, ExecFrame_t frame, Error *error)
 
 void GCInit(GC *gc) {
 
-  gc->usedFnSpace = 0;
-  gc->allocatedFnSpace = 0;
-  gc->fns = NULL;
-
   gc->usedClosureSpace = 0;
   gc->allocatedClosureSpace = 0;
   gc->closures = NULL;
@@ -589,7 +570,6 @@ void GCInit(GC *gc) {
   gc->conses = NULL;
 }
 
-void _fnFreeContents(Fn *fn);
 void _stringFreeContents(String *str);
 void _symbolFreeContents(Symbol *s);
 void _keywordFreeContents(Keyword *k);
@@ -597,14 +577,6 @@ void _consFreeContents(Cons *c);
 
 void GCFreeContents(GC *gc) {
   if (gc != NULL) {
-
-    for (uint64_t i=0; i<gc->usedFnSpace; i++) {
-      _fnFreeContents(&gc->fns[i]);
-    }
-    free(gc->fns);
-    gc->fns = NULL;
-    gc->usedFnSpace = 0;
-    gc->allocatedFnSpace = 0;
 
     free(gc->closures);
     gc->closures = NULL;
@@ -643,68 +615,6 @@ void GCFreeContents(GC *gc) {
     gc->usedConsSpace = 0;
     gc->allocatedConsSpace = 0;
   }
-}
-
-RetVal tryAllocateFn(GC *gc, Fn fn, Value *value, Error *error) {
-  RetVal ret;
-
-  if (gc->fns == NULL) {
-    uint16_t len = 16;
-    tryMalloc(gc->fns, len * sizeof(Fn), "Fn array");
-    gc->allocatedFnSpace = len;
-  }
-  else if (gc->usedFnSpace == gc->allocatedFnSpace) {
-    uint64_t newAllocatedLength = gc->allocatedFnSpace * 2;
-
-    Fn* resizedFns = realloc(gc->fns, newAllocatedLength * sizeof(Fn));
-    if (resizedFns == NULL) {
-      ret = memoryError(error, "realloc Fn array");
-      goto failure;
-    }
-
-    gc->allocatedFnSpace = newAllocatedLength;
-    gc->fns = resizedFns;
-  }
-
-  uint64_t index = gc->usedFnSpace;
-  gc->fns[index] = fn;
-  gc->usedFnSpace = index + 1;
-
-  value->type = VT_FN;
-  value->value = index;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-void _fnFreeContents(Fn *fn) {
-  if (fn != NULL) {
-    fn->numArgs = 0;
-
-    fn->numConstants = 0;
-    if (fn->constants != NULL) {
-      free(fn->constants);
-      fn->constants = NULL;
-    }
-
-    codeFreeContents(&fn->code);
-  }
-}
-
-RetVal tryDerefFn(GC *gc, Value value, Fn *fn, Error *error) {
-  RetVal ret;
-
-  if (gc->usedFnSpace <= value.value) {
-    throwInternalError(error, "fn reference points to fn that does not exist");
-  }
-
-  *fn = gc->fns[value.value];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 RetVal tryAllocateClosure(GC *gc, Closure closure, Value *value, Error *error) {
@@ -1055,58 +965,152 @@ RetVal tryUnresolvedFnRefsAppend(UnresolvedFnRefs *references, UnresolvedFnRef r
 
 RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, uint16_t constantIndex, UnresolvedFnRefs *unresolved, Error *error);
 
-RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr,
+RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values,
                             UnresolvedFnRefs *unresolved, Error *error);
+
+void fnInitContents(Fn *fn) {
+
+  fn->hasName = false;
+  fn->nameLength = 0;
+  fn->name = NULL;
+  fn->numCaptures = 0;
+  fn->numArgs = 0;
+  fn->usesVarArgs = false;
+  fn->numConstants = 0;
+  fn->constants = NULL;
+
+  fn->numLocals = 0;
+  fn->maxOperandStackSize = 0;
+  fn->codeLength = 0;
+  fn->code = NULL;
+
+  fn->hasSourceTable = false;
+  fn->sourceFileNameLength = 0;
+  fn->sourceFileName = NULL;
+  fn->numLineNumbers = 0;
+  fn->lineNumbers = NULL;
+}
+
+uint64_t fnLength(FnConstant *fnConst) {
+
+  uint64_t nameLength = 0;
+  if (fnConst->hasName) {
+    nameLength = fnConst->name.length;
+  }
+
+  uint64_t constantsLength = fnConst->numConstants * sizeof(Value);
+  uint64_t codeLength = fnConst->code.codeLength;
+
+  uint64_t lineNumbersLength = 0;
+  if (fnConst->code.hasSourceTable) {
+    lineNumbersLength = fnConst->code.sourceTable.numLineNumbers * sizeof(LineNumber);
+  }
+
+  return sizeof(Fn) + nameLength + constantsLength + codeLength + lineNumbersLength;
+}
 
 RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   RetVal ret;
 
   // always clean up
   UnresolvedFnRefs unresolved;
-
-  // cleanup on failure
-  Fn fn;
-
   unresolvedFnRefsInitContents(&unresolved);
 
-  fn.hasName = fnConst->hasName;
-  textInitContents(&fn.name);
-  if (fn.hasName) {
-    throws(tryTextCopy(&fnConst->name, &fn.name, error));
+  // cleanup on failure
+  Fn *fn;
+
+  uint64_t fnLen = fnLength(fnConst);
+  uint64_t offset = 0;
+  throws(alloc(NULL, fnLen, (void*)&fn, &offset, error));
+
+  fnInitContents(fn);
+
+  void *allocCursor = fn + sizeof(Fn);
+
+  fn->hasName = fnConst->hasName;
+  if (fn->hasName) {
+    fn->nameLength = fnConst->name.length;
+
+    size_t nameSize = sizeof(wchar_t) * fn->nameLength;
+    fn->name = allocCursor;
+    allocCursor += nameSize;
+
+    memcpy(fn->name, fnConst->name.value, nameSize);
   }
 
-  fn.numArgs = fnConst->numArgs;
-  fn.usesVarArgs = fnConst->usesVarArgs;
-  fn.numConstants = fnConst->numConstants;
-  fn.numCaptures = fnConst->numCaptures;
+  fn->numCaptures = fnConst->numCaptures;
+  fn->numArgs = fnConst->numArgs;
+  fn->usesVarArgs = fnConst->usesVarArgs;
 
-  tryMalloc(fn.constants, sizeof(Value) * fn.numConstants, "Value array");
-  throws(_tryHydrateConstants(vm, fn.numConstants, fnConst->constants, &fn.constants, &unresolved, error));
+  {
+    fn->numConstants = fnConst->numConstants;
 
-  throws(tryCodeDeepCopy(&fnConst->code, &fn.code, error));
+    size_t constantsSize = sizeof(Value) * fn->numConstants;
+    fn->constants = allocCursor;
+    allocCursor += constantsSize;
 
-  throws(tryAllocateFn(&vm->gc, fn, value, error));
+    throws(_tryHydrateConstants(vm, fn->numConstants, fnConst->constants, fn->constants, &unresolved, error));
 
-  for (uint16_t i=0; i<unresolved.usedSpace; i++) {
-    UnresolvedFnRef ref = unresolved.references[i];
+    for (uint16_t i=0; i<unresolved.usedSpace; i++) {
+      UnresolvedFnRef ref = unresolved.references[i];
 
-    if (ref.fnRef.fnId == fnConst->fnId) {
-      // resolve the reference
-      fn.constants[ref.constantIndex] = *value;
-    }
-    else {
-      throwRuntimeError(error, "cannot hydrate a reference to a function other than the current one: %llu", ref.fnRef.fnId);
+      if (ref.fnRef.fnId == fnConst->fnId) {
+        // resolve the reference
+        fn->constants[ref.constantIndex] = *value;
+      }
+      else {
+        throwRuntimeError(error, "cannot hydrate a reference to a function other than the current one: %llu", ref.fnRef.fnId);
+      }
     }
   }
+
+  fn->numLocals = fnConst->code.numLocals;
+  fn->maxOperandStackSize = fnConst->code.maxOperandStackSize;
+
+  {
+    fn->codeLength = fnConst->code.codeLength;
+
+    size_t codeSize = sizeof(uint8_t) * fn->codeLength;
+    fn->code = allocCursor;
+    allocCursor += codeSize;
+
+    memcpy(fn->code, fnConst->code.code, codeSize);
+  }
+
+  fn->hasSourceTable = fnConst->code.hasSourceTable;
+  if (fn->hasSourceTable) {
+
+    {
+      fn->sourceFileNameLength = fnConst->code.sourceTable.fileName.length;
+
+      size_t fileNameSize = sizeof(wchar_t) * fn->sourceFileNameLength;
+      fn->name = allocCursor;
+      allocCursor += fileNameSize;
+
+      memcpy(fn->sourceFileName, fnConst->code.sourceTable.fileName.value, fileNameSize);
+    }
+
+    {
+      fn->numLineNumbers = fnConst->code.sourceTable.numLineNumbers;
+
+      size_t lineNumbersSize = sizeof(LineNumber) * fn->numLineNumbers;
+      fn->lineNumbers = allocCursor;
+      allocCursor += lineNumbersSize;
+
+      memcpy(fn->lineNumbers, fnConst->code.sourceTable.lineNumbers, lineNumbersSize);
+    }
+  }
+
+  value->type = VT_FN;
+  value->value = offset;
 
   unresolvedFnRefsFreeContents(&unresolved);
 
   return R_SUCCESS;
 
   failure:
-  _fnFreeContents(&fn);
-  unresolvedFnRefsFreeContents(&unresolved);
-  return ret;
+    unresolvedFnRefsFreeContents(&unresolved);
+    return ret;
 }
 
 RetVal tryStringHydrate(VM *vm, StringConstant strConst, Value *value, Error *error) {
@@ -1268,14 +1272,9 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
   return ret;
 }
 
-RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value **ptr,
+RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values,
                             UnresolvedFnRefs *unresolved, Error *error) {
   RetVal ret;
-
-  // clean up on failure
-  Value *values = NULL;
-
-  tryMalloc(values, sizeof(Value) * numConstants, "Value array");
 
   for (uint16_t i=0; i<numConstants; i++) {
 
@@ -1287,15 +1286,12 @@ RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, 
     values[i] = v;
   }
 
-  *ptr = values;
   return R_SUCCESS;
-
   failure:
-    free(values);
     return ret;
 }
 
-RetVal tryHydrateConstants(VM *vm, Value **constants, CodeUnit *codeUnit, Error *error) {
+RetVal tryHydrateConstants(VM *vm, Value *constants, CodeUnit *codeUnit, Error *error) {
   RetVal ret;
 
   UnresolvedFnRefs unresolved;
@@ -1752,7 +1748,7 @@ RetVal tryStoreLocalEval(VM *vm, ExecFrame_t frame, Error *error) {
 }
 
 typedef struct Invocable {
-  Fn fn;
+  Fn *fn;
   bool hasClosure;
   Closure closure;
 } Invocable;
@@ -1765,7 +1761,9 @@ RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *e
 
   switch (popVal.type) {
     case VT_FN: {
-      throws(tryDerefFn(&vm->gc, popVal, &invocable->fn, error));
+
+      throws(deref(&vm->gc1, (void*)&invocable->fn, popVal.value, error));
+
       invocable->hasClosure = false;
       invocable->closure.fn = nil();
       invocable->closure.numCaptures = 0;
@@ -1775,7 +1773,7 @@ RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *e
     case VT_CLOSURE: {
       throws(tryDerefClosure(&vm->gc, popVal, &invocable->closure, error));
       invocable->hasClosure = true;
-      throws(tryDerefFn(&vm->gc, invocable->closure.fn, &invocable->fn, error));
+      throws(deref(&vm->gc1, (void*)&invocable->fn, invocable->closure.fn.value, error));
       break;
     }
     default:
@@ -1806,18 +1804,18 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
     throwRuntimeError(error, "first argument must be number of arguments supplied: %u", numArgsSupplied.type);
   }
 
-  if (numArgsSupplied.value > invocable.fn.numArgs) {
+  if (numArgsSupplied.value > invocable.fn->numArgs) {
 
-    if (!invocable.fn.usesVarArgs) {
+    if (!invocable.fn->usesVarArgs) {
       // fail: wrong number of arguments
-      throwRuntimeError(error, "extra arguments supplied, expected %u but got %llu", invocable.fn.numArgs,
+      throwRuntimeError(error, "extra arguments supplied, expected %u but got %llu", invocable.fn->numArgs,
           numArgsSupplied.value);
     }
 
     // read the extra args into a list, push it back on the stack
 
     Value seq = nil();
-    uint16_t numVarArgs = (numArgsSupplied.value - invocable.fn.numArgs) + 1;
+    uint16_t numVarArgs = (numArgsSupplied.value - invocable.fn->numArgs) + 1;
     for (uint16_t i = 0; i < numVarArgs; i++) {
 
       Value arg;
@@ -1832,7 +1830,7 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
     throws(pushOperand(parent, seq, error));
   }
 
-  if (numArgsSupplied.value == invocable.fn.numArgs && invocable.fn.usesVarArgs) {
+  if (numArgsSupplied.value == invocable.fn->numArgs && invocable.fn->usesVarArgs) {
     // wrap the last arg in a list
 
     Value arg;
@@ -1848,11 +1846,11 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
     throws(pushOperand(parent, seq, error));
   }
 
-  if (numArgsSupplied.value < invocable.fn.numArgs) {
+  if (numArgsSupplied.value < invocable.fn->numArgs) {
 
-    if (!invocable.fn.usesVarArgs) {
+    if (!invocable.fn->usesVarArgs) {
       // fail: wrong number of arguments
-      throwRuntimeError(error, "required arguments not supplied, expected %u but got %llu", invocable.fn.numArgs,
+      throwRuntimeError(error, "required arguments not supplied, expected %u but got %llu", invocable.fn->numArgs,
                         numArgsSupplied.value);
     }
 
@@ -1861,7 +1859,7 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
     throws(pushOperand(parent, nil(), error));
   }
 
-  for (uint16_t i = 0; i < invocable.fn.numArgs; i++) {
+  for (uint16_t i = 0; i < invocable.fn->numArgs; i++) {
     Value arg;
     throws(popOperand(parent, &arg, error));
 
@@ -1872,22 +1870,22 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
 //      throws(tryVMPrn(vm, arg, error));
 //    }
 
-    uint16_t idx = invocable.fn.numArgs - (1 + i);
+    uint16_t idx = invocable.fn->numArgs - (1 + i);
     throws(setLocal(child, idx, arg, error));
 //    child->locals[idx] = arg;
   }
 
-  if (invocable.fn.numCaptures > 0) {
+  if (invocable.fn->numCaptures > 0) {
 
     if (!invocable.hasClosure) {
-      throwRuntimeError(error, "cannot invoke this fn without a closure, it captures variables: %u", invocable.fn.numCaptures);
+      throwRuntimeError(error, "cannot invoke this fn without a closure, it captures variables: %u", invocable.fn->numCaptures);
     }
-    if (invocable.closure.numCaptures < invocable.fn.numCaptures) {
+    if (invocable.closure.numCaptures < invocable.fn->numCaptures) {
       throwRuntimeError(error, "closure does not have enough captured variables: %u", invocable.closure.numCaptures);
     }
 
-    uint16_t nextLocalIdx = invocable.fn.numArgs;
-    for (uint16_t i=0; i<invocable.fn.numCaptures; i++) {
+    uint16_t nextLocalIdx = invocable.fn->numArgs;
+    for (uint16_t i=0; i<invocable.fn->numCaptures; i++) {
       throws(setLocal(child, nextLocalIdx, invocable.closure.captures[i], error));
 //      child->locals[nextLocalIdx] = invocable.closure.captures[i];
       nextLocalIdx = nextLocalIdx + 1;
@@ -1922,12 +1920,12 @@ RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   FrameParams p;
   frameParamsInitContents(&p);
-  p.numConstants = invocable.fn.numConstants;
-  p.constants = invocable.fn.constants;
-  p.numLocals = invocable.fn.code.numLocals;
-  p.opStackSize = invocable.fn.code.maxOperandStackSize;
-  p.code = invocable.fn.code;
-  p.fnName = invocable.fn.name;
+  p.numConstants = invocable.fn->numConstants;
+  p.constants = invocable.fn->constants;
+  p.numLocals = invocable.fn->numLocals;
+  p.opStackSize = invocable.fn->maxOperandStackSize;
+  p.code = invocable.fn->code;
+  p.fnName = invocable.fn->name;
   p.hasFnName = true;
 
   throws(pushFrame(frame, p, error));
@@ -1967,12 +1965,12 @@ RetVal tryInvokeDynTailEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   FrameParams p;
   frameParamsInitContents(&p);
-  p.numConstants = invocable.fn.numConstants;
-  p.constants = invocable.fn.constants;
-  p.code = invocable.fn.code;
-  p.numLocals = invocable.fn.code.numLocals;
-  p.opStackSize = invocable.fn.code.maxOperandStackSize;
-  p.fnName = invocable.fn.name;
+  p.numConstants = invocable.fn->numConstants;
+  p.constants = invocable.fn->constants;
+  p.code = invocable.fn->code;
+  p.numLocals = invocable.fn->numLocals;
+  p.opStackSize = invocable.fn->maxOperandStackSize;
+  p.fnName = invocable.fn->name;
   p.hasFnName = true;
 
   throws(replaceFrame(frame, p, error));
@@ -2221,19 +2219,19 @@ RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
     throwRuntimeError(error, "cannot create a closure from this value type: %u", fnValue.type);
   }
 
-  Fn fn;
-  throws(tryDerefFn(&vm->gc, fnValue, &fn, error));
+  Fn *fn;
+  throws(deref(&vm->gc1, (void*)&fn, fnValue.value, error));
 
   Closure closure;
   closure.fn = fnValue;
-  closure.numCaptures = fn.numCaptures;
-  tryMalloc(closure.captures, fn.numCaptures * sizeof(Value), "Value array");
+  closure.numCaptures = fn->numCaptures;
+  tryMalloc(closure.captures, fn->numCaptures * sizeof(Value), "Value array");
 
   // pop captures in reverse order, same as arguments
   for (uint16_t i=0; i<closure.numCaptures; i++) {
     Value capture;
     throws(popOperand(frame, &capture, error));
-    uint16_t idx = fn.numCaptures - (1 + i);
+    uint16_t idx = fn->numCaptures - (1 + i);
     closure.captures[idx] = capture;
   }
 
@@ -3399,6 +3397,7 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
 
   vm->instTable = instTableCreate();
   GCInit(&vm->gc);
+  throws(tryGC1InitContents(&vm->gc1, 1024 * 1000, error));
   throws(tryNamespacesInitContents(&vm->namespaces, error));
 
   ret = R_SUCCESS;
@@ -3411,6 +3410,7 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
 void vmFreeContents(VM *vm) {
   if (vm != NULL) {
     GCFreeContents(&vm->gc);
+    GC1FreeContents(&vm->gc1);
     namespacesFreeContents(&vm->namespaces);
   }
 }
