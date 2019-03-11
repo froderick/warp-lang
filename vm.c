@@ -276,6 +276,7 @@ typedef struct Fn {
   uint16_t numCaptures;
   uint16_t numArgs;
   bool usesVarArgs;
+
   uint16_t numConstants;
   Value *constants;
 
@@ -289,6 +290,7 @@ typedef struct Fn {
   wchar_t *sourceFileName;
   uint64_t numLineNumbers;
   LineNumber *lineNumbers;
+
 } Fn;
 
 typedef struct Closure {
@@ -1678,18 +1680,8 @@ bool hasException(ExecFrame_t frame);
 void setException(ExecFrame_t frame, VMException e);
 RetVal getException(ExecFrame_t frame, VMException *e, Error *error);
 
-typedef struct FrameParams {
-  uint16_t numConstants;
-  Value *constants;
-  uint16_t numLocals;
-  uint16_t opStackSize;
-  Code code;
-  Text fnName;
-  bool hasFnName;
-} FrameParams;
-
-RetVal pushFrame(ExecFrame_t frame, FrameParams params, Error *error);
-RetVal replaceFrame(ExecFrame_t frame, FrameParams params, Error *error);
+RetVal pushFrame(ExecFrame_t *frame, Value newFn, Error *error);
+RetVal replaceFrame(ExecFrame_t frame, Value newFn, Error *error);
 void popFrame(ExecFrame_t frame);
 
 /*
@@ -1747,7 +1739,22 @@ RetVal tryStoreLocalEval(VM *vm, ExecFrame_t frame, Error *error) {
   return ret;
 }
 
+/*
+ * The invocable should become the contract needed to init a frame on the stack
+ *
+ * TODO: let's make a separate heap (perm-gen) for compiled, loaded code
+ * - this would mean that we can depend on the locations of functions not changing due to garbage collection
+ *   while regular instructions within a function are being executed.
+ * - we would garbage collect functions whenever the space is exhausted, which would be caused by attempting to
+ *   load new code. we'd start from the roots like normal gc, just with different semantics
+ * - the only time functions would get moved is when loading more code, which triggers gc.
+ * - this lets us write vm code that keeps direct pointers to hydrated compiled code
+ *
+ * - see https://www.quora.com/What-are-some-best-practices-in-using-the-Java-8-JVM-Metaspace
+ */
+
 typedef struct Invocable {
+  Value fnRef;
   Fn *fn;
   bool hasClosure;
   Closure closure;
@@ -1756,13 +1763,12 @@ typedef struct Invocable {
 RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *error) {
   RetVal ret;
 
-  Value popVal;
-  throws(popOperand(frame, &popVal, error));
+  throws(popOperand(frame, &invocable->fnRef, error));
 
-  switch (popVal.type) {
+  switch (invocable->fnRef.type) {
     case VT_FN: {
 
-      throws(deref(&vm->gc1, (void*)&invocable->fn, popVal.value, error));
+      throws(deref(&vm->gc1, (void*)&invocable->fn, invocable->fnRef.value, error));
 
       invocable->hasClosure = false;
       invocable->closure.fn = nil();
@@ -1771,14 +1777,14 @@ RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *e
       break;
     }
     case VT_CLOSURE: {
-      throws(tryDerefClosure(&vm->gc, popVal, &invocable->closure, error));
+      throws(tryDerefClosure(&vm->gc, invocable->fnRef, &invocable->closure, error));
       invocable->hasClosure = true;
       throws(deref(&vm->gc1, (void*)&invocable->fn, invocable->closure.fn.value, error));
       break;
     }
     default:
       // fail: not all values are invocable
-      throwRuntimeError(error, "cannot invoke this value type as a function: %u", popVal.type);
+      throwRuntimeError(error, "cannot invoke this value type as a function: %u", invocable->fnRef.type);
   }
 
   return R_SUCCESS;
@@ -1898,16 +1904,6 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
   return ret;
 }
 
-void frameParamsInitContents(FrameParams *p) {
-  p->numConstants = 0;
-  p->constants = NULL;
-  p->numLocals = 0;
-  p->opStackSize = 0;
-  codeInitContents(&p->code);
-  textInitContents(&p->fnName);
-  p->hasFnName = false;
-}
-
 // (8)              | (objectref, args... -> ...)
 RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
@@ -1918,17 +1914,7 @@ RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
   Invocable invocable;
   throws(tryPopInvocable(vm, frame, &invocable, error));
 
-  FrameParams p;
-  frameParamsInitContents(&p);
-  p.numConstants = invocable.fn->numConstants;
-  p.constants = invocable.fn->constants;
-  p.numLocals = invocable.fn->numLocals;
-  p.opStackSize = invocable.fn->maxOperandStackSize;
-  p.code = invocable.fn->code;
-  p.fnName = invocable.fn->name;
-  p.hasFnName = true;
-
-  throws(pushFrame(frame, p, error));
+  throws(pushFrame(&frame, invocable.fnRef, error));
   pushed = true;
 
   ExecFrame_t parent;
@@ -1963,17 +1949,7 @@ RetVal tryInvokeDynTailEval(VM *vm, ExecFrame_t frame, Error *error) {
   Invocable invocable;
   throws(tryPopInvocable(vm, frame, &invocable, error));
 
-  FrameParams p;
-  frameParamsInitContents(&p);
-  p.numConstants = invocable.fn->numConstants;
-  p.constants = invocable.fn->constants;
-  p.code = invocable.fn->code;
-  p.numLocals = invocable.fn->numLocals;
-  p.opStackSize = invocable.fn->maxOperandStackSize;
-  p.fnName = invocable.fn->name;
-  p.hasFnName = true;
-
-  throws(replaceFrame(frame, p, error));
+  throws(replaceFrame(frame, invocable.fnRef, error));
   throws(tryInvokePopulateLocals(vm, frame, frame, invocable, error));
 
   return R_SUCCESS;
@@ -2882,10 +2858,10 @@ typedef struct ExecFrame ExecFrame;
 
 typedef struct ExecFrame {
   ExecFrame *parent;
-  uint16_t numConstants; // TODO: make a verifier so we can check these bounds at load time rather than compile time
-  Value *constants;
-  Code code;
-  uint16_t numLocals;
+
+  Value fnRef;
+  Fn *fn; // TODO: the collector will have to treat relocating functions specially to make this reference work
+
   Value *locals;
   OpStack *opStack;
   Value result;
@@ -2894,9 +2870,6 @@ typedef struct ExecFrame {
 
   ExceptionHandler handler;
   bool handlerSet;
-
-  Text fnName;
-  bool hasFnName;
 
   VMException exception;
   bool exceptionSet;
@@ -2909,10 +2882,8 @@ void handlerInitContents(ExceptionHandler *h) {
 
 void frameInitContents(ExecFrame *frame) {
   frame->parent = NULL;
-  frame->numConstants = 0;
-  frame->constants = NULL;
-  codeInitContents(&frame->code);
-  frame->numLocals = 0;
+  frame->fnRef = nil();
+  frame->fn = NULL;
   frame->locals = NULL;
   frame->opStack = NULL;
   frame->resultAvailable = 0;
@@ -2921,8 +2892,6 @@ void frameInitContents(ExecFrame *frame) {
   frame->pc = 0;
   handlerInitContents(&frame->handler);
   frame->handlerSet = false;
-  textInitContents(&frame->fnName);
-  frame->hasFnName = false;
   exceptionInitContents(&frame->exception);
   frame->exceptionSet = false;
 }
@@ -2930,11 +2899,11 @@ void frameInitContents(ExecFrame *frame) {
 RetVal readInstruction(ExecFrame *frame, uint8_t *ptr, Error *error) {
   RetVal ret;
 
-  if (frame->pc >= frame->code.codeLength) {
+  if (frame->pc >= frame->fn->codeLength) {
     throwRuntimeError(error, "cannot read next instruction, no instructions left");
   }
 
-  *ptr = frame->code.code[frame->pc];
+  *ptr = frame->fn->code[frame->pc];
   frame->pc += 1;
 
   return R_SUCCESS;
@@ -2946,11 +2915,11 @@ RetVal readInstruction(ExecFrame *frame, uint8_t *ptr, Error *error) {
 RetVal readIndex(ExecFrame *frame, uint16_t *ptr, Error *error) {
   RetVal ret;
 
-  if (frame->pc + 1 >= frame->code.codeLength) {
+  if (frame->pc + 1 >= frame->fn->codeLength) {
     throwRuntimeError(error, "cannot read next instruction, no instructions left");
   }
 
-  uint8_t *code = frame->code.code;
+  uint8_t *code = frame->fn->code;
   uint16_t pc = frame->pc;
   *ptr = (code[pc] << 8) | code[pc + 1];
   frame->pc += 2;
@@ -2964,7 +2933,7 @@ RetVal readIndex(ExecFrame *frame, uint16_t *ptr, Error *error) {
 RetVal setPc(ExecFrame *frame, uint16_t newPc, Error *error) {
   RetVal ret;
 
-  if (newPc >= frame->code.codeLength) {
+  if (newPc >= frame->fn->codeLength) {
     throwRuntimeError(error, "no such instruction: %u", newPc);
   }
 
@@ -2979,11 +2948,11 @@ RetVal setPc(ExecFrame *frame, uint16_t newPc, Error *error) {
 RetVal getConst(ExecFrame *frame, uint16_t constantIndex, Value *ptr, Error *error) {
   RetVal ret;
 
-  if (constantIndex >= frame->numConstants) {
+  if (constantIndex >= frame->fn->numConstants) {
     throwRuntimeError(error, "no such constant: %u", constantIndex);
   }
 
-  *ptr = frame->constants[constantIndex];
+  *ptr = frame->fn->constants[constantIndex];
   return R_SUCCESS;
 
   failure:
@@ -2993,7 +2962,7 @@ RetVal getConst(ExecFrame *frame, uint16_t constantIndex, Value *ptr, Error *err
 RetVal getLocal(ExecFrame *frame, uint16_t localIndex, Value *ptr, Error *error) {
   RetVal ret;
 
-  if (localIndex >= frame->numLocals) {
+  if (localIndex >= frame->fn->numLocals) {
     throwRuntimeError(error, "no such local: %u", localIndex);
   }
 
@@ -3007,7 +2976,7 @@ RetVal getLocal(ExecFrame *frame, uint16_t localIndex, Value *ptr, Error *error)
 RetVal setLocal(ExecFrame *frame, uint16_t localIndex, Value value, Error *error) {
   RetVal ret;
 
-  if (localIndex >= frame->numLocals) {
+  if (localIndex >= frame->fn->numLocals) {
     throwRuntimeError(error, "no such local: %u", localIndex);
   }
 
@@ -3118,17 +3087,18 @@ void clearHandler(ExecFrame_t frame) {
 }
 
 bool hasFnName(ExecFrame *frame) {
-  return frame->hasFnName;
+  return frame->fn->hasName;
 }
 
 RetVal getFnName(ExecFrame_t frame, Text *name, Error *error) {
   RetVal ret;
 
-  if (!frame->hasFnName) {
+  if (!frame->fn->hasName) {
     throwRuntimeError(error, "no fn name found");
   }
 
-  *name = frame->fnName;
+  name->value = frame->fn->name;
+  name->length = frame->fn->nameLength;
   return R_SUCCESS;
 
   failure:
@@ -3136,14 +3106,13 @@ RetVal getFnName(ExecFrame_t frame, Text *name, Error *error) {
 }
 
 bool hasSourceTable(ExecFrame *frame) {
-  return frame->code.hasSourceTable;
+  return frame->fn->hasSourceTable;
 }
 
 bool getLineNumber(ExecFrame *frame, uint64_t *lineNumber) {
-  if (frame->code.hasSourceTable) {
-    SourceTable *t = &frame->code.sourceTable;
-    for (uint64_t i=0; i<t->numLineNumbers; i++) {
-      LineNumber *l = &t->lineNumbers[i];
+  if (frame->fn->hasSourceTable) {
+    for (uint64_t i=0; i<frame->fn->numLineNumbers; i++) {
+      LineNumber *l = &frame->fn->lineNumbers[i];
       if (l->startInstructionIndex >= frame->pc) {
         break;
       }
@@ -3156,8 +3125,9 @@ bool getLineNumber(ExecFrame *frame, uint64_t *lineNumber) {
 }
 
 bool getFileName(ExecFrame_t frame, Text *fileName) {
-  if (frame->code.hasSourceTable) {
-    *fileName = frame->code.sourceTable.fileName;
+  if (frame->fn->hasSourceTable) {
+    fileName->value = frame->fn->sourceFileName;
+    fileName->length = frame->fn->sourceFileNameLength;
     return true;
   }
   return false;
@@ -3186,31 +3156,37 @@ RetVal getException(ExecFrame_t frame, VMException *e, Error *error) {
     return ret;
 }
 
-RetVal pushFrame(ExecFrame *frame, FrameParams p, Error *error) {
+RetVal pushFrame(ExecFrame **framePtr, Value newFn, Error *error) {
   RetVal ret;
+
+  Fn *fn = NULL;
+  // TODO: get vm to deref new fn
 
   // clean up on fail
   ExecFrame_t parent = NULL;
 
-  tryMalloc(parent, sizeof(ExecFrame), "ExecFrame");
-  memcpy(parent, frame, sizeof(ExecFrame));
+  ExecFrame *frame = *framePtr;
+  if (frame == NULL) {
+    tryMalloc(frame, sizeof(ExecFrame), "ExecFrame");
+  }
+  else {
+    tryMalloc(parent, sizeof(ExecFrame), "ExecFrame");
+    memcpy(parent, frame, sizeof(ExecFrame));
+  }
 
   ExecFrame child;
   frameInitContents(&child);
 
   child.parent = parent;
-  child.numConstants = p.numConstants;
-  child.constants = p.constants;
-  child.code = p.code;
-  child.numLocals = p.numLocals;
-  child.hasFnName = p.hasFnName;
-  child.fnName = p.fnName;
+  child.fnRef = newFn;
+  child.fn = fn;
 
   tryMalloc(child.opStack, sizeof(OpStack), "OpStack");
-  tryMalloc(child.locals, sizeof(Value) * child.numLocals, "Value array");
-  throws(tryOpStackInitContents(child.opStack, p.opStackSize, error));
+  tryMalloc(child.locals, sizeof(Value) * child.fn->numLocals, "Value array");
+  throws(tryOpStackInitContents(child.opStack, child.fn->maxOperandStackSize, error));
 
   *frame = child;
+  *framePtr = frame;
   return R_SUCCESS;
 
   failure:
@@ -3222,34 +3198,32 @@ RetVal pushFrame(ExecFrame *frame, FrameParams p, Error *error) {
     return ret;
 }
 
-RetVal replaceFrame(ExecFrame_t frame, FrameParams p, Error *error) {
+RetVal replaceFrame(ExecFrame *frame, Value newFn, Error *error) {
   RetVal ret;
 
-  frame->numConstants = p.numConstants;
-  frame->constants = p.constants;
-  frame->code = p.code;
-  frame->hasFnName = p.hasFnName;
-  frame->fnName = p.fnName;
+  Fn *fn = NULL;
+  // TODO: get vm to deref new fn
 
   // resize locals if needed
-  if (p.numLocals > frame->numLocals) {
-    Value *resizedLocals = realloc(frame->locals, p.numLocals * sizeof(Value));
+  if (fn->numLocals > frame->fn->numLocals) {
+    Value *resizedLocals = realloc(frame->locals, fn->numLocals * sizeof(Value));
     if (resizedLocals == NULL) {
       throwMemoryError(error, "realloc Value array");
     }
-    frame->numLocals = p.numLocals;
     frame->locals = resizedLocals;
   }
 
-  if (p.opStackSize > frame->opStack->maxDepth) {
-    Value *resizedStack = realloc(frame->opStack->stack, p.opStackSize * sizeof(Value));
+  if (fn->maxOperandStackSize > frame->opStack->maxDepth) {
+    Value *resizedStack = realloc(frame->opStack->stack, fn->maxOperandStackSize * sizeof(Value));
     if (resizedStack == NULL) {
       throwMemoryError(error, "realloc Value array");
     }
-    frame->opStack->maxDepth = p.opStackSize;
+    frame->opStack->maxDepth = fn->maxOperandStackSize;
     frame->opStack->stack = resizedStack;
   }
 
+  frame->fnRef = newFn;
+  frame->fn = fn;
   frame->result = nil();
   frame->resultAvailable = false;
   frame->pc = 0;
@@ -3272,98 +3246,51 @@ void popFrame(ExecFrame *frame) {
   free(parent);
 }
 
-void topLevelFrameInit(TopLevelFrame *frame) {
-  frame->numConstants = 0;
-  frame->constants = NULL;
-  codeInitContents(&frame->code);
-  frame->numLocals = 0;
-  frame->locals = NULL;
-  opStackInitContents(&frame->opStack);
-}
-
-void topLevelFrameFreeContents(TopLevelFrame *topLevel);
-
-RetVal tryTopLevelFrameLoad(VM *vm, TopLevelFrame *topLevel, CodeUnit *codeUnit, Error *error) {
-  RetVal ret;
-
-  // hydrate all the immediate constant values referenced by the code
-
-  topLevel->numConstants = codeUnit->numConstants;
-  throws(tryHydrateConstants(vm, &topLevel->constants, codeUnit, error));
-
-  // deep-copy the code
-
-  throws(tryCodeDeepCopy(&codeUnit->code, &topLevel->code, error));
-
-  // allocate frame space
-
-  topLevel->numLocals = codeUnit->code.numLocals;
-  tryMalloc(topLevel->locals, sizeof(Value) * topLevel->numLocals, "Value array for locals");
-  throws(tryOpStackInitContents(&topLevel->opStack, codeUnit->code.maxOperandStackSize, error));
-
-  return R_SUCCESS;
-
-  failure:
-  topLevelFrameFreeContents(topLevel);
-  return ret;
-}
-
-void topLevelFrameFreeContents(TopLevelFrame *topLevel) {
-  if (topLevel != NULL) {
-
-    topLevel->numConstants = 0;
-    if (topLevel->constants != NULL) {
-      free(topLevel->constants);
-      topLevel->constants = NULL;
-    }
-
-    codeFreeContents(&topLevel->code);
-
-    topLevel->numLocals = 0;
-    if (topLevel->locals != NULL) {
-      free(topLevel->locals);
-      topLevel->locals = NULL;
-    }
-
-    opStackFreeContents(&topLevel->opStack);
-  }
-}
+/*
+ * The top level frame could just be a regular frame
+ * - that has an extra local, which points to a function
+ * - which happens to be the function created from the root expression and allocated on the heap
+ *
+ * This would remove all special cases in stack stuff, except for how that initial function gets hydrated, allocated, and bound
+ */
 
 RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, VMException *exception, bool *exceptionThrown,  Error *error) {
 
   RetVal ret;
 
-  // clean me up on exit
-  TopLevelFrame topLevel;
-  topLevelFrameInit(&topLevel);
+  bool pushed = false;
 
-  throws(tryTopLevelFrameLoad(vm, &topLevel, codeUnit, error));
+  FnConstant c;
+  constantFnInitContents(&c);
+  c.numConstants = codeUnit->numConstants;
+  c.constants = codeUnit->constants;
+  c.code = codeUnit->code;
 
-  ExecFrame frame;
-  frameInitContents(&frame);
-  frame.numConstants = topLevel.numConstants;
-  frame.constants = topLevel.constants;
-  frame.code = topLevel.code;
-  frame.numLocals = topLevel.numLocals;
-  frame.locals = topLevel.locals;
-  frame.opStack = &topLevel.opStack;
+  Value fnRef = nil();
+  throws(tryFnHydrate(vm, &c, &fnRef, error));
 
-  throws(tryFrameEval(vm, &frame, error));
+  ExecFrame_t frame;
+  throws(pushFrame(&frame, fnRef, error));
+  pushed = true;
 
-  if (frame.exceptionSet) {
+  throws(tryFrameEval(vm, frame, error));
+
+  if (frame->exceptionSet) {
     *exceptionThrown = true;
-    *exception = frame.exception;
+    *exception = frame->exception;
   }
   else {
-    *result = frame.result;
+    *result = frame->result;
   }
 
-  topLevelFrameFreeContents(&topLevel);
+  popFrame(frame);
 
   return R_SUCCESS;
 
   failure:
-    topLevelFrameFreeContents(&topLevel);
+    if (pushed) {
+      popFrame(frame);
+    }
     return ret;
 }
 
