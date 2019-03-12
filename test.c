@@ -751,7 +751,7 @@ START_TEST(repl) {
 
     assertEval(L"(let (a 100) (fn () a))", L"\"<closure>\"");
 
-    assertEval(L"(let (a 100 b (fn () a)) (b))",
+    assertEval(L"(let (a 100 b (fn b () a)) (b))",
                L"100");
 
     assertEval(L"(let (minimum 101"

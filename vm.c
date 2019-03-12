@@ -447,6 +447,8 @@ Value nil() {
 
 /*
  * NEW alloc/gc impl
+ *
+ * super useful: http://www.cs.cornell.edu/courses/cs312/2003fa/lectures/sec24.htm
  */
 
 void GC1FreeContents(GC1 *gc) {
@@ -500,11 +502,12 @@ RetVal tryGC1InitContents(GC1 *gc, uint64_t maxHeapSize, Error *error) {
  *   if heap has space for allocated value, allocate
  *   else fail
  */
+
 RetVal alloc(GC1 *gc, uint64_t length, void **ptr, uint64_t *offset, Error *error) {
   RetVal ret;
 
-  uint64_t heapAvailable = gc->currentHeap - gc->allocPtr;
-  if (heapAvailable + length < gc->heapSize) {
+  uint64_t heapUsed = gc->allocPtr - gc->currentHeap;
+  if (heapUsed + length < gc->heapSize) {
     *ptr = gc->allocPtr;
     gc->allocPtr += length;
   }
@@ -516,8 +519,26 @@ RetVal alloc(GC1 *gc, uint64_t length, void **ptr, uint64_t *offset, Error *erro
 
   return R_SUCCESS;
   failure:
-    return ret;
+  return ret;
 }
+//RetVal alloc(GC1 *gc, uint64_t length, void **ptr, uint64_t *offset, Error *error) {
+//  RetVal ret;
+//
+//  uint64_t heapAvailable = gc->allocPtr - gc->currentHeap;
+//  if (heapAvailable + length < gc->heapSize) {
+//    *ptr = gc->allocPtr;
+//    gc->allocPtr += length;
+//  }
+//  else {
+//    throwRuntimeError(error, "collect() not supported yet");
+//  }
+//
+//  *offset = *ptr - gc->currentHeap;
+//
+//  return R_SUCCESS;
+//  failure:
+//    return ret;
+//}
 
 RetVal deref(GC1 *gc, void **ptr, uint64_t offset, Error *error) {
   RetVal ret;
@@ -533,7 +554,7 @@ RetVal deref(GC1 *gc, void **ptr, uint64_t offset, Error *error) {
   return ret;
 }
 
-RetVal collect(GC1 *gc, Namespaces *namespaces, ExecFrame_t frame, Error *error) {
+RetVal collect(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
   void *scanptr;
@@ -993,24 +1014,6 @@ void fnInitContents(Fn *fn) {
   fn->lineNumbers = NULL;
 }
 
-uint64_t fnLength(FnConstant *fnConst) {
-
-  uint64_t nameLength = 0;
-  if (fnConst->hasName) {
-    nameLength = fnConst->name.length;
-  }
-
-  uint64_t constantsLength = fnConst->numConstants * sizeof(Value);
-  uint64_t codeLength = fnConst->code.codeLength;
-
-  uint64_t lineNumbersLength = 0;
-  if (fnConst->code.hasSourceTable) {
-    lineNumbersLength = fnConst->code.sourceTable.numLineNumbers * sizeof(LineNumber);
-  }
-
-  return sizeof(Fn) + nameLength + constantsLength + codeLength + lineNumbersLength;
-}
-
 RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   RetVal ret;
 
@@ -1019,25 +1022,36 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   unresolvedFnRefsInitContents(&unresolved);
 
   // cleanup on failure
-  Fn *fn;
+  Fn *fn = NULL;
 
-  uint64_t fnLen = fnLength(fnConst);
+  size_t nameSize = (fnConst->name.length + 1) * sizeof(wchar_t);
+  size_t constantsSize = fnConst->numConstants * sizeof(Value);
+  size_t codeSize = fnConst->code.codeLength * sizeof(uint8_t);
+  size_t sourceFileNameSize = (fnConst->code.sourceTable.fileName.length + 1) * sizeof(wchar_t);
+  size_t lineNumbersSize = fnConst->code.sourceTable.numLineNumbers * sizeof(LineNumber);
+
+  size_t fnSize = sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize + lineNumbersSize;
+
   uint64_t offset = 0;
-  throws(alloc(NULL, fnLen, (void*)&fn, &offset, error));
+  throws(alloc(&vm->gc1, fnSize, (void*)&fn, &offset, error));
+
+  value->type = VT_FN;
+  value->value = offset;
 
   fnInitContents(fn);
 
-  void *allocCursor = fn + sizeof(Fn);
+  void *base = fn;
+  fn->name           = base + sizeof(Fn);
+  fn->constants      = base + sizeof(Fn) + nameSize;
+  fn->code           = base + sizeof(Fn) + nameSize + constantsSize;
+  fn->sourceFileName = base + sizeof(Fn) + nameSize + constantsSize + codeSize;
+  fn->lineNumbers    = base + sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize;
 
   fn->hasName = fnConst->hasName;
   if (fn->hasName) {
     fn->nameLength = fnConst->name.length;
-
-    size_t nameSize = sizeof(wchar_t) * fn->nameLength;
-    fn->name = allocCursor;
-    allocCursor += nameSize;
-
     memcpy(fn->name, fnConst->name.value, nameSize);
+    fn->name[fn->nameLength] = L'\0';
   }
 
   fn->numCaptures = fnConst->numCaptures;
@@ -1046,11 +1060,6 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 
   {
     fn->numConstants = fnConst->numConstants;
-
-    size_t constantsSize = sizeof(Value) * fn->numConstants;
-    fn->constants = allocCursor;
-    allocCursor += constantsSize;
-
     throws(_tryHydrateConstants(vm, fn->numConstants, fnConst->constants, fn->constants, &unresolved, error));
 
     for (uint16_t i=0; i<unresolved.usedSpace; i++) {
@@ -1071,40 +1080,19 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 
   {
     fn->codeLength = fnConst->code.codeLength;
-
-    size_t codeSize = sizeof(uint8_t) * fn->codeLength;
-    fn->code = allocCursor;
-    allocCursor += codeSize;
-
     memcpy(fn->code, fnConst->code.code, codeSize);
   }
 
   fn->hasSourceTable = fnConst->code.hasSourceTable;
   if (fn->hasSourceTable) {
 
-    {
       fn->sourceFileNameLength = fnConst->code.sourceTable.fileName.length;
+      memcpy(fn->sourceFileName, fnConst->code.sourceTable.fileName.value, sourceFileNameSize);
+      fn->sourceFileName[fn->sourceFileNameLength] = L'\0';
 
-      size_t fileNameSize = sizeof(wchar_t) * fn->sourceFileNameLength;
-      fn->name = allocCursor;
-      allocCursor += fileNameSize;
-
-      memcpy(fn->sourceFileName, fnConst->code.sourceTable.fileName.value, fileNameSize);
-    }
-
-    {
       fn->numLineNumbers = fnConst->code.sourceTable.numLineNumbers;
-
-      size_t lineNumbersSize = sizeof(LineNumber) * fn->numLineNumbers;
-      fn->lineNumbers = allocCursor;
-      allocCursor += lineNumbersSize;
-
       memcpy(fn->lineNumbers, fnConst->code.sourceTable.lineNumbers, lineNumbersSize);
-    }
   }
-
-  value->type = VT_FN;
-  value->value = offset;
 
   unresolvedFnRefsFreeContents(&unresolved);
 
@@ -3242,8 +3230,10 @@ void popFrame(ExecFrame *frame) {
   opStackFreeContents(child->opStack);
   free(child->locals);
 
-  *frame = *parent;
-  free(parent);
+  if (parent != NULL) {
+    *frame = *parent;
+    free(parent);
+  }
 }
 
 /*
@@ -3252,6 +3242,7 @@ void popFrame(ExecFrame *frame) {
  * - which happens to be the function created from the root expression and allocated on the heap
  *
  * This would remove all special cases in stack stuff, except for how that initial function gets hydrated, allocated, and bound
+ *
  */
 
 RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, VMException *exception, bool *exceptionThrown,  Error *error) {
