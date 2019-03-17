@@ -321,10 +321,6 @@ typedef struct Cons {
 
 typedef struct GC {
 
-  uint64_t allocatedFnSpace;
-  uint64_t usedFnSpace;
-  Fn *fns;
-
   uint64_t allocatedClosureSpace;
   uint64_t usedClosureSpace;
   Closure *closures;
