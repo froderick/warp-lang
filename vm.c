@@ -321,10 +321,6 @@ typedef struct Cons {
 
 typedef struct GC {
 
-  uint64_t allocatedSymbolSpace;
-  uint64_t usedSymbolSpace;
-  Symbol *symbols;
-
   uint64_t allocatedKeywordSpace;
   uint64_t usedKeywordSpace;
   Keyword *keywords;
@@ -560,10 +556,6 @@ RetVal collect(VM *vm, ExecFrame_t frame, Error *error) {
 
 void GCInit(GC *gc) {
 
-  gc->allocatedSymbolSpace = 0;
-  gc->usedSymbolSpace = 0;
-  gc->symbols = NULL;
-
   gc->allocatedKeywordSpace = 0;
   gc->usedKeywordSpace = 0;
   gc->keywords = NULL;
@@ -579,14 +571,6 @@ void _consFreeContents(Cons *c);
 
 void GCFreeContents(GC *gc) {
   if (gc != NULL) {
-
-    for (uint64_t i=0; i<gc->usedSymbolSpace; i++) {
-      _symbolFreeContents(&gc->symbols[i]);
-    }
-    free(gc->symbols);
-    gc->symbols = NULL;
-    gc->usedSymbolSpace = 0;
-    gc->allocatedSymbolSpace = 0;
 
     for (uint64_t i=0; i<gc->usedKeywordSpace; i++) {
       _keywordFreeContents(&gc->keywords[i]);
@@ -610,64 +594,6 @@ void closureInitContents(Closure *cl) {
   cl->fn = nil();
   cl->numCaptures = 0;
   cl->captures = NULL;
-}
-
-RetVal tryAllocateSymbol(GC *gc, Symbol sym, Value *value, Error *error) {
-  RetVal ret;
-
-  if (gc->symbols == NULL) {
-    uint16_t len = 16;
-    tryMalloc(gc->symbols, len * sizeof(Symbol), "Symbol array");
-    gc->allocatedSymbolSpace = len;
-  }
-  else if (gc->usedSymbolSpace == gc->allocatedSymbolSpace) {
-    uint64_t newAllocatedLength = gc->allocatedSymbolSpace * 2;
-
-    Symbol* resizedSymbols = realloc(gc->symbols, newAllocatedLength * sizeof(Symbol));
-    if (resizedSymbols == NULL) {
-      ret = memoryError(error, "realloc Symbol array");
-      goto failure;
-    }
-
-    gc->allocatedSymbolSpace = newAllocatedLength;
-    gc->symbols = resizedSymbols;
-  }
-
-  uint64_t index = gc->usedSymbolSpace;
-  gc->symbols[index] = sym;
-  gc->usedSymbolSpace = index + 1;
-
-  value->type = VT_SYMBOL;
-  value->value = index;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryDerefSymbol(GC *gc, Value value, Symbol *sym, Error *error) {
-  RetVal ret;
-
-  if (gc->usedSymbolSpace <= value.value) {
-    throwInternalError(error, "sym reference points to sym that does not exist");
-  }
-
-  *sym = gc->symbols[value.value];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-void _symbolFreeContents(Symbol *s) {
-  if (s != NULL) {
-    if (s ->value != NULL) {
-      free(s->value);
-      s->value = NULL;
-    }
-    s->length = 0;
-  }
 }
 
 RetVal tryAllocateKeyword(GC *gc, Keyword kw, Value *value, Error *error) {
@@ -1013,13 +939,32 @@ RetVal tryVarRefHydrate(VM *vm, VarRefConstant varRefConst, Value *value, Error 
   return ret;
 }
 
+void symbolInitContents(Symbol *s) {
+  s->length = 0;
+  s->value = NULL;
+}
+
 RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *error) {
   RetVal ret;
 
-  Symbol sym;
-  sym.length = symConst.length;
-  throws(tryCopyText(symConst.value, &sym.value, sym.length, error));
-  throws(tryAllocateSymbol(&vm->gc, sym, value, error));
+  Symbol *sym = NULL;
+
+  size_t textSize = (symConst.length + 1) * sizeof(wchar_t);
+  size_t size = sizeof(String) + textSize;
+
+  uint64_t offset = 0;
+  throws(alloc(&vm->gc1, size, (void*)&sym, &offset, error));
+
+  value->type = VT_SYMBOL;
+  value->value = offset;
+
+  symbolInitContents(sym);
+  sym->length = symConst.length;
+
+  void *base = sym;
+  sym->value = base + sizeof(Symbol);
+  memcpy(sym->value, symConst.value, sym->length * sizeof(wchar_t));
+  sym->value[sym->length] = L'\0';
 
   return R_SUCCESS;
 
@@ -1232,12 +1177,13 @@ RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
       break;
     }
     case VT_SYMBOL: {
-      Symbol sym;
-      throws(tryDerefSymbol(&vm->gc, result, &sym, error));
+
+      Symbol *sym = NULL;
+      throws(deref(&vm->gc1, (void*)&sym, result.value, error));
 
       expr->type = N_SYMBOL;
-      expr->symbol.length = sym.length;
-      throws(tryCopyText(sym.value, &expr->symbol.value, expr->string.length, error));
+      expr->symbol.length = sym->length;
+      throws(tryCopyText(sym->value, &expr->symbol.value, expr->string.length, error));
       break;
     }
     case VT_KEYWORD: {
