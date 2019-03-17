@@ -321,10 +321,6 @@ typedef struct Cons {
 
 typedef struct GC {
 
-  uint64_t allocatedKeywordSpace;
-  uint64_t usedKeywordSpace;
-  Keyword *keywords;
-
   uint64_t allocatedConsSpace;
   uint64_t usedConsSpace;
   Cons *conses;
@@ -556,29 +552,15 @@ RetVal collect(VM *vm, ExecFrame_t frame, Error *error) {
 
 void GCInit(GC *gc) {
 
-  gc->allocatedKeywordSpace = 0;
-  gc->usedKeywordSpace = 0;
-  gc->keywords = NULL;
-
   gc->allocatedConsSpace = 0;
   gc->usedConsSpace = 0;
   gc->conses = NULL;
 }
 
-void _symbolFreeContents(Symbol *s);
-void _keywordFreeContents(Keyword *k);
 void _consFreeContents(Cons *c);
 
 void GCFreeContents(GC *gc) {
   if (gc != NULL) {
-
-    for (uint64_t i=0; i<gc->usedKeywordSpace; i++) {
-      _keywordFreeContents(&gc->keywords[i]);
-    }
-    free(gc->keywords);
-    gc->keywords = NULL;
-    gc->usedKeywordSpace = 0;
-    gc->allocatedKeywordSpace = 0;
 
     for (uint64_t i=0; i<gc->usedConsSpace; i++) {
       _consFreeContents(&gc->conses[i]);
@@ -594,64 +576,6 @@ void closureInitContents(Closure *cl) {
   cl->fn = nil();
   cl->numCaptures = 0;
   cl->captures = NULL;
-}
-
-RetVal tryAllocateKeyword(GC *gc, Keyword kw, Value *value, Error *error) {
-  RetVal ret;
-
-  if (gc->keywords == NULL) {
-    uint16_t len = 16;
-    tryMalloc(gc->keywords, len * sizeof(Keyword), "Keyword array");
-    gc->allocatedKeywordSpace = len;
-  }
-  else if (gc->usedKeywordSpace == gc->allocatedKeywordSpace) {
-    uint64_t newAllocatedLength = gc->allocatedKeywordSpace * 2;
-
-    Keyword* resizedKeywords = realloc(gc->keywords, newAllocatedLength * sizeof(Keyword));
-    if (resizedKeywords == NULL) {
-      ret = memoryError(error, "realloc Keyword array");
-      goto failure;
-    }
-
-    gc->allocatedKeywordSpace = newAllocatedLength;
-    gc->keywords = resizedKeywords;
-  }
-
-  uint64_t index = gc->usedKeywordSpace;
-  gc->keywords[index] = kw;
-  gc->usedKeywordSpace = index + 1;
-
-  value->type = VT_KEYWORD;
-  value->value = index;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryDerefKeyword(GC *gc, Value value, Keyword *kw, Error *error) {
-  RetVal ret;
-
-  if (gc->usedKeywordSpace <= value.value) {
-    throwInternalError(error, "kw reference points to kw that does not exist");
-  }
-
-  *kw = gc->keywords[value.value];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-void _keywordFreeContents(Keyword *k) {
-  if (k != NULL) {
-    if (k ->value != NULL) {
-      free(k->value);
-      k->value = NULL;
-    }
-    k->length = 0;
-  }
 }
 
 RetVal tryAllocateCons(GC *gc, Cons cons, Value *value, Error *error) {
@@ -950,7 +874,7 @@ RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *er
   Symbol *sym = NULL;
 
   size_t textSize = (symConst.length + 1) * sizeof(wchar_t);
-  size_t size = sizeof(String) + textSize;
+  size_t size = sizeof(Symbol) + textSize;
 
   uint64_t offset = 0;
   throws(alloc(&vm->gc1, size, (void*)&sym, &offset, error));
@@ -972,13 +896,32 @@ RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *er
   return ret;
 }
 
+void keywordInitContents(Keyword *k) {
+  k->length = 0;
+  k->value = NULL;
+}
+
 RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *error) {
   RetVal ret;
 
-  Keyword kw;
-  kw.length = kwConst.length;
-  throws(tryCopyText(kwConst.value, &kw.value, kw.length, error));
-  throws(tryAllocateKeyword(&vm->gc, kw, value, error));
+  Keyword *kw = NULL;
+
+  size_t textSize = (kwConst.length + 1) * sizeof(wchar_t);
+  size_t size = sizeof(Keyword) + textSize;
+
+  uint64_t offset = 0;
+  throws(alloc(&vm->gc1, size, (void*)&kw, &offset, error));
+
+  value->type = VT_KEYWORD;
+  value->value = offset;
+
+  keywordInitContents(kw);
+  kw->length = kwConst.length;
+
+  void *base = kw;
+  kw->value = base + sizeof(Keyword);
+  memcpy(kw->value, kwConst.value, kw->length * sizeof(wchar_t));
+  kw->value[kw->length] = L'\0';
 
   return R_SUCCESS;
 
@@ -1187,12 +1130,13 @@ RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
       break;
     }
     case VT_KEYWORD: {
-      Keyword kw;
-      throws(tryDerefKeyword(&vm->gc, result, &kw, error));
+
+      Keyword *kw = NULL;
+      throws(deref(&vm->gc1, (void*)&kw, result.value, error));
 
       expr->type = N_KEYWORD;
-      expr->keyword.length = kw.length;
-      throws(tryCopyText(kw.value, &expr->keyword.value, expr->string.length, error));
+      expr->keyword.length = kw->length;
+      throws(tryCopyText(kw->value, &expr->keyword.value, expr->string.length, error));
       break;
     }
     case VT_LIST: {
