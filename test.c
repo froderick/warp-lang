@@ -662,14 +662,19 @@ START_TEST(vmBasic) {
   }
 END_TEST
 
-#define assertEval(inputText, expectedOutputText) {\
+#define assertEval(inputText, expectedOutputText) { \
   Error error; \
   wchar_t *result; \
   errorInitContents(&error); \
   result = NULL; \
   ck_assert_int_eq(tryReplEval(inputText, &result, &error), R_SUCCESS); \
-  if (wcscmp(expectedOutputText, result) != 0) { \
-    ck_abort_msg("got '%ls', expected '%ls'", result, expectedOutputText); \
+  if (result != NULL) { \
+    if (wcscmp(expectedOutputText, result) != 0) { \
+      ck_abort_msg("got '%ls', expected '%ls'", result, expectedOutputText); \
+    } \
+  } \
+  else { \
+    ck_abort_msg("exception thrown"); \
   } \
 }
 
