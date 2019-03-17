@@ -1668,8 +1668,8 @@ bool hasException(ExecFrame_t frame);
 void setException(ExecFrame_t frame, VMException e);
 RetVal getException(ExecFrame_t frame, VMException *e, Error *error);
 
-RetVal pushFrame(ExecFrame_t *frame, Value newFn, Error *error);
-RetVal replaceFrame(ExecFrame_t frame, Value newFn, Error *error);
+RetVal pushFrame(VM *vm, ExecFrame_t *frame, Value newFn, Error *error);
+RetVal replaceFrame(VM *vm, ExecFrame_t frame, Value newFn, Error *error);
 void popFrame(ExecFrame_t frame);
 
 /*
@@ -1752,6 +1752,10 @@ RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *e
   RetVal ret;
 
   throws(popOperand(frame, &invocable->fnRef, error));
+  Value pop = nil();
+  throws(popOperand(frame, &pop, error));
+
+  invocable->fnRef = pop;
 
   switch (invocable->fnRef.type) {
     case VT_FN: {
@@ -1785,7 +1789,7 @@ RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *e
 //*   - sees var-arg flag on invocable
 //*   - pops all static arguments into local slot
 //*   - pops number indicating number of extra arguments
-//      TODO: do we have to start *aways* passing the number of arguments?
+//*   - we *aways* pass the number of arguments
 //*   - pops number of extra arguments into a list, sets as final argument in local slot
 
 RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, Invocable invocable, Error *error) {
@@ -1857,16 +1861,8 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
     Value arg;
     throws(popOperand(parent, &arg, error));
 
-//    if (wcscmp(invocable.fn.name.value, L"reverse") == 0
-//        || wcscmp(invocable.fn.name.value, L"concat-two") == 0
-//        || wcscmp(invocable.fn.name.value, L"concat") == 0
-//        ) {
-//      throws(tryVMPrn(vm, arg, error));
-//    }
-
     uint16_t idx = invocable.fn->numArgs - (1 + i);
     throws(setLocal(child, idx, arg, error));
-//    child->locals[idx] = arg;
   }
 
   if (invocable.fn->numCaptures > 0) {
@@ -1881,7 +1877,6 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
     uint16_t nextLocalIdx = invocable.fn->numArgs;
     for (uint16_t i=0; i<invocable.fn->numCaptures; i++) {
       throws(setLocal(child, nextLocalIdx, invocable.closure.captures[i], error));
-//      child->locals[nextLocalIdx] = invocable.closure.captures[i];
       nextLocalIdx = nextLocalIdx + 1;
     }
   }
@@ -1902,7 +1897,7 @@ RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
   Invocable invocable;
   throws(tryPopInvocable(vm, frame, &invocable, error));
 
-  throws(pushFrame(&frame, invocable.fnRef, error));
+  throws(pushFrame(vm, &frame, invocable.fnRef, error));
   pushed = true;
 
   ExecFrame_t parent;
@@ -1937,7 +1932,7 @@ RetVal tryInvokeDynTailEval(VM *vm, ExecFrame_t frame, Error *error) {
   Invocable invocable;
   throws(tryPopInvocable(vm, frame, &invocable, error));
 
-  throws(replaceFrame(frame, invocable.fnRef, error));
+  throws(replaceFrame(vm, frame, invocable.fnRef, error));
   throws(tryInvokePopulateLocals(vm, frame, frame, invocable, error));
 
   return R_SUCCESS;
@@ -3144,11 +3139,11 @@ RetVal getException(ExecFrame_t frame, VMException *e, Error *error) {
     return ret;
 }
 
-RetVal pushFrame(ExecFrame **framePtr, Value newFn, Error *error) {
+RetVal pushFrame(VM *vm, ExecFrame **framePtr, Value newFn, Error *error) {
   RetVal ret;
 
   Fn *fn = NULL;
-  // TODO: get vm to deref new fn
+  throws(deref(&vm->gc1, (void*)&fn, newFn.value, error));
 
   // clean up on fail
   ExecFrame_t parent = NULL;
@@ -3186,11 +3181,11 @@ RetVal pushFrame(ExecFrame **framePtr, Value newFn, Error *error) {
     return ret;
 }
 
-RetVal replaceFrame(ExecFrame *frame, Value newFn, Error *error) {
+RetVal replaceFrame(VM *vm, ExecFrame *frame, Value newFn, Error *error) {
   RetVal ret;
 
   Fn *fn = NULL;
-  // TODO: get vm to deref new fn
+  throws(deref(&vm->gc1, (void*)&fn, newFn.value, error));
 
   // resize locals if needed
   if (fn->numLocals > frame->fn->numLocals) {
@@ -3261,7 +3256,7 @@ RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, VMException *except
   throws(tryFnHydrate(vm, &c, &fnRef, error));
 
   ExecFrame_t frame;
-  throws(pushFrame(&frame, fnRef, error));
+  throws(pushFrame(vm, &frame, fnRef, error));
   pushed = true;
 
   throws(tryFrameEval(vm, frame, error));
