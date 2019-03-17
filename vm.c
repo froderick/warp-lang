@@ -321,10 +321,6 @@ typedef struct Cons {
 
 typedef struct GC {
 
-  uint64_t allocatedStringSpace;
-  uint64_t usedStringSpace;
-  String *strings;
-
   uint64_t allocatedSymbolSpace;
   uint64_t usedSymbolSpace;
   Symbol *symbols;
@@ -564,10 +560,6 @@ RetVal collect(VM *vm, ExecFrame_t frame, Error *error) {
 
 void GCInit(GC *gc) {
 
-  gc->allocatedStringSpace = 0;
-  gc->usedStringSpace = 0;
-  gc->strings = NULL;
-
   gc->allocatedSymbolSpace = 0;
   gc->usedSymbolSpace = 0;
   gc->symbols = NULL;
@@ -581,21 +573,12 @@ void GCInit(GC *gc) {
   gc->conses = NULL;
 }
 
-void _stringFreeContents(String *str);
 void _symbolFreeContents(Symbol *s);
 void _keywordFreeContents(Keyword *k);
 void _consFreeContents(Cons *c);
 
 void GCFreeContents(GC *gc) {
   if (gc != NULL) {
-
-    for (uint64_t i=0; i<gc->usedStringSpace; i++) {
-      _stringFreeContents(&gc->strings[i]);
-    }
-    free(gc->strings);
-    gc->strings = NULL;
-    gc->usedStringSpace = 0;
-    gc->allocatedStringSpace = 0;
 
     for (uint64_t i=0; i<gc->usedSymbolSpace; i++) {
       _symbolFreeContents(&gc->symbols[i]);
@@ -627,64 +610,6 @@ void closureInitContents(Closure *cl) {
   cl->fn = nil();
   cl->numCaptures = 0;
   cl->captures = NULL;
-}
-
-RetVal tryAllocateString(GC *gc, String str, Value *value, Error *error) {
-  RetVal ret;
-
-  if (gc->strings == NULL) {
-    uint16_t len = 16;
-    tryMalloc(gc->strings, len * sizeof(String), "String array");
-    gc->allocatedStringSpace = len;
-  }
-  else if (gc->usedStringSpace == gc->allocatedStringSpace) {
-    uint64_t newAllocatedLength = gc->allocatedStringSpace * 2;
-
-    String* resizedStrings = realloc(gc->strings, newAllocatedLength * sizeof(String));
-    if (resizedStrings == NULL) {
-      ret = memoryError(error, "realloc String array");
-      goto failure;
-    }
-
-    gc->allocatedStringSpace = newAllocatedLength;
-    gc->strings = resizedStrings;
-  }
-
-  uint64_t index = gc->usedStringSpace;
-  gc->strings[index] = str;
-  gc->usedStringSpace = index + 1;
-
-  value->type = VT_STR;
-  value->value = index;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryDerefString(GC *gc, Value value, String *str, Error *error) {
-  RetVal ret;
-
-  if (gc->usedStringSpace <= value.value) {
-    throwInternalError(error, "str reference points to str that does not exist");
-  }
-
-  *str = gc->strings[value.value];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-void _stringFreeContents(String *str) {
-  if (str != NULL) {
-    if (str->value != NULL) {
-      free(str->value);
-      str->value = NULL;
-    }
-    str->length = 0;
-  }
 }
 
 RetVal tryAllocateSymbol(GC *gc, Symbol sym, Value *value, Error *error) {
@@ -1035,14 +960,43 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
     return ret;
 }
 
+void stringInitContents(String *s) {
+  s->length = 0;
+  s->value = NULL;
+}
+
+RetVal _tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value, Error *error) {
+  RetVal ret;
+
+  String *str = NULL;
+
+  size_t textSize = (length + 1) * sizeof(wchar_t);
+  size_t strSize = sizeof(String) + textSize;
+
+  uint64_t offset = 0;
+  throws(alloc(&vm->gc1, strSize, (void*)&str, &offset, error));
+
+  value->type = VT_STR;
+  value->value = offset;
+
+  stringInitContents(str);
+  str->length = length;
+
+  void *base = str;
+  str->value = base + sizeof(String);
+  memcpy(str->value, text, length * sizeof(wchar_t));
+  str->value[length] = L'\0';
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 RetVal tryStringHydrate(VM *vm, StringConstant strConst, Value *value, Error *error) {
   RetVal ret;
 
-  String str;
-  str.length = strConst.length;
-  throws(tryCopyText(strConst.value, &str.value, str.length, error));
-  throws(tryAllocateString(&vm->gc, str, value, error));
-
+  throws(_tryStringHydrate(vm, strConst.value, strConst.length, value, error));
   return R_SUCCESS;
 
   failure:
@@ -1052,11 +1006,7 @@ RetVal tryStringHydrate(VM *vm, StringConstant strConst, Value *value, Error *er
 RetVal tryVarRefHydrate(VM *vm, VarRefConstant varRefConst, Value *value, Error *error) {
   RetVal ret;
 
-  String str;
-  str.length = varRefConst.nameLength;
-  throws(tryCopyText(varRefConst.name, &str.value, str.length, error));
-  throws(tryAllocateString(&vm->gc, str, value, error));
-
+  throws(_tryStringHydrate(vm, varRefConst.name, varRefConst.nameLength, value, error));
   return R_SUCCESS;
 
   failure:
@@ -1272,12 +1222,13 @@ RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
       break;
     }
     case VT_STR: {
-      String str;
-      throws(tryDerefString(&vm->gc, result, &str, error));
+
+      String *str = NULL;
+      throws(deref(&vm->gc1, (void*)&str, result.value, error));
 
       expr->type = N_STRING;
-      expr->string.length = str.length;
-      throws(tryCopyText(str.value, &expr->string.value, expr->string.length, error));
+      expr->string.length = str->length;
+      throws(tryCopyText(str->value, &expr->string.value, expr->string.length, error));
       break;
     }
     case VT_SYMBOL: {
@@ -2061,9 +2012,10 @@ RetVal tryDefVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(readIndex(frame, &constantIndex, error));
   throws(getConst(frame, constantIndex, &varName, error));
 
-  String str;
-  throws(tryDerefString(&vm->gc, varName, &str, error));
-  throws(tryDefVar(&vm->namespaces, str.value, str.length, value, error));
+  String *str = NULL;
+  throws(deref(&vm->gc1, (void*)&str, varName.value, error));
+
+  throws(tryDefVar(&vm->namespaces, str->value, str->length, value, error));
 
   // define always returns nil
   Value result;
@@ -2087,13 +2039,13 @@ RetVal tryLoadVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(readIndex(frame, &constantIndex, error));
   throws(getConst(frame, constantIndex, &varName, error));
 
-  String str;
-  throws(tryDerefString(&vm->gc, varName, &str, error));
+  String *str = NULL;
+  throws(deref(&vm->gc1, (void*)&str, varName.value, error));
 
   Var *var;
-  if (!resolveVar(&vm->namespaces, str.value, str.length, &var)) {
+  if (!resolveVar(&vm->namespaces, str->value, str->length, &var)) {
     // fail: not all vars exist
-    throwRuntimeError(error, "no such var found: '%ls'", str.value);
+    throwRuntimeError(error, "no such var found: '%ls'", str->value);
   }
   else {
     throws(pushOperand(frame, var->value, error));
@@ -2139,7 +2091,7 @@ RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
   closure->numCaptures = fn->numCaptures;
 
   void *base = closure;
-  closure->captures = base + sizeof(Fn);
+  closure->captures = base + sizeof(Closure);
 
   // pop captures in reverse order, same as arguments
   for (uint16_t i=0; i<closure->numCaptures; i++) {
@@ -2305,19 +2257,19 @@ RetVal trySetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
     throwRuntimeError(error, "only symbols can identify vars: %u", strValue.type);
   }
 
-  String str;
-  throws(tryDerefString(&vm->gc, strValue, &str, error));
+  String *str = NULL;
+  throws(deref(&vm->gc1, (void*)&str, strValue.value, error));
 
   Var *var;
-  if (!resolveVar(&vm->namespaces, str.value, str.length, &var)) {
+  if (!resolveVar(&vm->namespaces, str->value, str->length, &var)) {
     // fail: not all vars exist
-    throwRuntimeError(error, "no such var exists: %ls", str.value);
+    throwRuntimeError(error, "no such var exists: %ls", str->value);
   }
 
   if (!var->isMacro) {
     if (var->value.type != VT_FN) {
       // fail: only vars referring to functions can be macros
-      throwRuntimeError(error, "only vars referring to functions can be macros: %ls, %u", str.value, var->value.type);
+      throwRuntimeError(error, "only vars referring to functions can be macros: %ls, %u", str->value, var->value.type);
     }
     var->isMacro = true;
   }
@@ -2342,15 +2294,15 @@ RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
     throwRuntimeError(error, "only symbols can identify vars: %u", strValue.type);
   }
 
-  String str;
-  throws(tryDerefString(&vm->gc, strValue, &str, error));
+  String *str = NULL;
+  throws(deref(&vm->gc1, (void*)&str, strValue.value, error));
 
   Value result;
   result.type = VT_BOOL;
   result.value = false;
 
   Var *var;
-  if (resolveVar(&vm->namespaces, str.value, str.length, &var)) {
+  if (resolveVar(&vm->namespaces, str->value, str->length, &var)) {
     result.value = var->isMacro;
   }
 
