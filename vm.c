@@ -321,10 +321,6 @@ typedef struct Cons {
 
 typedef struct GC {
 
-  uint64_t allocatedClosureSpace;
-  uint64_t usedClosureSpace;
-  Closure *closures;
-
   uint64_t allocatedStringSpace;
   uint64_t usedStringSpace;
   String *strings;
@@ -568,10 +564,6 @@ RetVal collect(VM *vm, ExecFrame_t frame, Error *error) {
 
 void GCInit(GC *gc) {
 
-  gc->usedClosureSpace = 0;
-  gc->allocatedClosureSpace = 0;
-  gc->closures = NULL;
-
   gc->allocatedStringSpace = 0;
   gc->usedStringSpace = 0;
   gc->strings = NULL;
@@ -596,11 +588,6 @@ void _consFreeContents(Cons *c);
 
 void GCFreeContents(GC *gc) {
   if (gc != NULL) {
-
-    free(gc->closures);
-    gc->closures = NULL;
-    gc->usedClosureSpace = 0;
-    gc->allocatedClosureSpace = 0;
 
     for (uint64_t i=0; i<gc->usedStringSpace; i++) {
       _stringFreeContents(&gc->strings[i]);
@@ -636,61 +623,10 @@ void GCFreeContents(GC *gc) {
   }
 }
 
-RetVal tryAllocateClosure(GC *gc, Closure closure, Value *value, Error *error) {
-  RetVal ret;
-
-  if (gc->closures == NULL) {
-    uint16_t len = 16;
-    tryMalloc(gc->closures, len * sizeof(Closure), "Closure array");
-    gc->allocatedClosureSpace = len;
-  }
-  else if (gc->usedClosureSpace == gc->allocatedClosureSpace) {
-    uint64_t newAllocatedLength = gc->allocatedClosureSpace * 2;
-
-    Closure* resizedClosures = realloc(gc->closures, newAllocatedLength * sizeof(Closure));
-    if (resizedClosures == NULL) {
-      ret = memoryError(error, "realloc Closure array");
-      goto failure;
-    }
-
-    gc->allocatedClosureSpace = newAllocatedLength;
-    gc->closures = resizedClosures;
-  }
-
-  uint64_t index = gc->usedClosureSpace;
-  gc->closures[index] = closure;
-  gc->usedClosureSpace = index + 1;
-
-  value->type = VT_CLOSURE;
-  value->value = index;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-void _closureFreeContents(Closure *closure) {
-  if (closure != NULL) {
-    if (closure->captures != NULL) {
-      free(closure->captures);
-      closure->captures = NULL;
-    }
-  }
-}
-
-RetVal tryDerefClosure(GC *gc, Value value, Closure *closure, Error *error) {
-  RetVal ret;
-
-  if (gc->usedClosureSpace <= value.value) {
-    throwInternalError(error, "closure reference points to closure that does not exist");
-  }
-
-  *closure = gc->closures[value.value];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+void closureInitContents(Closure *cl) {
+  cl->fn = nil();
+  cl->numCaptures = 0;
+  cl->captures = NULL;
 }
 
 RetVal tryAllocateString(GC *gc, String str, Value *value, Error *error) {
@@ -1741,11 +1677,20 @@ typedef struct Invocable {
   Value fnRef;
   Fn *fn;
   bool hasClosure;
-  Closure closure;
+  Closure *closure;
 } Invocable;
+
+void invocableInitContents(Invocable *i) {
+  i->fnRef = nil();
+  i->fn = NULL;
+  i->hasClosure = false;
+  i->closure = NULL;
+}
 
 RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *error) {
   RetVal ret;
+
+  invocableInitContents(invocable);
 
   Value pop = nil();
   throws(popOperand(frame, &pop, error));
@@ -1758,16 +1703,16 @@ RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *e
       throws(deref(&vm->gc1, (void*)&invocable->fn, invocable->fnRef.value, error));
 
       invocable->hasClosure = false;
-      invocable->closure.fn = nil();
-      invocable->closure.numCaptures = 0;
-      invocable->closure.captures = NULL;
+      invocable->closure = NULL;
       break;
     }
     case VT_CLOSURE: {
-      throws(tryDerefClosure(&vm->gc, invocable->fnRef, &invocable->closure, error));
+
+      throws(deref(&vm->gc1, (void*)&invocable->closure, invocable->fnRef.value, error));
+
       invocable->hasClosure = true;
-      invocable->fnRef = invocable->closure.fn;
-      throws(deref(&vm->gc1, (void*)&invocable->fn, invocable->closure.fn.value, error));
+      invocable->fnRef = invocable->closure->fn;
+      throws(deref(&vm->gc1, (void*)&invocable->fn, invocable->closure->fn.value, error));
       break;
     }
     default:
@@ -1866,13 +1811,13 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
     if (!invocable.hasClosure) {
       throwRuntimeError(error, "cannot invoke this fn without a closure, it captures variables: %u", invocable.fn->numCaptures);
     }
-    if (invocable.closure.numCaptures < invocable.fn->numCaptures) {
-      throwRuntimeError(error, "closure does not have enough captured variables: %u", invocable.closure.numCaptures);
+    if (invocable.closure->numCaptures < invocable.fn->numCaptures) {
+      throwRuntimeError(error, "closure does not have enough captured variables: %u", invocable.closure->numCaptures);
     }
 
     uint16_t nextLocalIdx = invocable.fn->numArgs;
     for (uint16_t i=0; i<invocable.fn->numCaptures; i++) {
-      throws(setLocal(child, nextLocalIdx, invocable.closure.captures[i], error));
+      throws(setLocal(child, nextLocalIdx, invocable.closure->captures[i], error));
       nextLocalIdx = nextLocalIdx + 1;
     }
   }
@@ -2177,27 +2122,38 @@ RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
   Fn *fn;
   throws(deref(&vm->gc1, (void*)&fn, fnValue.value, error));
 
-  Closure closure;
-  closure.fn = fnValue;
-  closure.numCaptures = fn->numCaptures;
-  tryMalloc(closure.captures, fn->numCaptures * sizeof(Value), "Value array");
+  Closure *closure = NULL;
 
-  // pop captures in reverse order, same as arguments
-  for (uint16_t i=0; i<closure.numCaptures; i++) {
-    Value capture;
-    throws(popOperand(frame, &capture, error));
-    uint16_t idx = fn->numCaptures - (1 + i);
-    closure.captures[idx] = capture;
-  }
+  size_t capturesSize = fn->numCaptures * sizeof(Value);
+  size_t clSize = sizeof(Closure) + capturesSize;
+
+  uint64_t offset = 0;
+  throws(alloc(&vm->gc1, clSize, (void*)&closure, &offset, error));
 
   Value closureValue;
-  throws(tryAllocateClosure(&vm->gc, closure, &closureValue, error));
+  closureValue.type = VT_CLOSURE;
+  closureValue.value = offset;
+
+  closureInitContents(closure);
+  closure->fn = fnValue;
+  closure->numCaptures = fn->numCaptures;
+
+  void *base = closure;
+  closure->captures = base + sizeof(Fn);
+
+  // pop captures in reverse order, same as arguments
+  for (uint16_t i=0; i<closure->numCaptures; i++) {
+    Value capture;
+    throws(popOperand(frame, &capture, error));
+    uint16_t idx = closure->numCaptures - (1 + i);
+    closure->captures[idx] = capture;
+  }
+
   throws(pushOperand(frame, closureValue, error));
 
   return R_SUCCESS;
 
   failure:
-    _closureFreeContents(&closure);
     return ret;
 }
 
