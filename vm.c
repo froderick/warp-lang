@@ -3255,7 +3255,7 @@ RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, VMException *except
   Value fnRef = nil();
   throws(tryFnHydrate(vm, &c, &fnRef, error));
 
-  ExecFrame_t frame;
+  ExecFrame_t frame = NULL;
   throws(pushFrame(vm, &frame, fnRef, error));
   pushed = true;
 
