@@ -1770,6 +1770,7 @@ RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *e
     case VT_CLOSURE: {
       throws(tryDerefClosure(&vm->gc, invocable->fnRef, &invocable->closure, error));
       invocable->hasClosure = true;
+      invocable->fnRef = invocable->closure.fn;
       throws(deref(&vm->gc1, (void*)&invocable->fn, invocable->closure.fn.value, error));
       break;
     }
@@ -3187,11 +3188,13 @@ RetVal replaceFrame(VM *vm, ExecFrame *frame, Value newFn, Error *error) {
   throws(deref(&vm->gc1, (void*)&fn, newFn.value, error));
 
   // resize locals if needed
-  if (fn->numLocals > frame->fn->numLocals) {
-    Value *resizedLocals = realloc(frame->locals, fn->numLocals * sizeof(Value));
+  uint16_t newNumLocals = fn->numLocals + fn->numCaptures;
+  if (newNumLocals > frame->fn->numLocals) {
+    Value *resizedLocals = realloc(frame->locals, newNumLocals * sizeof(Value));
     if (resizedLocals == NULL) {
       throwMemoryError(error, "realloc Value array");
     }
+    frame->fn->numLocals = newNumLocals;
     frame->locals = resizedLocals;
   }
 
