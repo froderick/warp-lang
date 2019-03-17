@@ -1751,7 +1751,6 @@ typedef struct Invocable {
 RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *error) {
   RetVal ret;
 
-  throws(popOperand(frame, &invocable->fnRef, error));
   Value pop = nil();
   throws(popOperand(frame, &pop, error));
 
