@@ -321,14 +321,6 @@ typedef struct Cons {
 
 typedef struct GC {
 
-  uint64_t allocatedConsSpace;
-  uint64_t usedConsSpace;
-  Cons *conses;
-
-} GC;
-
-typedef struct GC1 {
-
   // the total memory allocated
   uint64_t heapMemorySize;
   void *heapMemory;
@@ -342,7 +334,7 @@ typedef struct GC1 {
   void *currentHeap; // the heap to use for allocation
   void *allocPtr;    // the offset within the heap to use for allocation
 
-} GC1;
+} GC;
 
 // namespaces
 
@@ -392,7 +384,6 @@ typedef struct InstTable {
 
 typedef struct VM {
   GC gc;
-  GC1 gc1;
   Namespaces namespaces;
   InstTable instTable;
 } VM;
@@ -431,7 +422,7 @@ Value nil() {
  * super useful: http://www.cs.cornell.edu/courses/cs312/2003fa/lectures/sec24.htm
  */
 
-void GC1FreeContents(GC1 *gc) {
+void GCFreeContents(GC *gc) {
   free(gc->heapMemory);
   gc->heapMemory = NULL;
   gc->heapA = NULL;
@@ -440,7 +431,7 @@ void GC1FreeContents(GC1 *gc) {
   gc->allocPtr = NULL;
 }
 
-void GC1InitContents(GC1 *gc) {
+void GCInitContents(GC *gc) {
   gc->heapMemorySize = 0;
   gc->heapMemory = NULL;
   gc->heapSize = 0;
@@ -450,10 +441,10 @@ void GC1InitContents(GC1 *gc) {
   gc->allocPtr = NULL;
 }
 
-RetVal tryGC1InitContents(GC1 *gc, uint64_t maxHeapSize, Error *error) {
+RetVal tryGCInitContents(GC *gc, uint64_t maxHeapSize, Error *error) {
   RetVal ret;
 
-  GC1InitContents(gc);
+  GCInitContents(gc);
 
   gc->heapSize = maxHeapSize;
   gc->heapMemorySize = gc->heapSize * 2;
@@ -483,7 +474,7 @@ RetVal tryGC1InitContents(GC1 *gc, uint64_t maxHeapSize, Error *error) {
  *   else fail
  */
 
-RetVal alloc(GC1 *gc, uint64_t length, void **ptr, uint64_t *offset, Error *error) {
+RetVal alloc(GC *gc, uint64_t length, void **ptr, uint64_t *offset, Error *error) {
   RetVal ret;
 
   uint64_t heapUsed = gc->allocPtr - gc->currentHeap;
@@ -520,7 +511,7 @@ RetVal alloc(GC1 *gc, uint64_t length, void **ptr, uint64_t *offset, Error *erro
 //    return ret;
 //}
 
-RetVal deref(GC1 *gc, void **ptr, uint64_t offset, Error *error) {
+RetVal deref(GC *gc, void **ptr, uint64_t offset, Error *error) {
   RetVal ret;
 
   if (offset > gc->heapSize) {
@@ -550,85 +541,6 @@ RetVal collect(VM *vm, ExecFrame_t frame, Error *error) {
  * gc/runtime implementation
  */
 
-void GCInit(GC *gc) {
-
-  gc->allocatedConsSpace = 0;
-  gc->usedConsSpace = 0;
-  gc->conses = NULL;
-}
-
-void _consFreeContents(Cons *c);
-
-void GCFreeContents(GC *gc) {
-  if (gc != NULL) {
-
-    for (uint64_t i=0; i<gc->usedConsSpace; i++) {
-      _consFreeContents(&gc->conses[i]);
-    }
-    free(gc->conses);
-    gc->conses = NULL;
-    gc->usedConsSpace = 0;
-    gc->allocatedConsSpace = 0;
-  }
-}
-
-void closureInitContents(Closure *cl) {
-  cl->fn = nil();
-  cl->numCaptures = 0;
-  cl->captures = NULL;
-}
-
-RetVal tryAllocateCons(GC *gc, Cons cons, Value *value, Error *error) {
-  RetVal ret;
-
-  if (gc->conses == NULL) {
-    uint16_t len = 16;
-    tryMalloc(gc->conses, len * sizeof(Cons), "Cons array");
-    gc->allocatedConsSpace = len;
-  }
-  else if (gc->usedConsSpace == gc->allocatedConsSpace) {
-    uint64_t newAllocatedLength = gc->allocatedConsSpace * 2;
-
-    Cons* resizedConses = realloc(gc->conses, newAllocatedLength * sizeof(Cons));
-    if (resizedConses == NULL) {
-      ret = memoryError(error, "realloc Cons array");
-      goto failure;
-    }
-
-    gc->allocatedConsSpace = newAllocatedLength;
-    gc->conses = resizedConses;
-  }
-
-  uint64_t index = gc->usedConsSpace;
-  gc->conses[index] = cons;
-  gc->usedConsSpace = index + 1;
-
-  value->type = VT_LIST;
-  value->value = index;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryDerefCons(GC *gc, Value value, Cons *cons, Error *error) {
-  RetVal ret;
-
-  if (gc->usedConsSpace <= value.value) {
-    throwInternalError(error, "cons reference points to cons that does not exist");
-  }
-
-  *cons = gc->conses[value.value];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-void _consFreeContents(Cons *c) {
-  // nothing to do
-}
 
 /*
  * Loading Constants as Values
@@ -740,7 +652,7 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   size_t fnSize = sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize + lineNumbersSize;
 
   uint64_t offset = 0;
-  throws(alloc(&vm->gc1, fnSize, (void*)&fn, &offset, error));
+  throws(alloc(&vm->gc, fnSize, (void*)&fn, &offset, error));
 
   value->type = VT_FN;
   value->value = offset;
@@ -824,7 +736,7 @@ RetVal _tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value, E
   size_t strSize = sizeof(String) + textSize;
 
   uint64_t offset = 0;
-  throws(alloc(&vm->gc1, strSize, (void*)&str, &offset, error));
+  throws(alloc(&vm->gc, strSize, (void*)&str, &offset, error));
 
   value->type = VT_STR;
   value->value = offset;
@@ -877,7 +789,7 @@ RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *er
   size_t size = sizeof(Symbol) + textSize;
 
   uint64_t offset = 0;
-  throws(alloc(&vm->gc1, size, (void*)&sym, &offset, error));
+  throws(alloc(&vm->gc, size, (void*)&sym, &offset, error));
 
   value->type = VT_SYMBOL;
   value->value = offset;
@@ -910,7 +822,7 @@ RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *e
   size_t size = sizeof(Keyword) + textSize;
 
   uint64_t offset = 0;
-  throws(alloc(&vm->gc1, size, (void*)&kw, &offset, error));
+  throws(alloc(&vm->gc, size, (void*)&kw, &offset, error));
 
   value->type = VT_KEYWORD;
   value->value = offset;
@@ -929,6 +841,37 @@ RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *e
   return ret;
 }
 
+void consInitContents(Cons *c) {
+  c->value = nil();
+  c->next = nil();
+}
+
+RetVal tryAllocateCons(VM *vm, Value value, Value next, Value *ptr, Error *error) {
+  RetVal ret;
+
+  if (next.type != VT_NIL && next.type != VT_LIST) {
+    throwRuntimeError(error, "a Cons next must be nil or a list: %u", next.type);
+  }
+
+  Cons *cons = NULL;
+
+  size_t size = sizeof(Cons);
+
+  uint64_t offset = 0;
+  throws(alloc(&vm->gc, size, (void*)&cons, &offset, error));
+
+  ptr->type = VT_LIST;
+  ptr->value = offset;
+
+  consInitContents(cons);
+  cons->value = value;
+  cons->next = next;
+
+  return R_SUCCESS;
+  failure:
+    return ret;
+}
+
 RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant listConst, Value *value, Error *error) {
   RetVal ret;
 
@@ -941,11 +884,7 @@ RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant list
     uint16_t listConstEnd = listConst.length - 1;
     uint16_t valueIndex = listConst.constants[listConstEnd - i];
 
-    Cons cons;
-    cons.value = alreadyHydratedConstants[valueIndex];
-    cons.next = seq;
-
-    throws(tryAllocateCons(&vm->gc, cons, &seq, error));
+    throws(tryAllocateCons(vm, alreadyHydratedConstants[valueIndex], seq, &seq, error));
   }
 
   *value = seq;
@@ -1112,7 +1051,7 @@ RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
     case VT_STR: {
 
       String *str = NULL;
-      throws(deref(&vm->gc1, (void*)&str, result.value, error));
+      throws(deref(&vm->gc, (void*)&str, result.value, error));
 
       expr->type = N_STRING;
       expr->string.length = str->length;
@@ -1122,7 +1061,7 @@ RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
     case VT_SYMBOL: {
 
       Symbol *sym = NULL;
-      throws(deref(&vm->gc1, (void*)&sym, result.value, error));
+      throws(deref(&vm->gc, (void*)&sym, result.value, error));
 
       expr->type = N_SYMBOL;
       expr->symbol.length = sym->length;
@@ -1132,7 +1071,7 @@ RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
     case VT_KEYWORD: {
 
       Keyword *kw = NULL;
-      throws(deref(&vm->gc1, (void*)&kw, result.value, error));
+      throws(deref(&vm->gc, (void*)&kw, result.value, error));
 
       expr->type = N_KEYWORD;
       expr->keyword.length = kw->length;
@@ -1140,21 +1079,28 @@ RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
       break;
     }
     case VT_LIST: {
-      Cons cons;
-      throws(tryDerefCons(&vm->gc, result, &cons, error));
+
+      Cons *cons;
+      throws(deref(&vm->gc, (void*)&cons, result.value, error));
 
       expr->type = N_LIST;
       listInitContents(&expr->list);
       Expr *elem;
 
       tryMalloc(elem, sizeof(Expr), "Expr");
-      throws(tryVMPrn(vm, cons.value, elem, error));
+      throws(tryVMPrn(vm, cons->value, elem, error));
       throws(tryListAppend(&expr->list, elem, error));
 
-      while (cons.next.type != VT_NIL) {
-        throws(tryDerefCons(&vm->gc, cons.next, &cons, error));
+      while (cons->next.type != VT_NIL) {
+
+        if (cons->next.type != VT_LIST) {
+          throwRuntimeError(error, "this should always be a type of VT_LIST");
+        }
+
+        throws(deref(&vm->gc, (void*)&cons, cons->next.value, error));
+
         tryMalloc(elem, sizeof(Expr), "Expr");
-        throws(tryVMPrn(vm, cons.value, elem, error));
+        throws(tryVMPrn(vm, cons->value, elem, error));
         throws(tryListAppend(&expr->list, elem, error));
       }
 
@@ -1541,7 +1487,7 @@ RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *e
   switch (invocable->fnRef.type) {
     case VT_FN: {
 
-      throws(deref(&vm->gc1, (void*)&invocable->fn, invocable->fnRef.value, error));
+      throws(deref(&vm->gc, (void*)&invocable->fn, invocable->fnRef.value, error));
 
       invocable->hasClosure = false;
       invocable->closure = NULL;
@@ -1549,11 +1495,11 @@ RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *e
     }
     case VT_CLOSURE: {
 
-      throws(deref(&vm->gc1, (void*)&invocable->closure, invocable->fnRef.value, error));
+      throws(deref(&vm->gc, (void*)&invocable->closure, invocable->fnRef.value, error));
 
       invocable->hasClosure = true;
       invocable->fnRef = invocable->closure->fn;
-      throws(deref(&vm->gc1, (void*)&invocable->fn, invocable->closure->fn.value, error));
+      throws(deref(&vm->gc, (void*)&invocable->fn, invocable->closure->fn.value, error));
       break;
     }
     default:
@@ -1601,10 +1547,7 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
       Value arg;
       throws(popOperand(parent, &arg, error));
 
-      Cons cons;
-      cons.value = arg;
-      cons.next = seq;
-      throws(tryAllocateCons(&vm->gc, cons, &seq, error));
+      throws(tryAllocateCons(vm, arg, seq, &seq, error));
     }
 
     throws(pushOperand(parent, seq, error));
@@ -1617,11 +1560,7 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
     throws(popOperand(parent, &arg, error));
 
     Value seq = nil();
-
-    Cons cons;
-    cons.value = arg;
-    cons.next = nil();
-    throws(tryAllocateCons(&vm->gc, cons, &seq, error));
+    throws(tryAllocateCons(vm, arg, seq, &seq, error));
 
     throws(pushOperand(parent, seq, error));
   }
@@ -1903,7 +1842,7 @@ RetVal tryDefVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(getConst(frame, constantIndex, &varName, error));
 
   String *str = NULL;
-  throws(deref(&vm->gc1, (void*)&str, varName.value, error));
+  throws(deref(&vm->gc, (void*)&str, varName.value, error));
 
   throws(tryDefVar(&vm->namespaces, str->value, str->length, value, error));
 
@@ -1930,7 +1869,7 @@ RetVal tryLoadVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(getConst(frame, constantIndex, &varName, error));
 
   String *str = NULL;
-  throws(deref(&vm->gc1, (void*)&str, varName.value, error));
+  throws(deref(&vm->gc, (void*)&str, varName.value, error));
 
   Var *var;
   if (!resolveVar(&vm->namespaces, str->value, str->length, &var)) {
@@ -1945,6 +1884,12 @@ RetVal tryLoadVarEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   failure:
   return ret;
+}
+
+void closureInitContents(Closure *cl) {
+  cl->fn = nil();
+  cl->numCaptures = 0;
+  cl->captures = NULL;
 }
 
 // (8), offset (16) | (captures... -> value)
@@ -1962,7 +1907,7 @@ RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
   }
 
   Fn *fn;
-  throws(deref(&vm->gc1, (void*)&fn, fnValue.value, error));
+  throws(deref(&vm->gc, (void*)&fn, fnValue.value, error));
 
   Closure *closure = NULL;
 
@@ -1970,7 +1915,7 @@ RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
   size_t clSize = sizeof(Closure) + capturesSize;
 
   uint64_t offset = 0;
-  throws(alloc(&vm->gc1, clSize, (void*)&closure, &offset, error));
+  throws(alloc(&vm->gc, clSize, (void*)&closure, &offset, error));
 
   Value closureValue;
   closureValue.type = VT_CLOSURE;
@@ -2054,10 +1999,7 @@ RetVal tryConsEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   Value result;
   if (seq.type == VT_NIL || seq.type == VT_LIST) {
-    Cons cons;
-    cons.value = x;
-    cons.next = seq;
-    throws(tryAllocateCons(&vm->gc, cons, &result, error));
+    throws(tryAllocateCons(vm, x, seq, &result, error));
   }
   else {
     // TODO: we need to print the actual type here, should make a metadata table for value types
@@ -2086,9 +2028,9 @@ RetVal tryFirstEval(VM *vm, ExecFrame_t frame, Error *error) {
     result = nil();
   }
   else if (seq.type == VT_LIST) {
-    Cons cons;
-    throws(tryDerefCons(&vm->gc, seq, &cons, error));
-    result = cons.value;
+    Cons *cons;
+    throws(deref(&vm->gc, (void*)&cons, seq.value, error));
+    result = cons->value;
   }
   else {
     // TODO: we need to print the actual type here, should make a metadata table for value types
@@ -2117,9 +2059,11 @@ RetVal tryRestEval(VM *vm, ExecFrame_t frame, Error *error) {
     result = nil();
   }
   else if (seq.type == VT_LIST) {
-    Cons cons;
-    throws(tryDerefCons(&vm->gc, seq, &cons, error));
-    result = cons.next;
+
+    Cons *cons;
+    throws(deref(&vm->gc, (void*)&cons, seq.value, error));
+
+    result = cons->next;
   }
   else {
     // fail: not all types can be used as a seq
@@ -2148,7 +2092,7 @@ RetVal trySetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   }
 
   String *str = NULL;
-  throws(deref(&vm->gc1, (void*)&str, strValue.value, error));
+  throws(deref(&vm->gc, (void*)&str, strValue.value, error));
 
   Var *var;
   if (!resolveVar(&vm->namespaces, str->value, str->length, &var)) {
@@ -2185,7 +2129,7 @@ RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   }
 
   String *str = NULL;
-  throws(deref(&vm->gc1, (void*)&str, strValue.value, error));
+  throws(deref(&vm->gc, (void*)&str, strValue.value, error));
 
   Value result;
   result.type = VT_BOOL;
@@ -2937,7 +2881,7 @@ RetVal pushFrame(VM *vm, ExecFrame **framePtr, Value newFn, Error *error) {
   RetVal ret;
 
   Fn *fn = NULL;
-  throws(deref(&vm->gc1, (void*)&fn, newFn.value, error));
+  throws(deref(&vm->gc, (void*)&fn, newFn.value, error));
 
   // clean up on fail
   ExecFrame_t parent = NULL;
@@ -2979,7 +2923,7 @@ RetVal replaceFrame(VM *vm, ExecFrame *frame, Value newFn, Error *error) {
   RetVal ret;
 
   Fn *fn = NULL;
-  throws(deref(&vm->gc1, (void*)&fn, newFn.value, error));
+  throws(deref(&vm->gc, (void*)&fn, newFn.value, error));
 
   // resize locals if needed
   uint16_t newNumLocals = fn->numLocals + fn->numCaptures;
@@ -3105,8 +3049,7 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
   RetVal ret;
 
   vm->instTable = instTableCreate();
-  GCInit(&vm->gc);
-  throws(tryGC1InitContents(&vm->gc1, 1024 * 1000, error));
+  throws(tryGCInitContents(&vm->gc, 1024 * 1000, error));
   throws(tryNamespacesInitContents(&vm->namespaces, error));
 
   ret = R_SUCCESS;
@@ -3119,7 +3062,6 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
 void vmFreeContents(VM *vm) {
   if (vm != NULL) {
     GCFreeContents(&vm->gc);
-    GC1FreeContents(&vm->gc1);
     namespacesFreeContents(&vm->namespaces);
   }
 }
