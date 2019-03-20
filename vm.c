@@ -707,6 +707,8 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
 
   void *scanptr = vm->gc.currentHeap;
 
+  // TODO: make a new temporary vm instruction to invoke collect() for now, worry about FFI later
+
   /*
    * iterate over the objects in the new space that need to be scanned, for each:
    *   traverse the value references within, foreach:
@@ -3335,3 +3337,18 @@ void printCodeUnit(CodeUnit *unit) {
 
 
 
+/*
+ * THINKING ABOUT FFI
+ * goal: bind values to vars, that when invoked, invoke c functions directly
+ * - c functions must be enumerated and mapped from names to function pointers
+ * - once a function has been resolved, it still has to be invoked:
+ *
+ *     Invoke an extern assembly function, which takes as arguments:
+ *       - a pointer to the VM
+ *       - a pointer to the C function to be called
+ *       - the c function arguments as an array of 64-bit values
+ *       - an Error pointer
+ *
+ *     The assembly function pushes the arguments onto the stack and invokes
+ *
+ */
