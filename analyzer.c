@@ -1509,7 +1509,7 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *err
 RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error) {
   RetVal ret;
 
-  if (expr->type != VT_LIST) {
+  if (expr->type != N_LIST) {
     throwInternalError(error, "the contents of a macro argumet must be a list: %u", expr->type);
   }
 
