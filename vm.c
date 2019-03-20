@@ -235,7 +235,35 @@ void evalResultFreeContents(VMEvalResult *r) {
  * VM Data Structures
  */
 
-// gc
+/*
+ * In this machine, all values are represented by a 64-bit word.
+ * The leftmost 4 bits are used to encode the following types. The remaining 60
+ * bits are interpreted on a per-type basis.
+ * :unsigned-int - an overflowable unsigned integer
+ * :bool         - 0 for false, 1 for true
+ * :nil          - constant, always 0
+ * :char         - the lowest 32 bits represent a UTF-16 character
+ * :object       - interpreted as an unsigned integer, the value is a pointer
+ *                 offset to dynamically-allocated memory on the heap.
+ */
+  typedef enum ValueType {
+    VT_NIL,
+    VT_UINT,
+    VT_BOOL,
+    VT_FN,
+//  VT_CHAR,
+        VT_STR,
+    VT_SYMBOL,
+    VT_KEYWORD,
+    VT_LIST,
+    VT_CLOSURE,
+//  VT_OBJECT,
+  } ValueType;
+
+  typedef struct Value {
+    ValueType type : 4;
+    uint64_t value : 60;
+  } Value;
 
 /*
  * The constant part of a function is the FnDef. This is what gets hydrated at eval time.

@@ -71,7 +71,6 @@ typedef enum InstType {
 
 } InstType;
 
-void printCodeArray(uint8_t *code, uint16_t codeLength);
 
 // These are the constant values that can be loaded by Code instructions into the opstack for use.
 // These constant values are represented as a part of the CodeUnit that is submitted to the vm for evaluation.
@@ -170,36 +169,6 @@ void codeUnitFreeContents(CodeUnit *codeUnit);
 
 typedef struct VM *VM_t;
 
-/*
- * In this machine, all values are represented by a 64-bit word.
- * The leftmost 4 bits are used to encode the following types. The remaining 60
- * bits are interpreted on a per-type basis.
- * :unsigned-int - an overflowable unsigned integer
- * :bool         - 0 for false, 1 for true
- * :nil          - constant, always 0
- * :char         - the lowest 32 bits represent a UTF-16 character
- * :object       - interpreted as an unsigned integer, the value is a pointer
- *                 offset to dynamically-allocated memory on the heap.
- */
-typedef enum ValueType {
-  VT_NIL,
-  VT_UINT,
-  VT_BOOL,
-  VT_FN,
-//  VT_CHAR,
-  VT_STR,
-  VT_SYMBOL,
-  VT_KEYWORD,
-  VT_LIST,
-  VT_CLOSURE,
-//  VT_OBJECT,
-} ValueType;
-
-typedef struct Value {
-  ValueType type : 4;
-  uint64_t value : 60;
-} Value;
-
 RetVal tryVMInitContents(VM_t vm, Error *error);
 void vmFreeContents(VM_t vm);
 RetVal tryVMMake(VM_t *ptr , Error *error);
@@ -245,6 +214,8 @@ RetVal tryExceptionPrint(VMException *e, wchar_t **ptr, Error *error);
 RetVal tryExceptionPrintf(VMException *e, Error *error);
 
 RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, VMEvalResult *result, Error *error);
+
+void printCodeArray(uint8_t *code, uint16_t codeLength);
 
 #endif //WARP_LANG_VM_H
 
