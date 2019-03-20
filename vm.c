@@ -159,33 +159,6 @@ void codeUnitFreeContents(CodeUnit *u) {
   }
 }
 
-RetVal tryCodeDeepCopy(Code *from, Code *to, Error *error) {
-  RetVal ret;
-
-  to->numLocals = from->numLocals;
-  to->maxOperandStackSize = from->maxOperandStackSize;
-  to->codeLength = from->codeLength;
-
-  tryMalloc(to->code, sizeof(uint8_t) * to->codeLength, "Code array");
-  memcpy(to->code, from->code, to->codeLength);
-
-  to->hasSourceTable = from->hasSourceTable;
-  if (to->hasSourceTable) {
-    throws(tryTextCopy(&from->sourceTable.fileName, &to->sourceTable.fileName, error));
-
-    to->sourceTable.numLineNumbers = from->sourceTable.numLineNumbers;
-    uint64_t numbersSize = sizeof(LineNumber) * to->sourceTable.numLineNumbers;
-    tryMalloc(to->sourceTable.lineNumbers, numbersSize, "LineNumber array");
-    memcpy(to->sourceTable.lineNumbers, from->sourceTable.lineNumbers, numbersSize);
-  }
-
-  return R_SUCCESS;
-
-  failure:
-  codeFreeContents(to);
-  return ret;
-}
-
 void exFrameInitContents(VMExceptionFrame *f) {
   textInitContents(&f->functionName);
   f->unknownSource = true;
