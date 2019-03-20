@@ -332,6 +332,7 @@ typedef struct GC {
 
   // the current heap
   void *currentHeap; // the heap to use for allocation
+  void *currentHeapEnd; // the heap to use for allocation
   void *allocPtr;    // the offset within the heap to use for allocation
 
 } GC;
@@ -396,15 +397,6 @@ typedef struct OpStack {
   uint64_t usedDepth;
 } OpStack;
 
-typedef struct TopLevelFrame {
-  uint16_t numConstants;
-  Value *constants;
-  Code code;
-  uint16_t numLocals;
-  Value *locals;
-  OpStack opStack;
-} TopLevelFrame;
-
 /*
  * Common value factories
  */
@@ -415,6 +407,56 @@ Value nil() {
   v.value = 0;
   return v;
 }
+
+/*
+ * The ExecFrame and operations it supports
+ */
+
+  RetVal readInstruction(ExecFrame_t frame, uint8_t *ptr, Error *error);
+  RetVal readIndex(ExecFrame_t frame, uint16_t *ptr, Error *error);
+  RetVal setPc(ExecFrame_t frame, uint16_t newPc, Error *error);
+  RetVal getConst(ExecFrame_t frame, uint16_t constantIndex, Value *ptr, Error *error);
+  RetVal getLocal(ExecFrame_t frame, uint16_t localIndex, Value *ptr, Error *error);
+  RetVal setLocal(ExecFrame_t frame, uint16_t localIndex, Value value, Error *error);
+  RetVal getLocalRef(ExecFrame_t frame, uint16_t localIndex, Value **ptr, Error *error);
+  uint16_t numLocals(ExecFrame_t frame);
+  uint64_t numOperands(ExecFrame_t frame);
+  RetVal getOperandRef(ExecFrame_t frame, uint64_t opIndex, Value **ptr, Error *error);
+  uint16_t pushOperand(ExecFrame_t frame, Value value, Error *error);
+  uint16_t popOperand(ExecFrame_t frame, Value *value, Error *error);
+  Value getFnRef(ExecFrame_t frame);
+  RetVal setFnRef(VM *vm, ExecFrame_t frame, Value value, Error *error);
+
+  bool hasResult(ExecFrame_t frame);
+  bool hasParent(ExecFrame_t frame);
+  RetVal getParent(ExecFrame_t frame, ExecFrame_t *ptr, Error *error);
+  RetVal setResult(ExecFrame_t frame, Value result, Error *error);
+  RetVal getResult(ExecFrame_t frame, Value *ptr, Error *error);
+
+  typedef struct ExceptionHandler {
+    uint16_t jumpAddress;
+    uint16_t localIndex;
+  } ExceptionHandler;
+
+  bool hasHandler(ExecFrame_t frame);
+  RetVal getHandler(ExecFrame_t frame, ExceptionHandler *ptr, Error *error);
+  void setHandler(ExecFrame_t frame, ExceptionHandler handler);
+  void clearHandler(ExecFrame_t frame);
+
+  bool hasFnName(ExecFrame_t frame);
+  RetVal getFnName(ExecFrame_t frame, Text *name, Error *error);
+
+  bool hasSourceTable(ExecFrame_t frame);
+  bool getLineNumber(ExecFrame_t frame, uint64_t *lineNumber);
+  bool getFileName(ExecFrame_t frame, Text *fileName);
+
+  bool hasException(ExecFrame_t frame);
+  void setException(ExecFrame_t frame, VMException e);
+  RetVal getException(ExecFrame_t frame, VMException *e, Error *error);
+
+  RetVal pushFrame(VM *vm, ExecFrame_t *frame, Value newFn, Error *error);
+  RetVal replaceFrame(VM *vm, ExecFrame_t frame, Value newFn, Error *error);
+  void popFrame(ExecFrame_t frame);
 
 /*
  * NEW alloc/gc impl
@@ -455,6 +497,7 @@ RetVal tryGCInitContents(GC *gc, uint64_t maxHeapSize, Error *error) {
   gc->heapA = gc->heapMemory;
   gc->heapB = gc->heapA + gc->heapSize;
   gc->currentHeap = gc->heapA;
+  gc->currentHeapEnd = gc->currentHeap + gc->heapSize;
   gc->allocPtr = gc->currentHeap;
 
   return R_SUCCESS;
@@ -477,6 +520,14 @@ RetVal tryGCInitContents(GC *gc, uint64_t maxHeapSize, Error *error) {
 RetVal alloc(GC *gc, uint64_t length, void **ptr, uint64_t *offset, Error *error) {
   RetVal ret;
 
+  /*
+   * each object must be at least the size of a pointer, so we can replace it with a
+   * forwarding pointer during gc
+   */
+  if (length < 8) {
+    length = 8;
+  }
+
   uint64_t heapUsed = gc->allocPtr - gc->currentHeap;
   if (heapUsed + length < gc->heapSize) {
     *ptr = gc->allocPtr;
@@ -492,24 +543,6 @@ RetVal alloc(GC *gc, uint64_t length, void **ptr, uint64_t *offset, Error *error
   failure:
   return ret;
 }
-//RetVal alloc(GC1 *gc, uint64_t length, void **ptr, uint64_t *offset, Error *error) {
-//  RetVal ret;
-//
-//  uint64_t heapAvailable = gc->allocPtr - gc->currentHeap;
-//  if (heapAvailable + length < gc->heapSize) {
-//    *ptr = gc->allocPtr;
-//    gc->allocPtr += length;
-//  }
-//  else {
-//    throwRuntimeError(error, "collect() not supported yet");
-//  }
-//
-//  *offset = *ptr - gc->currentHeap;
-//
-//  return R_SUCCESS;
-//  failure:
-//    return ret;
-//}
 
 RetVal deref(GC *gc, void **ptr, uint64_t offset, Error *error) {
   RetVal ret;
@@ -525,22 +558,177 @@ RetVal deref(GC *gc, void **ptr, uint64_t offset, Error *error) {
   return ret;
 }
 
-RetVal collect(VM *vm, ExecFrame_t frame, Error *error) {
+bool inCurrentHeap(GC *gc, void *ptr) {
+  return gc->currentHeap <= ptr && ptr < gc->currentHeapEnd;
+}
+
+uint64_t fnSize(Fn *fn);
+uint64_t strSize(String *str);
+uint64_t symbolSize(Symbol *sym);
+uint64_t keywordSize(Keyword *kw);
+uint64_t consSize(Cons *c);
+uint64_t closureSize(Closure *cl);
+
+// TODO: use asserts instead of exceptions, we can't afford to allow a gc to fail in a partial state
+
+RetVal relocate(GC *gc, Value *value, Error *error) {
   RetVal ret;
 
-  void *scanptr;
-  void *allocptr;
+  void *ptr = NULL;
+  throws(deref(gc, &ptr, value->value, error));
+
+  if (!inCurrentHeap(gc, ptr)) {
+
+    void **forwardPtr = ptr;
+    if (inCurrentHeap(gc, *forwardPtr)) {
+      value->value = *forwardPtr - gc->currentHeap;
+    }
+    else {
+
+      // TODO: is this worth the heap space savings, vs storing the size of each object with the object?
+      size_t size = 0;
+      switch (value->type) {
+        case VT_FN:
+          size = fnSize((Fn*)ptr);
+          break;
+        case VT_STR:
+          size = strSize((String*)ptr);
+          break;
+        case VT_SYMBOL:
+          size = symbolSize((Symbol*)ptr);
+          break;
+        case VT_KEYWORD:
+          size = keywordSize((Keyword*)ptr);
+          break;
+        case VT_LIST:
+          size = consSize((Cons*)ptr);
+          break;
+        case VT_CLOSURE:
+          size = closureSize((Closure*)ptr);
+          break;
+        default:
+          throwRuntimeError(error, "unsupported type: %u", value->type);
+      }
+
+      void *newPtr = NULL;
+      uint64_t offset = 0;
+      throws(alloc(gc, size, &newPtr, &offset, error));
+
+      memcpy(newPtr, ptr, size);
+      value->value = newPtr - gc->currentHeap;
+
+      *forwardPtr = newPtr;
+    }
+  }
+
+  /*
+   * compute pointer value from offset
+   * if the pointer points to the new space, skip it (already moved)
+   * else if the pointer points to a forwarding pointer
+   *   update the root value to point to the new copy
+   * else
+   *   dereference it
+   *   determine its size
+   *   copy it to allocptr, increment allocptr
+   *   update the root value to point to the new copy
+   *   update the old space with a forwarding pointer to the new space
+   */
 
 
   return R_SUCCESS;
   failure:
-  return ret;
+    return ret;
 }
 
-/*
- * gc/runtime implementation
- */
+void collect(VM *vm, ExecFrame_t frame, Error *error) {
+  RetVal ret;
 
+  // flip heaps
+  void *oldHeap = vm->gc.currentHeap;
+  if (oldHeap == vm->gc.heapA) {
+    vm->gc.currentHeap = vm->gc.heapB;
+  }
+  else {
+    vm->gc.currentHeap = vm->gc.heapA;
+  }
+  vm->gc.currentHeapEnd = vm->gc.currentHeap + vm->gc.heapSize;
+  vm->gc.allocPtr = vm->gc.currentHeap;
+
+  // relocate var roots
+  for (uint64_t i=0; i<vm->namespaces.numNamespaces; i++) {
+    Namespace *ns = &vm->namespaces.namespaces[i];
+    for (uint64_t j=0; j<ns->localVars.length; j++) {
+      Var *var = &ns->localVars.vars[j];
+      throws(relocate(&vm->gc, &var->value, error));
+    }
+  }
+
+  // relocate call stack roots
+  ExecFrame_t current = frame;
+  while (true) {
+
+    // relocate fnRef
+    {
+      Value oldFnRef = getFnRef(current);
+      Value newFnRef = oldFnRef;
+      throws(relocate(&vm->gc, &newFnRef, error));
+
+      if (oldFnRef.value != newFnRef.value) {
+        throws(setFnRef(vm, current, newFnRef, error));
+      }
+    }
+
+    uint16_t locals = numLocals(current);
+    for (uint16_t i=0; i<locals; i++) {
+
+      Value *val = NULL;
+      throws(getLocalRef(current, i, &val, error));
+
+      throws(relocate(&vm->gc, val, error));
+    }
+
+    uint64_t operands = numOperands(current);
+    for (uint64_t i=0; i<operands; i++) {
+
+      Value *val = NULL;
+      throws(getOperandRef(current, i, &val, error));
+
+      throws(relocate(&vm->gc, val, error));
+    }
+
+    if (!hasParent(current)) {
+      break;
+    }
+    else {
+      throws(getParent(current, &current, error) != R_SUCCESS);
+    }
+  }
+
+  void *scanptr = vm->gc.currentHeap;
+
+  /*
+   * iterate over the objects in the new space that need to be scanned, for each:
+   *   traverse the value references within, foreach:
+   *
+   *     compute pointer value from offset
+   *     if the pointer points to the new space, skip it (already moved)
+   *     else if the pointer points to a forwarding pointer
+   *       update the reference value to point to the new copy
+   *     else
+   *       dereference it
+   *       determine its size
+   *       copy it to allocptr, increment allocptr
+   *       update the root value to point to the new copy
+   *       update the old space with a forwarding pointer to the new space
+   *
+   */
+
+  return;
+
+  failure:
+    printf("collect() failed, terminating process :)\n");
+    exit(-1);
+}
 
 /*
  * Loading Constants as Values
@@ -631,6 +819,16 @@ void fnInitContents(Fn *fn) {
   fn->sourceFileName = NULL;
   fn->numLineNumbers = 0;
   fn->lineNumbers = NULL;
+}
+
+// TODO: somehow deduplicate this
+uint64_t fnSize(Fn *fn) {
+  size_t nameSize = (fn->nameLength + 1) * sizeof(wchar_t);
+  size_t constantsSize = fn->numConstants * sizeof(Value);
+  size_t codeSize = fn->codeLength * sizeof(uint8_t);
+  size_t sourceFileNameSize = (fn->sourceFileNameLength + 1) * sizeof(wchar_t);
+  size_t lineNumbersSize = fn->numLineNumbers * sizeof(LineNumber);
+  return sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize + lineNumbersSize;
 }
 
 RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
@@ -727,6 +925,11 @@ void stringInitContents(String *s) {
   s->value = NULL;
 }
 
+uint64_t strSize(String *str) {
+  size_t textSize = (str->length + 1) * sizeof(wchar_t);
+  return sizeof(String) + textSize;
+}
+
 RetVal _tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value, Error *error) {
   RetVal ret;
 
@@ -780,6 +983,11 @@ void symbolInitContents(Symbol *s) {
   s->value = NULL;
 }
 
+uint64_t symbolSize(Symbol *sym) {
+  size_t textSize = (sym->length + 1) * sizeof(wchar_t);
+  return sizeof(Symbol) + textSize;
+}
+
 RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *error) {
   RetVal ret;
 
@@ -813,6 +1021,11 @@ void keywordInitContents(Keyword *k) {
   k->value = NULL;
 }
 
+uint64_t keywordSize(Keyword *kw) {
+  size_t textSize = (kw->length + 1) * sizeof(wchar_t);
+  return sizeof(Keyword) + textSize;
+}
+
 RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *error) {
   RetVal ret;
 
@@ -844,6 +1057,10 @@ RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *e
 void consInitContents(Cons *c) {
   c->value = nil();
   c->next = nil();
+}
+
+uint64_t consSize(Cons *c) {
+  return sizeof(Cons);
 }
 
 RetVal tryAllocateCons(VM *vm, Value value, Value next, Value *ptr, Error *error) {
@@ -1348,50 +1565,6 @@ void namespacesFreeContents(Namespaces *namespaces) {
 }
 
 /*
- * The ExecFrame and operations it supports
- */
-
-RetVal readInstruction(ExecFrame_t frame, uint8_t *ptr, Error *error);
-RetVal readIndex(ExecFrame_t frame, uint16_t *ptr, Error *error);
-RetVal setPc(ExecFrame_t frame, uint16_t newPc, Error *error);
-RetVal getConst(ExecFrame_t frame, uint16_t constantIndex, Value *ptr, Error *error);
-RetVal getLocal(ExecFrame_t frame, uint16_t localIndex, Value *ptr, Error *error);
-RetVal setLocal(ExecFrame_t frame, uint16_t localIndex, Value value, Error *error);
-uint16_t pushOperand(ExecFrame_t frame, Value value, Error *error);
-uint16_t popOperand(ExecFrame_t frame, Value *value, Error *error);
-
-bool hasResult(ExecFrame_t frame);
-bool hasParent(ExecFrame_t frame);
-RetVal getParent(ExecFrame_t frame, ExecFrame_t *ptr, Error *error);
-RetVal setResult(ExecFrame_t frame, Value result, Error *error);
-RetVal getResult(ExecFrame_t frame, Value *ptr, Error *error);
-
-typedef struct ExceptionHandler {
-  uint16_t jumpAddress;
-  uint16_t localIndex;
-} ExceptionHandler;
-
-bool hasHandler(ExecFrame_t frame);
-RetVal getHandler(ExecFrame_t frame, ExceptionHandler *ptr, Error *error);
-void setHandler(ExecFrame_t frame, ExceptionHandler handler);
-void clearHandler(ExecFrame_t frame);
-
-bool hasFnName(ExecFrame_t frame);
-RetVal getFnName(ExecFrame_t frame, Text *name, Error *error);
-
-bool hasSourceTable(ExecFrame_t frame);
-bool getLineNumber(ExecFrame_t frame, uint64_t *lineNumber);
-bool getFileName(ExecFrame_t frame, Text *fileName);
-
-bool hasException(ExecFrame_t frame);
-void setException(ExecFrame_t frame, VMException e);
-RetVal getException(ExecFrame_t frame, VMException *e, Error *error);
-
-RetVal pushFrame(VM *vm, ExecFrame_t *frame, Value newFn, Error *error);
-RetVal replaceFrame(VM *vm, ExecFrame_t frame, Value newFn, Error *error);
-void popFrame(ExecFrame_t frame);
-
-/*
  * Instruction Definitions
  */
 
@@ -1890,6 +2063,11 @@ void closureInitContents(Closure *cl) {
   cl->fn = nil();
   cl->numCaptures = 0;
   cl->captures = NULL;
+}
+
+uint64_t closureSize(Closure *cl) {
+  size_t capturesSize = cl->numCaptures * sizeof(Value);
+  return sizeof(Closure) + capturesSize;
 }
 
 // (8), offset (16) | (captures... -> value)
@@ -2694,6 +2872,20 @@ RetVal getLocal(ExecFrame *frame, uint16_t localIndex, Value *ptr, Error *error)
   return ret;
 }
 
+RetVal getLocalRef(ExecFrame *frame, uint16_t localIndex, Value **ptr, Error *error) {
+  RetVal ret;
+
+  if (localIndex >= frame->fn->numLocals) {
+    throwRuntimeError(error, "no such local: %u", localIndex);
+  }
+
+  *ptr = &frame->locals[localIndex];
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 RetVal setLocal(ExecFrame *frame, uint16_t localIndex, Value value, Error *error) {
   RetVal ret;
 
@@ -2702,6 +2894,28 @@ RetVal setLocal(ExecFrame *frame, uint16_t localIndex, Value value, Error *error
   }
 
   frame->locals[localIndex] = value;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+uint16_t numLocals(ExecFrame *frame) {
+  return frame->fn->numLocals;
+}
+
+uint64_t numOperands(ExecFrame *frame) {
+  return frame->opStack->usedDepth;
+}
+
+RetVal getOperandRef(ExecFrame *frame, uint64_t opIndex, Value **ptr, Error *error) {
+  RetVal ret;
+
+  if (opIndex >= frame->opStack->usedDepth) {
+    throwRuntimeError(error, "no such operand: %llu", opIndex);
+  }
+
+  *ptr = &frame->opStack->stack[opIndex];
   return R_SUCCESS;
 
   failure:
@@ -2726,6 +2940,24 @@ uint16_t popOperand(ExecFrame *frame, Value *value, Error *error) {
 
   failure:
   return ret;
+}
+
+Value getFnRef(ExecFrame *frame) {
+  return frame->fnRef;
+}
+
+RetVal setFnRef(VM *vm, ExecFrame *frame, Value value, Error *error) {
+  RetVal ret;
+
+  frame->fnRef = value;
+  frame->fn = NULL;
+
+  throws(deref(&vm->gc, (void*)&frame->fn, value.value, error));
+
+  return R_SUCCESS;
+  failure:
+    return ret;
+
 }
 
 bool hasResult(ExecFrame *frame) {

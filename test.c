@@ -797,6 +797,73 @@ START_TEST(repl) {
   }
 END_TEST
 
+START_TEST(gc) {
+
+    Error error;
+    VM_t vm = NULL;
+    VMEvalResult result;
+
+    errorInitContents(&error);
+    ck_assert_int_eq(tryVMMake(&vm, &error), R_SUCCESS);
+
+    uint8_t fnCode[] = {
+        I_LOAD_CONST, 0, 0,
+        I_LOAD_LOCAL, 0, 0,
+        I_ADD,
+        I_RET
+    };
+
+    FnConstant fn;
+    constantFnInitContents(&fn);
+    fn.numConstants = 1;
+    fn.constants = malloc(sizeof(Constant) * fn.numConstants);
+    fn.constants[0].type = CT_INT;
+    fn.constants[0].integer = 100;
+    fn.numArgs = 1;
+    fn.numCaptures = 0;
+    fn.code.numLocals = 1;
+    fn.code.maxOperandStackSize = 10;
+    fn.code.codeLength = sizeof(fnCode);
+    fn.code.code = fnCode;
+    fn.code.hasSourceTable = false;
+
+    uint8_t code[] = {
+        I_LOAD_CONST, 0, 0,
+        I_LOAD_CONST, 0, 2,
+        I_LOAD_CONST, 0, 1,
+        I_INVOKE_DYN,
+        I_RET
+    };
+
+    CodeUnit unit;
+    codeUnitInitContents(&unit);
+    unit.numConstants = 3;
+    unit.constants = malloc(sizeof(Constant) * unit.numConstants);
+    unit.constants[0].type = CT_INT;
+    unit.constants[0].integer = 10;
+    unit.constants[1].type = CT_FN;
+    unit.constants[1].function = fn;
+    unit.constants[2].type = CT_INT;
+    unit.constants[2].integer = 1;
+    unit.code.numLocals = 0;
+    unit.code.maxOperandStackSize = 10;
+    unit.code.codeLength = sizeof(code);
+    unit.code.code = code;
+    unit.code.hasSourceTable = false;
+
+    ck_assert_int_eq(tryVMEval(vm, &unit, &result, &error), R_SUCCESS);
+    ck_assert_int_eq(result.type, RT_RESULT);
+
+    ck_assert_int_eq(result.result.type, N_NUMBER);
+    ck_assert_int_eq(result.result.number.value, 110);
+
+
+
+    evalResultFreeContents(&result);
+    vmFree(vm);
+  }
+END_TEST
+
 Suite * suite(void) {
 
   TCase *tc_core = tcase_create("Core");
@@ -809,6 +876,7 @@ Suite * suite(void) {
   tcase_add_test(tc_core, compilerBasic);
   tcase_add_test(tc_core, vmBasic);
   tcase_add_test(tc_core, repl);
+  tcase_add_test(tc_core, gc);
 
   Suite *s = suite_create("lexer");
   suite_add_tcase(s, tc_core);
