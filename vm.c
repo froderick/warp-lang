@@ -710,7 +710,14 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
 
   void *scanptr = vm->gc.currentHeap;
 
-  // TODO: make a new temporary vm instruction to invoke collect() for now, worry about FFI later
+  /*
+   * TODO: scanptr requires that objects in the heap be scannable, meaning that they must contain
+   * type information, and may as well contain size information too
+   *
+   * This probably means we need to make a union container for the objects.
+   * As an upside, this will make computing object sizes faster. As a downside, it will increase object sizes.
+   * We can probably pack both into a 32 or 64-bit word.
+   */
 
   /*
    * iterate over the objects in the new space that need to be scanned, for each:
