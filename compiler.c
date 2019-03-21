@@ -901,6 +901,15 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     }
 
   }
+  else if (wcscmp(builtin->name.value, L"gc") == 0) {
+
+    if (builtin->args.numForms != 0) {
+      throwCompilerError(error, "gc takes no arguments, got %u", builtin->args.numForms);
+    }
+
+    uint8_t addCode[] = { I_GC };
+    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+  }
   else {
     throwCompilerError(error, "unsupported builtin '%ls'", builtin->name.value);
   }

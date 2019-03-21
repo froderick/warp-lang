@@ -60,6 +60,7 @@ typedef enum InstType {
   I_REST,            // (8),             | (seq -> seq)
   I_SET_MACRO,       // (8),             | (name -> nil)
   I_GET_MACRO,       // (8),             | (name -> bool)
+  I_GC,              // (8),             | (->)
 
   // requires garbage collection
   I_NEW,         // (8), objlen (16) | (-> objectref)

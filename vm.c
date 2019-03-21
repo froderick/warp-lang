@@ -572,11 +572,14 @@ uint64_t closureSize(Closure *cl);
 
 // TODO: use asserts instead of exceptions, we can't afford to allow a gc to fail in a partial state
 
-RetVal relocate(GC *gc, Value *value, Error *error) {
+RetVal relocate(GC *gc, void *oldHeap, Value *value, Error *error) {
   RetVal ret;
 
   void *ptr = NULL;
-  throws(deref(gc, &ptr, value->value, error));
+  if (value->value > gc->heapSize) {
+    throwRuntimeError(error, "invalid memory address");
+  }
+  ptr = oldHeap + value->value;
 
   if (!inCurrentHeap(gc, ptr)) {
 
@@ -660,7 +663,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
     Namespace *ns = &vm->namespaces.namespaces[i];
     for (uint64_t j=0; j<ns->localVars.length; j++) {
       Var *var = &ns->localVars.vars[j];
-      throws(relocate(&vm->gc, &var->value, error));
+      throws(relocate(&vm->gc, oldHeap, &var->value, error));
     }
   }
 
@@ -672,7 +675,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
     {
       Value oldFnRef = getFnRef(current);
       Value newFnRef = oldFnRef;
-      throws(relocate(&vm->gc, &newFnRef, error));
+      throws(relocate(&vm->gc, oldHeap, &newFnRef, error));
 
       if (oldFnRef.value != newFnRef.value) {
         throws(setFnRef(vm, current, newFnRef, error));
@@ -685,7 +688,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
       Value *val = NULL;
       throws(getLocalRef(current, i, &val, error));
 
-      throws(relocate(&vm->gc, val, error));
+      throws(relocate(&vm->gc, oldHeap, val, error));
     }
 
     uint64_t operands = numOperands(current);
@@ -694,7 +697,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
       Value *val = NULL;
       throws(getOperandRef(current, i, &val, error));
 
-      throws(relocate(&vm->gc, val, error));
+      throws(relocate(&vm->gc, oldHeap, val, error));
     }
 
     if (!hasParent(current)) {
@@ -2329,6 +2332,21 @@ RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   return ret;
 }
 
+// (8),             | (name -> bool)
+  RetVal tryGCEval(VM *vm, ExecFrame_t frame, Error *error) {
+    RetVal ret;
+
+    collect(vm, frame, error);
+
+    throws(pushOperand(frame, nil(), error));
+
+    return R_SUCCESS;
+
+    failure:
+    return ret;
+  }
+
+
 void printInst(int *i, const char* name, uint8_t *code) {
   printf("%i:\t%s\n", *i, name);
 }
@@ -2386,6 +2404,7 @@ InstTable instTableCreate() {
       [I_REST]             = { .name = "I_REST",            .print = printInst,           .tryEval = tryRestEval },
       [I_SET_MACRO]        = { .name = "I_SET_MACRO",       .print = printInst,           .tryEval = trySetMacroEval},
       [I_GET_MACRO]        = { .name = "I_GET_MACRO",       .print = printInst,           .tryEval = tryGetMacroEval},
+      [I_GC]               = { .name = "I_GC",              .print = printInst,           .tryEval = tryGCEval},
 
 
 //      [I_NEW]         = { .name = "I_NEW",         .print = printUnknown},
