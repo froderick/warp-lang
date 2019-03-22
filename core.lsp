@@ -62,3 +62,10 @@
 ;;                      prev2
 ;;                    (_fib prev2 (+ prev1 prev2) (- n 1)))))
 ;;     (_fib 0 1 n)))
+
+(defn large (n)
+  (let (_large (fn _large (n seq)
+                  (if (zero? n)
+                    seq
+                    (_large (dec n) (cons n seq)))))
+    (_large n nil)))

@@ -1,6 +1,7 @@
-  #include <stdlib.h>
+#include <stdlib.h>
 #include <string.h>
 #include <libgen.h>
+#include <time.h>
 #include "vm.h"
 #include "utils.h"
 
@@ -545,8 +546,14 @@ RetVal tryGCInitContents(GC *gc, uint64_t maxHeapSize, Error *error) {
  *   else fail
  */
 
-RetVal alloc(GC *gc, uint64_t length, void **ptr, uint64_t *offset, Error *error) {
-  RetVal ret;
+void collect(VM *vm, ExecFrame_t frame, Error *error);
+
+#define R_OOM 1
+
+/*
+ * Allocates, returns R_OOM if allocation fails. Doesn't attempt collection.
+ */
+int _alloc(GC *gc, uint64_t length, void **ptr, uint64_t *offset) {
 
   /*
    * each object must be at least the size of a pointer, so we can replace it with a
@@ -556,20 +563,53 @@ RetVal alloc(GC *gc, uint64_t length, void **ptr, uint64_t *offset, Error *error
     length = 8;
   }
 
-  uint64_t heapUsed = gc->allocPtr - gc->currentHeap;
-  if (heapUsed + length < gc->heapSize) {
+  if (gc->allocPtr + length < gc->currentHeapEnd) {
     *ptr = gc->allocPtr;
+    *offset = gc->allocPtr - gc->currentHeap;
+
+    if (*offset > gc->heapSize) {
+      printf("what");
+    }
+
     gc->allocPtr += length;
+    return R_SUCCESS;
   }
   else {
-    throwRuntimeError(error, "collect() not supported yet");
+    return R_OOM;
   }
 
-  *offset = *ptr - gc->currentHeap;
+//  uint64_t heapUsed = gc->allocPtr - gc->currentHeap;
+//  if (heapUsed + length < gc->heapSize) {
+//    *ptr = gc->allocPtr;
+//    gc->allocPtr += length;
+//  }
+//  else {
+//    return R_OOM;
+//  }
+
+}
+
+/*
+ * Allocates, attempts collection if allocation fails.
+ */
+RetVal alloc(VM *vm, ExecFrame_t frame, uint64_t length, void **ptr, uint64_t *offset, Error *error) {
+  RetVal ret;
+
+  int success = _alloc(&vm->gc, length, ptr, offset);
+
+  if (success == R_OOM) {
+    collect(vm, frame, error);
+
+    success = _alloc(&vm->gc, length, ptr, offset);
+
+    if (success == R_OOM) {
+      throwRuntimeError(error, "out of memory, failed to allocate %llu bytes", length);
+    }
+  }
 
   return R_SUCCESS;
   failure:
-  return ret;
+    return ret;
 }
 
 RetVal deref(GC *gc, void **ptr, uint64_t offset, Error *error) {
@@ -590,16 +630,9 @@ bool inCurrentHeap(GC *gc, void *ptr) {
   return gc->currentHeap <= ptr && ptr < gc->currentHeapEnd;
 }
 
-uint64_t fnSize(Fn *fn);
-uint64_t strSize(String *str);
-uint64_t symbolSize(Symbol *sym);
-uint64_t keywordSize(Keyword *kw);
-uint64_t consSize(Cons *c);
-uint64_t closureSize(Closure *cl);
-
 // TODO: use asserts instead of exceptions, we can't afford to allow a gc to fail in a partial state
 
-RetVal relocate(GC *gc, void *oldHeap, Value *value, Error *error) {
+RetVal relocate(VM *vm, void *oldHeap, Value *value, Error *error) {
   RetVal ret;
 
   switch (value->type) {
@@ -620,8 +653,10 @@ RetVal relocate(GC *gc, void *oldHeap, Value *value, Error *error) {
       break;
 
     default:
-      throwRuntimeError(error, "unknown value type");
+      throwRuntimeError(error, "unknown value type: %u", value->type);
   }
+
+  GC *gc = &vm->gc;
 
   void *ptr = NULL;
   if (value->value > gc->heapSize) {
@@ -629,24 +664,28 @@ RetVal relocate(GC *gc, void *oldHeap, Value *value, Error *error) {
   }
   ptr = oldHeap + value->value;
 
-  if (!inCurrentHeap(gc, ptr)) {
+  void **forwardPtr = ptr;
+  if (inCurrentHeap(gc, *forwardPtr)) {
+    value->value = *forwardPtr - gc->currentHeap;
+  }
+  else {
+    size_t size = ((ObjectHeader*)ptr)->size;
 
-    void **forwardPtr = ptr;
-    if (inCurrentHeap(gc, *forwardPtr)) {
-      value->value = *forwardPtr - gc->currentHeap;
+    void *newPtr = NULL;
+    uint64_t offset = 0;
+
+    if (_alloc(gc, size, &newPtr, &offset) == R_OOM) {
+      throwRuntimeError(error, "out of memory, cannot allocate %lu bytes mid-gc", size);
     }
-    else {
-      size_t size = ((ObjectHeader*)ptr)->size;
 
-      void *newPtr = NULL;
-      uint64_t offset = 0;
-      throws(alloc(gc, size, &newPtr, &offset, error));
+    memcpy(newPtr, ptr, size);
+    value->value = newPtr - gc->currentHeap;
 
-      memcpy(newPtr, ptr, size);
-      value->value = newPtr - gc->currentHeap;
+    *forwardPtr = newPtr;
+  }
 
-      *forwardPtr = newPtr;
-    }
+  if (value->value >= 31138512903) {
+    printf("what2\n");
   }
 
   /*
@@ -668,8 +707,20 @@ RetVal relocate(GC *gc, void *oldHeap, Value *value, Error *error) {
     return ret;
 }
 
+uint64_t now() {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+  uint64_t millis = now.tv_nsec / 1000000;
+  return millis;
+}
+
 void collect(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
+
+  uint64_t oldHeapUsed = vm->gc.allocPtr - vm->gc.currentHeap;
+
+  uint64_t start = now();
+  printf("gc: starting, %llu bytes used\n", oldHeapUsed);
 
   // flip heaps
   void *oldHeap = vm->gc.currentHeap;
@@ -687,7 +738,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
     Namespace *ns = &vm->namespaces.namespaces[i];
     for (uint64_t j=0; j<ns->localVars.length; j++) {
       Var *var = &ns->localVars.vars[j];
-      throws(relocate(&vm->gc, oldHeap, &var->value, error));
+      throws(relocate(vm, oldHeap, &var->value, error));
     }
   }
 
@@ -699,7 +750,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
     {
       Value oldFnRef = getFnRef(current);
       Value newFnRef = oldFnRef;
-      throws(relocate(&vm->gc, oldHeap, &newFnRef, error));
+      throws(relocate(vm, oldHeap, &newFnRef, error));
 
       if (oldFnRef.value != newFnRef.value) {
         throws(setFnRef(vm, current, newFnRef, error));
@@ -712,7 +763,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
       Value *val = NULL;
       throws(getLocalRef(current, i, &val, error));
 
-      throws(relocate(&vm->gc, oldHeap, val, error));
+      throws(relocate(vm, oldHeap, val, error));
     }
 
     uint64_t operands = numOperands(current);
@@ -721,7 +772,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
       Value *val = NULL;
       throws(getOperandRef(current, i, &val, error));
 
-      throws(relocate(&vm->gc, oldHeap, val, error));
+      throws(relocate(vm, oldHeap, val, error));
     }
 
     if (!hasParent(current)) {
@@ -740,35 +791,59 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
     ObjectHeader *header = scanptr;
     switch (header->type) {
 
-      case VT_FN:
       case VT_STR:
       case VT_SYMBOL:
       case VT_KEYWORD:
         // no references
         break;
 
+      case VT_FN: {
+        Fn *fn = scanptr;
+        for (uint16_t i=0; i<fn->numConstants; i++) {
+
+          if (fn->constants[i].value >= 31138512900) {
+            printf("what4\n");
+          }
+
+          throws(relocate(vm, oldHeap, &fn->constants[i], error));
+
+
+          if (fn->constants[i].value >= 31138512900) {
+            printf("what2\n");
+          }
+        }
+        break;
+      }
+
       case VT_LIST: {
         Cons *cons = scanptr;
-        relocate(&vm->gc, oldHeap, &cons->value, error);
-        relocate(&vm->gc, oldHeap, &cons->next, error);
+        throws(relocate(vm, oldHeap, &cons->value, error));
+        throws(relocate(vm, oldHeap, &cons->next, error));
         break;
       }
 
       case VT_CLOSURE: {
         Closure *closure = scanptr;
-        relocate(&vm->gc, oldHeap, &closure->fn, error);
+        throws(relocate(vm, oldHeap, &closure->fn, error));
         for (uint16_t i=0; i<closure->numCaptures; i++) {
-          relocate(&vm->gc, oldHeap, &closure->captures[i], error);
+          throws(relocate(vm, oldHeap, &closure->captures[i], error));
         }
         break;
       }
 
       default:
-        throwRuntimeError(error, "unknown value type: %u", header->type);
+        throwRuntimeError(error, "unknown or unexpected value type: %u", header->type);
     }
 
     scanptr += header->size;
   }
+
+  uint64_t newHeapUsed = vm->gc.allocPtr - vm->gc.currentHeap;
+  uint64_t sizeRecovered = oldHeapUsed - newHeapUsed;
+  uint64_t end = now();
+  uint64_t duration = end - start;
+
+  printf("gc: completed, %llu bytes recovered, %llu bytes used, took %llums\n", sizeRecovered, newHeapUsed, duration);
 
   return;
 
@@ -898,16 +973,6 @@ void fnInitContents(Fn *fn) {
   fn->lineNumbers = NULL;
 }
 
-// TODO: somehow deduplicate this
-uint64_t fnSize(Fn *fn) {
-  size_t nameSize = (fn->nameLength + 1) * sizeof(wchar_t);
-  size_t constantsSize = fn->numConstants * sizeof(Value);
-  size_t codeSize = fn->codeLength * sizeof(uint8_t);
-  size_t sourceFileNameSize = (fn->sourceFileNameLength + 1) * sizeof(wchar_t);
-  size_t lineNumbersSize = fn->numLineNumbers * sizeof(LineNumber);
-  return sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize + lineNumbersSize;
-}
-
 RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   RetVal ret;
 
@@ -927,7 +992,9 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   size_t fnSize = sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize + lineNumbersSize;
 
   uint64_t offset = 0;
-  throws(alloc(&vm->gc, fnSize, (void*)&fn, &offset, error));
+  if (_alloc(&vm->gc, fnSize, (void*)&fn, &offset) == R_OOM) {
+    throwRuntimeError(error, "out of memory, failed to allocate fn constant");
+  }
 
   value->type = VT_FN;
   value->value = offset;
@@ -1006,11 +1073,6 @@ void stringInitContents(String *s) {
   s->value = NULL;
 }
 
-uint64_t strSize(String *str) {
-  size_t textSize = (str->length + 1) * sizeof(wchar_t);
-  return sizeof(String) + textSize;
-}
-
 RetVal _tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value, Error *error) {
   RetVal ret;
 
@@ -1020,7 +1082,10 @@ RetVal _tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value, E
   size_t strSize = sizeof(String) + textSize;
 
   uint64_t offset = 0;
-  throws(alloc(&vm->gc, strSize, (void*)&str, &offset, error));
+
+  if (_alloc(&vm->gc, strSize, (void*)&str, &offset) == R_OOM) {
+    throwRuntimeError(error, "out of memory, failed to allocate string constant: %ls", text);
+  }
 
   value->type = VT_STR;
   value->value = offset;
@@ -1067,11 +1132,6 @@ void symbolInitContents(Symbol *s) {
   s->value = NULL;
 }
 
-uint64_t symbolSize(Symbol *sym) {
-  size_t textSize = (sym->length + 1) * sizeof(wchar_t);
-  return sizeof(Symbol) + textSize;
-}
-
 RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *error) {
   RetVal ret;
 
@@ -1081,7 +1141,9 @@ RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *er
   size_t size = sizeof(Symbol) + textSize;
 
   uint64_t offset = 0;
-  throws(alloc(&vm->gc, size, (void*)&sym, &offset, error));
+  if (_alloc(&vm->gc, size, (void*)&sym, &offset) == R_OOM) {
+    throwRuntimeError(error, "out of memory, failed to allocate symbol: %ls", symConst.value);
+  }
 
   value->type = VT_SYMBOL;
   value->value = offset;
@@ -1108,11 +1170,6 @@ void keywordInitContents(Keyword *k) {
   k->value = NULL;
 }
 
-uint64_t keywordSize(Keyword *kw) {
-  size_t textSize = (kw->length + 1) * sizeof(wchar_t);
-  return sizeof(Keyword) + textSize;
-}
-
 RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *error) {
   RetVal ret;
 
@@ -1122,7 +1179,9 @@ RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *e
   size_t size = sizeof(Keyword) + textSize;
 
   uint64_t offset = 0;
-  throws(alloc(&vm->gc, size, (void*)&kw, &offset, error));
+  if (_alloc(&vm->gc, size, (void*)&kw, &offset) == R_OOM) {
+    throwRuntimeError(error, "out of memory, failed to allocate keyword: %ls", kwConst.value);
+  }
 
   value->type = VT_KEYWORD;
   value->value = offset;
@@ -1149,11 +1208,7 @@ void consInitContents(Cons *c) {
   c->next = nil();
 }
 
-uint64_t consSize(Cons *c) {
-  return sizeof(Cons);
-}
-
-RetVal tryAllocateCons(VM *vm, Value value, Value next, Value *ptr, Error *error) {
+RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value *ptr, Error *error) {
   RetVal ret;
 
   if (next.type != VT_NIL && next.type != VT_LIST) {
@@ -1165,7 +1220,9 @@ RetVal tryAllocateCons(VM *vm, Value value, Value next, Value *ptr, Error *error
   size_t size = sizeof(Cons);
 
   uint64_t offset = 0;
-  throws(alloc(&vm->gc, size, (void*)&cons, &offset, error));
+  if (_alloc(&vm->gc, size, (void*)&cons, &offset) == R_OOM) {
+    throwRuntimeError(error, "out of memory, failed to allocate cons");
+  }
 
   ptr->type = VT_LIST;
   ptr->value = offset;
@@ -1178,7 +1235,7 @@ RetVal tryAllocateCons(VM *vm, Value value, Value next, Value *ptr, Error *error
 
   return R_SUCCESS;
   failure:
-    return ret;
+  return ret;
 }
 
 RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant listConst, Value *value, Error *error) {
@@ -1193,7 +1250,7 @@ RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant list
     uint16_t listConstEnd = listConst.length - 1;
     uint16_t valueIndex = listConst.constants[listConstEnd - i];
 
-    throws(tryAllocateCons(vm, alreadyHydratedConstants[valueIndex], seq, &seq, error));
+    throws(_tryAllocateCons(vm, alreadyHydratedConstants[valueIndex], seq, &seq, error));
   }
 
   *value = seq;
@@ -1656,6 +1713,34 @@ void namespacesFreeContents(Namespaces *namespaces) {
   }
 }
 
+RetVal tryAllocateCons(VM *vm, ExecFrame_t frame, Value value, Value next, Value *ptr, Error *error) {
+  RetVal ret;
+
+  if (next.type != VT_NIL && next.type != VT_LIST) {
+    throwRuntimeError(error, "a Cons next must be nil or a list: %u", next.type);
+  }
+
+  Cons *cons = NULL;
+
+  size_t size = sizeof(Cons);
+
+  uint64_t offset = 0;
+  throws(alloc(vm, frame, size, (void*)&cons, &offset, error));
+
+  ptr->type = VT_LIST;
+  ptr->value = offset;
+
+  consInitContents(cons);
+  cons->header.type = VT_LIST;
+  cons->header.size = size;
+  cons->value = value;
+  cons->next = next;
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
 /*
  * Instruction Definitions
  */
@@ -1803,30 +1888,44 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
           numArgsSupplied.value);
     }
 
-    // read the extra args into a list, push it back on the stack
 
-    Value seq = nil();
+    // push empty varargs sequence
+    throws(pushOperand(parent, nil(), error));
+
+    // read the extra args into that sequence, push it back on the stack
     uint16_t numVarArgs = (numArgsSupplied.value - invocable.fn->numArgs) + 1;
     for (uint16_t i = 0; i < numVarArgs; i++) {
 
-      Value arg;
-      throws(popOperand(parent, &arg, error));
+      Value seq = nil();
 
-      throws(tryAllocateCons(vm, arg, seq, &seq, error));
+      // may gc, so has to happen before we pop anything off the stack
+      throws(tryAllocateCons(vm, parent, nil(), nil(), &seq, error));
+
+      // gc possibility over, so pop sequence and arg from the stack and set them on cons
+      Cons *cons = NULL;
+      throws(deref(&vm->gc, (void*)&cons, seq.value, error));
+      throws(popOperand(parent, &cons->next, error));
+      throws(popOperand(parent, &cons->value, error));
+
+      // put the new sequence back on the stack
+      throws(pushOperand(parent, seq, error));
     }
-
-    throws(pushOperand(parent, seq, error));
   }
 
   if (numArgsSupplied.value == invocable.fn->numArgs && invocable.fn->usesVarArgs) {
     // wrap the last arg in a list
 
-    Value arg;
-    throws(popOperand(parent, &arg, error));
-
     Value seq = nil();
-    throws(tryAllocateCons(vm, arg, seq, &seq, error));
 
+    //may gc, so has to happen before we pop anything off the stack
+    throws(tryAllocateCons(vm, parent, nil(), nil(), &seq, error));
+
+    // gc possibility over, so pop arg from the stack and it on cons
+    Cons *cons = NULL;
+    throws(deref(&vm->gc, (void*)&cons, seq.value, error));
+    throws(popOperand(parent, &cons->value, error));
+
+    // put the one-element sequence back on the stack
     throws(pushOperand(parent, seq, error));
   }
 
@@ -2133,10 +2232,14 @@ RetVal tryLoadVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(readIndex(frame, &constantIndex, error));
   throws(getConst(frame, constantIndex, &varName, error));
 
+  if (varName.type != VT_STR) {
+    throwRuntimeError(error, "expected a string: %u", varName.type);
+  }
+
   String *str = NULL;
   throws(deref(&vm->gc, (void*)&str, varName.value, error));
 
-  Var *var;
+  Var *var = NULL;
   if (!resolveVar(&vm->namespaces, str->value, str->length, &var)) {
     // fail: not all vars exist
     throwRuntimeError(error, "no such var found: '%ls'", str->value);
@@ -2156,11 +2259,6 @@ void closureInitContents(Closure *cl) {
   cl->fn = nil();
   cl->numCaptures = 0;
   cl->captures = NULL;
-}
-
-uint64_t closureSize(Closure *cl) {
-  size_t capturesSize = cl->numCaptures * sizeof(Value);
-  return sizeof(Closure) + capturesSize;
 }
 
 // (8), offset (16) | (captures... -> value)
@@ -2186,7 +2284,7 @@ RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
   size_t clSize = sizeof(Closure) + capturesSize;
 
   uint64_t offset = 0;
-  throws(alloc(&vm->gc, clSize, (void*)&closure, &offset, error));
+  throws(alloc(vm, frame, clSize, (void*)&closure, &offset, error));
 
   Value closureValue;
   closureValue.type = VT_CLOSURE;
@@ -2266,19 +2364,24 @@ RetVal tryClearHandlerEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryConsEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
+  // (def d (large 30000))
+
+  // gc may occur, so allocate the cons first
+  Value result = nil();
+  throws(tryAllocateCons(vm, frame, nil(), nil(), &result, error));
+
   Value x, seq;
   throws(popOperand(frame, &seq, error));
   throws(popOperand(frame, &x, error));
 
-  Value result;
-  if (seq.type == VT_NIL || seq.type == VT_LIST) {
-    throws(tryAllocateCons(vm, x, seq, &result, error));
-  }
-  else {
-    // TODO: we need to print the actual type here, should make a metadata table for value types
-    // fail: not all types can be used as a seq
+  if (seq.type != VT_NIL && seq.type != VT_LIST) {
     throwRuntimeError(error, "cannot cons onto a value of type %u", seq.type);
   }
+
+  Cons *cons = NULL;
+  throws(deref(&vm->gc, (void*)&cons, result.value, error));
+  cons->value = x;
+  cons->next = seq;
 
   throws(pushOperand(frame, result, error));
 
