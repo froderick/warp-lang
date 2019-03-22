@@ -55,3 +55,10 @@
                     forms (drop 2 args))
                 `(def ~name (fn ~name ~fnargs ~@forms)))))
 (builtin :setmacro "defn")
+
+;; (defn fib (n)
+;;   (let (_fib (fn _fib (prev1 prev2 n)
+;;                  (if (= n 0)
+;;                      prev2
+;;                    (_fib prev2 (+ prev1 prev2) (- n 1)))))
+;;     (_fib 0 1 n)))

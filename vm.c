@@ -246,24 +246,38 @@ void evalResultFreeContents(VMEvalResult *r) {
  * :object       - interpreted as an unsigned integer, the value is a pointer
  *                 offset to dynamically-allocated memory on the heap.
  */
-  typedef enum ValueType {
-    VT_NIL,
-    VT_UINT,
-    VT_BOOL,
-    VT_FN,
+ typedef enum ValueType {
+   VT_NIL,
+   VT_UINT,
+   VT_BOOL,
+   VT_FN,
 //  VT_CHAR,
-        VT_STR,
-    VT_SYMBOL,
-    VT_KEYWORD,
-    VT_LIST,
-    VT_CLOSURE,
+   VT_STR,
+   VT_SYMBOL,
+   VT_KEYWORD,
+   VT_LIST,
+   VT_CLOSURE,
 //  VT_OBJECT,
-  } ValueType;
+} ValueType;
 
-  typedef struct Value {
-    ValueType type : 4;
-    uint64_t value : 60;
-  } Value;
+typedef struct Value {
+  ValueType type : 4;
+  uint64_t value : 60;
+} Value;
+
+/*
+ * This is the first field inside all heap objects. It must come first so that the GC can
+ * scan through the heap, for which it needs to determine object sizes and object types.
+ */
+typedef struct ObjectHeader {
+  ValueType type : 4;
+  size_t size : 60;
+} ObjectHeader;
+
+void objectHeaderInitContents(ObjectHeader *h) {
+  h->type = VT_NIL;
+  h->size = 0;
+}
 
 /*
  * The constant part of a function is the FnDef. This is what gets hydrated at eval time.
@@ -271,6 +285,8 @@ void evalResultFreeContents(VMEvalResult *r) {
  */
 
 typedef struct Fn {
+  ObjectHeader header;
+
   bool hasName;
   uint64_t nameLength;
   wchar_t *name;
@@ -295,30 +311,41 @@ typedef struct Fn {
 } Fn;
 
 typedef struct Closure {
+  ObjectHeader header;
+
   Value fn;
   uint16_t numCaptures;
   Value *captures;
 } Closure;
 
 typedef struct String {
+  ObjectHeader header;
+
   uint64_t length;
   wchar_t *value;
 } String;
 
 typedef struct Symbol {
+  ObjectHeader header;
+
   uint64_t length;
   wchar_t *value;
 } Symbol;
 
 typedef struct Keyword {
+  ObjectHeader header;
+
   uint64_t length;
   wchar_t *value;
 } Keyword;
 
 typedef struct Cons {
+  ObjectHeader header;
+
   Value value;
   Value next; // this must be a Cons, or Nil
 } Cons;
+
 
 typedef struct GC {
 
@@ -575,6 +602,27 @@ uint64_t closureSize(Closure *cl);
 RetVal relocate(GC *gc, void *oldHeap, Value *value, Error *error) {
   RetVal ret;
 
+  switch (value->type) {
+
+    case VT_NIL:
+    case VT_UINT:
+    case VT_BOOL:
+      // these do not live as objects on the heap
+      return R_SUCCESS;
+
+    case VT_FN:
+    case VT_STR:
+    case VT_SYMBOL:
+    case VT_KEYWORD:
+    case VT_LIST:
+    case VT_CLOSURE:
+      // these are on the heap and require relocation
+      break;
+
+    default:
+      throwRuntimeError(error, "unknown value type");
+  }
+
   void *ptr = NULL;
   if (value->value > gc->heapSize) {
     throwRuntimeError(error, "invalid memory address");
@@ -588,31 +636,7 @@ RetVal relocate(GC *gc, void *oldHeap, Value *value, Error *error) {
       value->value = *forwardPtr - gc->currentHeap;
     }
     else {
-
-      // TODO: is this worth the heap space savings, vs storing the size of each object with the object?
-      size_t size = 0;
-      switch (value->type) {
-        case VT_FN:
-          size = fnSize((Fn*)ptr);
-          break;
-        case VT_STR:
-          size = strSize((String*)ptr);
-          break;
-        case VT_SYMBOL:
-          size = symbolSize((Symbol*)ptr);
-          break;
-        case VT_KEYWORD:
-          size = keywordSize((Keyword*)ptr);
-          break;
-        case VT_LIST:
-          size = consSize((Cons*)ptr);
-          break;
-        case VT_CLOSURE:
-          size = closureSize((Closure*)ptr);
-          break;
-        default:
-          throwRuntimeError(error, "unsupported type: %u", value->type);
-      }
+      size_t size = ((ObjectHeader*)ptr)->size;
 
       void *newPtr = NULL;
       uint64_t offset = 0;
@@ -710,6 +734,49 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
 
   void *scanptr = vm->gc.currentHeap;
 
+  while (scanptr < vm->gc.allocPtr) {
+
+    // relocate all the objects this object references
+    ObjectHeader *header = scanptr;
+    switch (header->type) {
+
+      case VT_FN:
+      case VT_STR:
+      case VT_SYMBOL:
+      case VT_KEYWORD:
+        // no references
+        break;
+
+      case VT_LIST: {
+        Cons *cons = scanptr;
+        relocate(&vm->gc, oldHeap, &cons->value, error);
+        relocate(&vm->gc, oldHeap, &cons->next, error);
+        break;
+      }
+
+      case VT_CLOSURE: {
+        Closure *closure = scanptr;
+        relocate(&vm->gc, oldHeap, &closure->fn, error);
+        for (uint16_t i=0; i<closure->numCaptures; i++) {
+          relocate(&vm->gc, oldHeap, &closure->captures[i], error);
+        }
+        break;
+      }
+
+      default:
+        throwRuntimeError(error, "unknown value type: %u", header->type);
+    }
+
+    scanptr += header->size;
+  }
+
+  return;
+
+  failure:
+    printf("collect() failed, terminating process :)\n");
+    exit(-1);
+}
+
   /*
    * TODO: scanptr requires that objects in the heap be scannable, meaning that they must contain
    * type information, and may as well contain size information too
@@ -717,6 +784,8 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
    * This probably means we need to make a union container for the objects.
    * As an upside, this will make computing object sizes faster. As a downside, it will increase object sizes.
    * We can probably pack both into a 32 or 64-bit word.
+   *
+   * TODO: port alloc/deref calling code to work with Object struct
    */
 
   /*
@@ -735,13 +804,6 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
    *       update the old space with a forwarding pointer to the new space
    *
    */
-
-  return;
-
-  failure:
-    printf("collect() failed, terminating process :)\n");
-    exit(-1);
-}
 
 /*
  * Loading Constants as Values
@@ -813,6 +875,8 @@ RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, 
 
 void fnInitContents(Fn *fn) {
 
+  objectHeaderInitContents(&fn->header);
+
   fn->hasName = false;
   fn->nameLength = 0;
   fn->name = NULL;
@@ -869,6 +933,9 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   value->value = offset;
 
   fnInitContents(fn);
+
+  fn->header.type = VT_FN;
+  fn->header.size = fnSize;
 
   void *base = fn;
   fn->name           = base + sizeof(Fn);
@@ -934,6 +1001,7 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 }
 
 void stringInitContents(String *s) {
+  objectHeaderInitContents(&s->header);
   s->length = 0;
   s->value = NULL;
 }
@@ -958,6 +1026,8 @@ RetVal _tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value, E
   value->value = offset;
 
   stringInitContents(str);
+  str->header.type = VT_STR;
+  str->header.size = strSize;
   str->length = length;
 
   void *base = str;
@@ -992,6 +1062,7 @@ RetVal tryVarRefHydrate(VM *vm, VarRefConstant varRefConst, Value *value, Error 
 }
 
 void symbolInitContents(Symbol *s) {
+  objectHeaderInitContents(&s->header);
   s->length = 0;
   s->value = NULL;
 }
@@ -1016,6 +1087,8 @@ RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *er
   value->value = offset;
 
   symbolInitContents(sym);
+  sym->header.type = VT_SYMBOL;
+  sym->header.size = size;
   sym->length = symConst.length;
 
   void *base = sym;
@@ -1030,6 +1103,7 @@ RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *er
 }
 
 void keywordInitContents(Keyword *k) {
+  objectHeaderInitContents(&k->header);
   k->length = 0;
   k->value = NULL;
 }
@@ -1054,6 +1128,8 @@ RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *e
   value->value = offset;
 
   keywordInitContents(kw);
+  kw->header.type = VT_KEYWORD;
+  kw->header.size = size;
   kw->length = kwConst.length;
 
   void *base = kw;
@@ -1068,6 +1144,7 @@ RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *e
 }
 
 void consInitContents(Cons *c) {
+  objectHeaderInitContents(&c->header);
   c->value = nil();
   c->next = nil();
 }
@@ -1094,6 +1171,8 @@ RetVal tryAllocateCons(VM *vm, Value value, Value next, Value *ptr, Error *error
   ptr->value = offset;
 
   consInitContents(cons);
+  cons->header.type = VT_LIST;
+  cons->header.size = size;
   cons->value = value;
   cons->next = next;
 
@@ -2073,6 +2152,7 @@ RetVal tryLoadVarEval(VM *vm, ExecFrame_t frame, Error *error) {
 }
 
 void closureInitContents(Closure *cl) {
+  objectHeaderInitContents(&cl->header);
   cl->fn = nil();
   cl->numCaptures = 0;
   cl->captures = NULL;
@@ -2113,6 +2193,8 @@ RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
   closureValue.value = offset;
 
   closureInitContents(closure);
+  closure->header.type = VT_CLOSURE;
+  closure->header.size = clSize;
   closure->fn = fnValue;
   closure->numCaptures = fn->numCaptures;
 
