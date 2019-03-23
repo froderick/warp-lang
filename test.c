@@ -782,18 +782,16 @@ START_TEST(repl) {
     assertEval(L"(defn x () (+ 1 nil))", L"nil");
     assertEval(L"(let () (defn x (y) (+ y 10)) (x 11))", L"21");
 
+    // this was a bug where ifs could not be nested
+    assertEval(L"(if true (if true 'x 'y) 'z)", L"x");
 
-//    (def adder (fn (args)
-//                    (cons '+
-//        (cons (first args)
-//    (cons (second args) nil)))))
-//    (builtin :setmacro "adder")
+    assertEval(L"(and nil true)", L"false");
+    assertEval(L"(and 1 true)", L"true");
+    assertEval(L"(or false false)", L"nil");
+    assertEval(L"(or false 10)", L"10");
+    assertEval(L"(or 11 false)", L"11");
+    assertEval(L"(or 11 12)", L"11");
 
-//    assertEval(L"(let ()"
-//               "   (def adder (fn (args) (list 'builtin :add (list 'builtin :first args) (list 'builtin :first (list 'builtin :first args)))))"
-//               "   (builtin :setmacro \"adder\")"
-//               "   (adder 10 11))",
-//               L"21");
   }
 END_TEST
 
@@ -815,6 +813,7 @@ END_TEST
 
 START_TEST(gc) {
 
+    // this was failing because of stupid memory errors
     assertEvalNoStd(L"(let () "
                     "   (def x (fn () \"hi\"))"
                     "   (builtin :gc)"

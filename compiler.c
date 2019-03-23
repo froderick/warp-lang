@@ -215,25 +215,32 @@ RetVal tryAppendSource(Form *form, Output output, Error *error) {
   return ret;
 }
 
+void setIndexAtOffset(Output output, uint16_t index, uint16_t value) {
+  output.codes->codes[index] = value >> 8;
+  output.codes->codes[index + 1] = value & 0xFF;
+}
+
 RetVal tryCompile(Form *form, Output output, Error *error);
 
+// TODO: stop using temporary compilation spaces, they don't work when ifs are nested
+// *instead*, compile everything inline, but keep pointers to the forward-jump addresses that need to be updated once
+// the sizes of the compiled then/else blocks are known
 RetVal tryCompileIf(Form *form, Output output, Error *error) {
   RetVal ret;
 
-  Codes ifBranch, elseBranch;
-
-  codesInitContents(&ifBranch);
-  codesInitContents(&elseBranch);
-
-  // emit the test in the main code space
+  // emit the test code
   throws(tryCompile(form->iff.test, output, error));
 
-  // emit ifBranch form in temporary code space
+  // emit the testFailedJump code, keep a pointer to the jump address
+  uint16_t testFailedJumpAddrOffset;
   {
-    Output ifOutput = output;
-    ifOutput.codes = &ifBranch;
-    throws(tryCompile(form->iff.ifBranch, ifOutput, error));
+    uint8_t testFailedJumpCode[] = { I_JMP_IF_NOT, 0, 0 };
+    throws(tryCodeAppend(output.codes, sizeof(testFailedJumpCode), testFailedJumpCode, error));
+    testFailedJumpAddrOffset = output.codes->numUsed - 2;
   }
+
+  // emit ifBranch form code
+  throws(tryCompile(form->iff.ifBranch, output, error));
 
   if (form->iff.elseBranch == NULL) {
 
@@ -244,15 +251,9 @@ RetVal tryCompileIf(Form *form, Output output, Error *error) {
     // }
     // $END_ADDR
 
-    // compute the conditional code, lengths and offsets
+    // the testFailedJumpAddr should point to the first address after the ifBranch
     uint16_t nextCodeAddr = output.codes->numUsed;
-    uint16_t ifBranchLength = ifBranch.numUsed;
-    uint16_t jumpToEndAddr = nextCodeAddr + ifBranchLength;
-    uint8_t jumpToEndCode[] = { I_JMP_IF_NOT, jumpToEndAddr >> 8, jumpToEndAddr & 0xFF };
-
-    // emit the code for real
-    throws(tryCodeAppend(output.codes, sizeof(jumpToEndCode), jumpToEndCode, error));
-    throws(tryCodeAppendContents(&ifBranch, output.codes, error));
+    setIndexAtOffset(output, testFailedJumpAddrOffset, nextCodeAddr);
   }
   else {
 
@@ -268,41 +269,32 @@ RetVal tryCompileIf(Form *form, Output output, Error *error) {
     // }
     // $END_ADDR
 
-    // emit elseBranch form in temporary code space
+    // emit the jumpToEnd code to terminate the if branch, keep a pointer to the jump address
+    uint16_t jumpToEndAddrOffset;
     {
-      Output elseOutput = output;
-      elseOutput.codes = &elseBranch;
-      throws(tryCompile(form->iff.elseBranch, elseOutput, error));
+      uint8_t jumpToEndCode[] = {I_JMP, 0, 0};
+      throws(tryCodeAppend(output.codes, sizeof(jumpToEndCode), jumpToEndCode, error));
+      jumpToEndAddrOffset = output.codes->numUsed - 2;
     }
 
-    // compute the conditional code, lengths and offsets
-    uint16_t nextCodeAddr = output.codes->numUsed;
-    uint16_t jumpToElseCodeLength = 3;
-    uint16_t ifBranchLength = ifBranch.numUsed;
-    uint16_t jumpToEndCodeLength = 3;
-    uint16_t elseBranchLength = elseBranch.numUsed;
+    // the testFailedJumpAddr should point to the first address after the ifBranch
+    {
+      uint16_t nextCodeAddr = output.codes->numUsed;
+      setIndexAtOffset(output, testFailedJumpAddrOffset, nextCodeAddr);
+    }
 
-    uint16_t jumpToElseAddr = nextCodeAddr + jumpToElseCodeLength + ifBranchLength + jumpToEndCodeLength;
-    uint8_t jumpToElseCode[] = {I_JMP_IF_NOT, jumpToElseAddr >> 8, jumpToElseAddr & 0xFF};
+    // emit elseBranch form code
+    throws(tryCompile(form->iff.elseBranch, output, error));
 
-    uint16_t jumpToEndAddr = jumpToElseAddr + elseBranchLength;
-    uint8_t jumpToEndCode[] = {I_JMP, jumpToEndAddr >> 8, jumpToEndAddr & 0xFF};
-
-    // emit the code for real
-    throws(tryCodeAppend(output.codes, sizeof(jumpToElseCode), jumpToElseCode, error));
-    throws(tryCodeAppendContents(&ifBranch, output.codes, error));
-    throws(tryCodeAppend(output.codes, sizeof(jumpToEndCode), jumpToEndCode, error));
-    throws(tryCodeAppendContents(&elseBranch, output.codes, error));
+    // the jumpToEndAddr should point to the first address after the elseBranch
+    {
+      uint16_t nextCodeAddr = output.codes->numUsed;
+      setIndexAtOffset(output, jumpToEndAddrOffset, nextCodeAddr);
+    }
   }
 
-  codesFreeContents(&ifBranch);
-  codesFreeContents(&elseBranch);
-
   return R_SUCCESS;
-
   failure:
-    codesFreeContents(&ifBranch);
-    codesFreeContents(&elseBranch);
     return ret;
 }
 

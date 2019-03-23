@@ -285,3 +285,28 @@ Profuse swearing guaranteed.
 // - collect a list of function references, along with pointers to their intended value locations, while hydrating a function
 // - before completing hydration, resolve any matching references with the function's hydrated value
 // - explode if there are any references that the current function can't satisfy, since we don't support closures yet
+
+gc debugging
+------------
+
+(ObjectHeader*)((uint64_t )oldHeap + 153 + 140 + 36 + 32)
+
+before gc 1:
+
+    fn(153)
+    fn(140) constant is string:293
+    str(36) "hi"
+    str(32) "x"
+
+after gc 1:
+
+    fn(140) constant is string:293
+    fn(153)
+    str(36) "hi"
+    str(32) "x"
+
+
+mid gc 2, pre scanptr:
+
+    fn(140): constant is corrupted (nil type plus huge value)
+    fn(153): constant is not corrupted

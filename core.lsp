@@ -21,7 +21,6 @@
                  seq
                (drop (dec i) (rest seq)))))
 
-
 (def reverse (fn reverse (seq)
                  (let (_reverse (fn _reverse (old new)
                                     (if (nil? old)
@@ -69,3 +68,31 @@
                     seq
                     (_large (dec n) (cons n seq)))))
     (_large n nil)))
+
+(defn and (a b)
+  (if a
+    (if b true false)
+    false))
+
+(defn or (a b)
+  (if a
+    a
+    (if b b nil)))
+
+;; (let (a 1 b 2)
+;;   (if a
+;;     (if b true false)
+;;     false))
+
+;; (defn take (n coll)
+;;   (let (_take (fn _take (accum n coll)
+;;                  (if (zero? n)
+;;                    (if (nil? coll)
+;;                    (reverse accum)
+;;                    (_take (cons (
+;;                  ))
+;;     (take nil n coll)))
+
+
+;; todo: or, and, not, cond, print-bytecode for vars and for arbitrary expressions, deref vars / @
+;; todo:
