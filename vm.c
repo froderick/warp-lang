@@ -290,55 +290,78 @@ typedef struct Fn {
 
   bool hasName;
   uint64_t nameLength;
-  wchar_t *name;
+//  wchar_t *name;
+  size_t nameOffset;
   uint16_t numCaptures;
   uint16_t numArgs;
   bool usesVarArgs;
 
   uint16_t numConstants;
-  Value *constants;
+//  Value *constants;
+  size_t constantsOffset;
 
   uint16_t numLocals;           // the number of local bindings this code unit uses
   uint64_t maxOperandStackSize; // the maximum number of items this code pushes onto the operand stack at one time
   uint64_t codeLength;          // the number of bytes in this code block
-  uint8_t *code;                // this code block's actual instructions
+//  uint8_t *code;                // this code block's actual instructions
+  size_t codeOffset;
 
   bool hasSourceTable;
   uint64_t sourceFileNameLength;
-  wchar_t *sourceFileName;
+//  wchar_t *sourceFileName;
+  size_t sourceFileNameOffset;
   uint64_t numLineNumbers;
-  LineNumber *lineNumbers;
+//  LineNumber *lineNumbers;
+  size_t lineNumbersOffset;
 
 } Fn;
+
+wchar_t* fnName(Fn *fn) { return (void*)fn + fn->nameOffset; }
+Value* fnConstants(Fn *fn) { return (void*)fn + fn->constantsOffset; }
+uint8_t* fnCode(Fn *fn) { return (void*)fn + fn->codeOffset; }
+wchar_t* fnSourceFileName(Fn *fn) { return (void*)fn + fn->sourceFileNameOffset; }
+LineNumber* fnLineNumbers(Fn *fn) { return (void*)fn + fn->lineNumbersOffset; }
 
 typedef struct Closure {
   ObjectHeader header;
 
   Value fn;
   uint16_t numCaptures;
-  Value *captures;
+//  Value *captures;
+  size_t capturesOffset;
 } Closure;
+
+Value* closureCaptures(Closure *closure) { return (void*)closure + closure->capturesOffset; }
 
 typedef struct String {
   ObjectHeader header;
 
   uint64_t length;
-  wchar_t *value;
+//  wchar_t *value;
+  size_t valueOffset;
 } String;
+
+wchar_t* stringValue(String *x) { return (void*)x + x->valueOffset; }
 
 typedef struct Symbol {
   ObjectHeader header;
 
   uint64_t length;
-  wchar_t *value;
+//  wchar_t *value;
+  size_t valueOffset;
 } Symbol;
+
+wchar_t* symbolValue(Symbol *x) { return (void*)x + x->valueOffset; }
 
 typedef struct Keyword {
   ObjectHeader header;
 
   uint64_t length;
-  wchar_t *value;
+//  wchar_t *value;
+  size_t valueOffset;
 } Keyword;
+
+wchar_t* keywordValue(Keyword *x) { return (void*)x + x->valueOffset; }
 
 typedef struct Cons {
   ObjectHeader header;
@@ -346,7 +369,6 @@ typedef struct Cons {
   Value value;
   Value next; // this must be a Cons, or Nil
 } Cons;
-
 
 typedef struct GC {
 
@@ -534,18 +556,6 @@ RetVal tryGCInitContents(GC *gc, uint64_t maxHeapSize, Error *error) {
     return ret;
 }
 
-/*
- * if heap has space for allocated value, allocate:
- *   write object at allocPtr
- *   save allocPtr as new value location
- *   increase allocPtr by length of object
- *
- * else
- *   collect
- *   if heap has space for allocated value, allocate
- *   else fail
- */
-
 void collect(VM *vm, ExecFrame_t frame, Error *error);
 
 #define R_OOM 1
@@ -566,27 +576,12 @@ int _alloc(GC *gc, uint64_t length, void **ptr, uint64_t *offset) {
   if (gc->allocPtr + length < gc->currentHeapEnd) {
     *ptr = gc->allocPtr;
     *offset = gc->allocPtr - gc->currentHeap;
-
-    if (*offset > gc->heapSize) {
-      printf("what");
-    }
-
     gc->allocPtr += length;
     return R_SUCCESS;
   }
   else {
     return R_OOM;
   }
-
-//  uint64_t heapUsed = gc->allocPtr - gc->currentHeap;
-//  if (heapUsed + length < gc->heapSize) {
-//    *ptr = gc->allocPtr;
-//    gc->allocPtr += length;
-//  }
-//  else {
-//    return R_OOM;
-//  }
-
 }
 
 /*
@@ -629,8 +624,6 @@ RetVal deref(GC *gc, void **ptr, uint64_t offset, Error *error) {
 bool inCurrentHeap(GC *gc, void *ptr) {
   return gc->currentHeap <= ptr && ptr < gc->currentHeapEnd;
 }
-
-// TODO: use asserts instead of exceptions, we can't afford to allow a gc to fail in a partial state
 
 RetVal relocate(VM *vm, void *oldHeap, Value *value, Error *error) {
   RetVal ret;
@@ -683,24 +676,6 @@ RetVal relocate(VM *vm, void *oldHeap, Value *value, Error *error) {
 
     *forwardPtr = newPtr;
   }
-
-  if (value->value >= 31138512903) {
-    printf("what2\n");
-  }
-
-  /*
-   * compute pointer value from offset
-   * if the pointer points to the new space, skip it (already moved)
-   * else if the pointer points to a forwarding pointer
-   *   update the root value to point to the new copy
-   * else
-   *   dereference it
-   *   determine its size
-   *   copy it to allocptr, increment allocptr
-   *   update the root value to point to the new copy
-   *   update the old space with a forwarding pointer to the new space
-   */
-
 
   return R_SUCCESS;
   failure:
@@ -802,17 +777,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
       case VT_FN: {
         Fn *fn = scanptr;
         for (uint16_t i=0; i<fn->numConstants; i++) {
-
-          if (fn->constants[i].value >= 31138512900) {
-            printf("what4\n");
-          }
-
-          throws(relocate(vm, oldHeap, &fn->constants[i], error));
-
-
-          if (fn->constants[i].value >= 31138512900) {
-            printf("what2\n");
-          }
+          throws(relocate(vm, oldHeap, &fnConstants(fn)[i], error));
         }
         break;
       }
@@ -828,7 +793,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
         Closure *closure = scanptr;
         throws(relocate(vm, oldHeap, &closure->fn, error));
         for (uint16_t i=0; i<closure->numCaptures; i++) {
-          throws(relocate(vm, oldHeap, &closure->captures[i], error));
+          throws(relocate(vm, oldHeap, &closureCaptures(closure)[i], error));
         }
         break;
       }
@@ -853,34 +818,6 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
     printf("collect() failed, terminating process :)\n");
     exit(-1);
 }
-
-  /*
-   * TODO: scanptr requires that objects in the heap be scannable, meaning that they must contain
-   * type information, and may as well contain size information too
-   *
-   * This probably means we need to make a union container for the objects.
-   * As an upside, this will make computing object sizes faster. As a downside, it will increase object sizes.
-   * We can probably pack both into a 32 or 64-bit word.
-   *
-   * TODO: port alloc/deref calling code to work with Object struct
-   */
-
-  /*
-   * iterate over the objects in the new space that need to be scanned, for each:
-   *   traverse the value references within, foreach:
-   *
-   *     compute pointer value from offset
-   *     if the pointer points to the new space, skip it (already moved)
-   *     else if the pointer points to a forwarding pointer
-   *       update the reference value to point to the new copy
-   *     else
-   *       dereference it
-   *       determine its size
-   *       copy it to allocptr, increment allocptr
-   *       update the root value to point to the new copy
-   *       update the old space with a forwarding pointer to the new space
-   *
-   */
 
 /*
  * Loading Constants as Values
@@ -956,23 +893,23 @@ void fnInitContents(Fn *fn) {
 
   fn->hasName = false;
   fn->nameLength = 0;
-  fn->name = NULL;
+  fn->nameOffset = 0;
   fn->numCaptures = 0;
   fn->numArgs = 0;
   fn->usesVarArgs = false;
   fn->numConstants = 0;
-  fn->constants = NULL;
+  fn->constantsOffset = 0;
 
   fn->numLocals = 0;
   fn->maxOperandStackSize = 0;
   fn->codeLength = 0;
-  fn->code = NULL;
+  fn->codeOffset = 0;
 
   fn->hasSourceTable = false;
   fn->sourceFileNameLength = 0;
-  fn->sourceFileName = NULL;
+  fn->sourceFileNameOffset = 0;
   fn->numLineNumbers = 0;
-  fn->lineNumbers = NULL;
+  fn->lineNumbersOffset = 0;
 }
 
 RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
@@ -1006,18 +943,17 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   fn->header.type = VT_FN;
   fn->header.size = fnSize;
 
-  void *base = fn;
-  fn->name           = base + sizeof(Fn);
-  fn->constants      = base + sizeof(Fn) + nameSize;
-  fn->code           = base + sizeof(Fn) + nameSize + constantsSize;
-  fn->sourceFileName = base + sizeof(Fn) + nameSize + constantsSize + codeSize;
-  fn->lineNumbers    = base + sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize;
+  fn->nameOffset           = sizeof(Fn);
+  fn->constantsOffset      = sizeof(Fn) + nameSize;
+  fn->codeOffset           = sizeof(Fn) + nameSize + constantsSize;
+  fn->sourceFileNameOffset = sizeof(Fn) + nameSize + constantsSize + codeSize;
+  fn->lineNumbersOffset    = sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize;
 
   fn->hasName = fnConst->hasName;
   if (fn->hasName) {
     fn->nameLength = fnConst->name.length;
-    memcpy(fn->name, fnConst->name.value, nameSize);
-    fn->name[fn->nameLength] = L'\0';
+    memcpy(fnName(fn), fnConst->name.value, nameSize);
+    fnName(fn)[fn->nameLength] = L'\0';
   }
 
   fn->numCaptures = fnConst->numCaptures;
@@ -1026,14 +962,14 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 
   {
     fn->numConstants = fnConst->numConstants;
-    throws(_tryHydrateConstants(vm, fn->numConstants, fnConst->constants, fn->constants, &unresolved, error));
+    throws(_tryHydrateConstants(vm, fn->numConstants, fnConst->constants, fnConstants(fn), &unresolved, error));
 
     for (uint16_t i=0; i<unresolved.usedSpace; i++) {
       UnresolvedFnRef ref = unresolved.references[i];
 
       if (ref.fnRef.fnId == fnConst->fnId) {
         // resolve the reference
-        fn->constants[ref.constantIndex] = *value;
+        fnConstants(fn)[ref.constantIndex] = *value;
       }
       else {
         throwRuntimeError(error, "cannot hydrate a reference to a function other than the current one: %llu", ref.fnRef.fnId);
@@ -1046,18 +982,18 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 
   {
     fn->codeLength = fnConst->code.codeLength;
-    memcpy(fn->code, fnConst->code.code, codeSize);
+    memcpy(fnCode(fn), fnConst->code.code, codeSize);
   }
 
   fn->hasSourceTable = fnConst->code.hasSourceTable;
   if (fn->hasSourceTable) {
 
       fn->sourceFileNameLength = fnConst->code.sourceTable.fileName.length;
-      memcpy(fn->sourceFileName, fnConst->code.sourceTable.fileName.value, sourceFileNameSize);
-      fn->sourceFileName[fn->sourceFileNameLength] = L'\0';
+      memcpy(fnSourceFileName(fn), fnConst->code.sourceTable.fileName.value, sourceFileNameSize);
+      fnSourceFileName(fn)[fn->sourceFileNameLength] = L'\0';
 
       fn->numLineNumbers = fnConst->code.sourceTable.numLineNumbers;
-      memcpy(fn->lineNumbers, fnConst->code.sourceTable.lineNumbers, lineNumbersSize);
+      memcpy(fnLineNumbers(fn), fnConst->code.sourceTable.lineNumbers, lineNumbersSize);
   }
 
   unresolvedFnRefsFreeContents(&unresolved);
@@ -1072,7 +1008,7 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 void stringInitContents(String *s) {
   objectHeaderInitContents(&s->header);
   s->length = 0;
-  s->value = NULL;
+  s->valueOffset = 0;
 }
 
 RetVal _tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value, Error *error) {
@@ -1097,10 +1033,9 @@ RetVal _tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value, E
   str->header.size = strSize;
   str->length = length;
 
-  void *base = str;
-  str->value = base + sizeof(String);
-  memcpy(str->value, text, length * sizeof(wchar_t));
-  str->value[length] = L'\0';
+  str->valueOffset = sizeof(String);
+  memcpy(stringValue(str), text, length * sizeof(wchar_t));
+  stringValue(str)[length] = L'\0';
 
   return R_SUCCESS;
 
@@ -1131,7 +1066,7 @@ RetVal tryVarRefHydrate(VM *vm, VarRefConstant varRefConst, Value *value, Error 
 void symbolInitContents(Symbol *s) {
   objectHeaderInitContents(&s->header);
   s->length = 0;
-  s->value = NULL;
+  s->valueOffset = 0;
 }
 
 RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *error) {
@@ -1155,10 +1090,9 @@ RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *er
   sym->header.size = size;
   sym->length = symConst.length;
 
-  void *base = sym;
-  sym->value = base + sizeof(Symbol);
-  memcpy(sym->value, symConst.value, sym->length * sizeof(wchar_t));
-  sym->value[sym->length] = L'\0';
+  sym->valueOffset = sizeof(Symbol);
+  memcpy(symbolValue(sym), symConst.value, sym->length * sizeof(wchar_t));
+  symbolValue(sym)[sym->length] = L'\0';
 
   return R_SUCCESS;
 
@@ -1169,7 +1103,7 @@ RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *er
 void keywordInitContents(Keyword *k) {
   objectHeaderInitContents(&k->header);
   k->length = 0;
-  k->value = NULL;
+  k->valueOffset = 0;
 }
 
 RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *error) {
@@ -1193,10 +1127,9 @@ RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *e
   kw->header.size = size;
   kw->length = kwConst.length;
 
-  void *base = kw;
-  kw->value = base + sizeof(Keyword);
-  memcpy(kw->value, kwConst.value, kw->length * sizeof(wchar_t));
-  kw->value[kw->length] = L'\0';
+  kw->valueOffset = sizeof(Keyword);
+  memcpy(keywordValue(kw), kwConst.value, kw->length * sizeof(wchar_t));
+  keywordValue(kw)[kw->length] = L'\0';
 
   return R_SUCCESS;
 
@@ -1261,21 +1194,6 @@ RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant list
   failure:
   return ret;
 }
-
-// TODO: when hydrating a function, determine its fn declaration depth and keep these in a mapping table after hydration is complete
-// TODO: while hydrating, keep a growing list of the constant specs and pointers to the values that should reference functions
-// TODO: after hydrating, iterate over the unresolved references, match them up by typeIndex
-
-// during analysis
-// - grant a unique id to each function
-// - within the function, when adding a binding for the function name, use this id for the binding typeIndex
-// during compilation
-// - include function ids in functions
-// - include function ids in constants that reference functions
-// during hydration
-// - collect a list of function references, along with pointers to their intended value locations, while hydrating a function
-// - before completing hydration, resolve any matching references with the function's hydrated value
-// - explode if there are any references that the current function can't satisfy, since we don't support closures yet
 
 RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, uint16_t constantIndex, UnresolvedFnRefs *unresolved, Error *error) {
   RetVal ret;
@@ -1358,6 +1276,7 @@ RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, 
     return ret;
 }
 
+// TODO: this is not being used. is this still needed? what problem was this solving?
 RetVal tryHydrateConstants(VM *vm, Value *constants, CodeUnit *codeUnit, Error *error) {
   RetVal ret;
 
@@ -1423,7 +1342,7 @@ RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
 
       expr->type = N_STRING;
       expr->string.length = str->length;
-      throws(tryCopyText(str->value, &expr->string.value, expr->string.length, error));
+      throws(tryCopyText(stringValue(str), &expr->string.value, expr->string.length, error));
       break;
     }
     case VT_SYMBOL: {
@@ -1433,7 +1352,7 @@ RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
 
       expr->type = N_SYMBOL;
       expr->symbol.length = sym->length;
-      throws(tryCopyText(sym->value, &expr->symbol.value, expr->string.length, error));
+      throws(tryCopyText(symbolValue(sym), &expr->symbol.value, expr->string.length, error));
       break;
     }
     case VT_KEYWORD: {
@@ -1443,7 +1362,7 @@ RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
 
       expr->type = N_KEYWORD;
       expr->keyword.length = kw->length;
-      throws(tryCopyText(kw->value, &expr->keyword.value, expr->string.length, error));
+      throws(tryCopyText(keywordValue(kw), &expr->keyword.value, expr->string.length, error));
       break;
     }
     case VT_LIST: {
@@ -1799,8 +1718,6 @@ RetVal tryStoreLocalEval(VM *vm, ExecFrame_t frame, Error *error) {
 }
 
 /*
- * The invocable should become the contract needed to init a frame on the stack
- *
  * TODO: let's make a separate heap (perm-gen) for compiled, loaded code
  * - this would mean that we can depend on the locations of functions not changing due to garbage collection
  *   while regular instructions within a function are being executed.
@@ -1963,7 +1880,7 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
 
     uint16_t nextLocalIdx = invocable.fn->numArgs;
     for (uint16_t i=0; i<invocable.fn->numCaptures; i++) {
-      throws(setLocal(child, nextLocalIdx, invocable.closure->captures[i], error));
+      throws(setLocal(child, nextLocalIdx, closureCaptures(invocable.closure)[i], error));
       nextLocalIdx = nextLocalIdx + 1;
     }
   }
@@ -2210,7 +2127,7 @@ RetVal tryDefVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   String *str = NULL;
   throws(deref(&vm->gc, (void*)&str, varName.value, error));
 
-  throws(tryDefVar(&vm->namespaces, str->value, str->length, value, error));
+  throws(tryDefVar(&vm->namespaces, stringValue(str), str->length, value, error));
 
   // define always returns nil
   Value result;
@@ -2242,9 +2159,9 @@ RetVal tryLoadVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(deref(&vm->gc, (void*)&str, varName.value, error));
 
   Var *var = NULL;
-  if (!resolveVar(&vm->namespaces, str->value, str->length, &var)) {
+  if (!resolveVar(&vm->namespaces, stringValue(str), str->length, &var)) {
     // fail: not all vars exist
-    throwRuntimeError(error, "no such var found: '%ls'", str->value);
+    throwRuntimeError(error, "no such var found: '%ls'", stringValue(str));
   }
   else {
     throws(pushOperand(frame, var->value, error));
@@ -2260,7 +2177,7 @@ void closureInitContents(Closure *cl) {
   objectHeaderInitContents(&cl->header);
   cl->fn = nil();
   cl->numCaptures = 0;
-  cl->captures = NULL;
+  cl->capturesOffset = 0;
 }
 
 // (8), offset (16) | (captures... -> value)
@@ -2298,15 +2215,14 @@ RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
   closure->fn = fnValue;
   closure->numCaptures = fn->numCaptures;
 
-  void *base = closure;
-  closure->captures = base + sizeof(Closure);
+  closure->capturesOffset = sizeof(Closure);
 
   // pop captures in reverse order, same as arguments
   for (uint16_t i=0; i<closure->numCaptures; i++) {
     Value capture;
     throws(popOperand(frame, &capture, error));
     uint16_t idx = closure->numCaptures - (1 + i);
-    closure->captures[idx] = capture;
+    closureCaptures(closure)[idx] = capture;
   }
 
   throws(pushOperand(frame, closureValue, error));
@@ -2412,7 +2328,6 @@ RetVal tryFirstEval(VM *vm, ExecFrame_t frame, Error *error) {
   }
   else {
     // TODO: we need to print the actual type here, should make a metadata table for value types
-    // fail: not all types can be used as a seq
     throwRuntimeError(error, "cannot get first from a value of type %u", seq.type);
   }
 
@@ -2444,7 +2359,6 @@ RetVal tryRestEval(VM *vm, ExecFrame_t frame, Error *error) {
     result = cons->next;
   }
   else {
-    // fail: not all types can be used as a seq
     // TODO: we need to print the actual type here, should make a metadata table for value types
     throwRuntimeError(error, "cannot get rest from a value of type %u", seq.type);
   }
@@ -2465,7 +2379,6 @@ RetVal trySetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(popOperand(frame, &strValue, error));
 
   if (strValue.type != VT_STR) {
-    // fail: not all types identify vars
     throwRuntimeError(error, "only symbols can identify vars: %u", strValue.type);
   }
 
@@ -2473,15 +2386,13 @@ RetVal trySetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(deref(&vm->gc, (void*)&str, strValue.value, error));
 
   Var *var;
-  if (!resolveVar(&vm->namespaces, str->value, str->length, &var)) {
-    // fail: not all vars exist
-    throwRuntimeError(error, "no such var exists: %ls", str->value);
+  if (!resolveVar(&vm->namespaces, stringValue(str), str->length, &var)) {
+    throwRuntimeError(error, "no such var exists: %ls", stringValue(str));
   }
 
   if (!var->isMacro) {
     if (var->value.type != VT_FN) {
-      // fail: only vars referring to functions can be macros
-      throwRuntimeError(error, "only vars referring to functions can be macros: %ls, %u", str->value, var->value.type);
+      throwRuntimeError(error, "only vars referring to functions can be macros: %ls, %u", stringValue(str), var->value.type);
     }
     var->isMacro = true;
   }
@@ -2502,7 +2413,6 @@ RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(popOperand(frame, &strValue, error));
 
   if (strValue.type != VT_STR) {
-    // fail: not all types identify vars
     throwRuntimeError(error, "only symbols can identify vars: %u", strValue.type);
   }
 
@@ -2514,7 +2424,7 @@ RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   result.value = false;
 
   Var *var;
-  if (resolveVar(&vm->namespaces, str->value, str->length, &var)) {
+  if (resolveVar(&vm->namespaces, stringValue(str), str->length, &var)) {
     result.value = var->isMacro;
   }
 
@@ -3018,7 +2928,7 @@ RetVal readInstruction(ExecFrame *frame, uint8_t *ptr, Error *error) {
     throwRuntimeError(error, "cannot read next instruction, no instructions left");
   }
 
-  *ptr = frame->fn->code[frame->pc];
+  *ptr = fnCode(frame->fn)[frame->pc];
   frame->pc += 1;
 
   return R_SUCCESS;
@@ -3034,7 +2944,7 @@ RetVal readIndex(ExecFrame *frame, uint16_t *ptr, Error *error) {
     throwRuntimeError(error, "cannot read next instruction, no instructions left");
   }
 
-  uint8_t *code = frame->fn->code;
+  uint8_t *code = fnCode(frame->fn);
   uint16_t pc = frame->pc;
   *ptr = (code[pc] << 8) | code[pc + 1];
   frame->pc += 2;
@@ -3067,7 +2977,7 @@ RetVal getConst(ExecFrame *frame, uint16_t constantIndex, Value *ptr, Error *err
     throwRuntimeError(error, "no such constant: %u", constantIndex);
   }
 
-  *ptr = frame->fn->constants[constantIndex];
+  *ptr = fnConstants(frame->fn)[constantIndex];
   return R_SUCCESS;
 
   failure:
@@ -3266,7 +3176,7 @@ RetVal getFnName(ExecFrame_t frame, Text *name, Error *error) {
     throwRuntimeError(error, "no fn name found");
   }
 
-  name->value = frame->fn->name;
+  name->value = fnName(frame->fn);
   name->length = frame->fn->nameLength;
   return R_SUCCESS;
 
@@ -3281,7 +3191,7 @@ bool hasSourceTable(ExecFrame *frame) {
 bool getLineNumber(ExecFrame *frame, uint64_t *lineNumber) {
   if (frame->fn->hasSourceTable) {
     for (uint64_t i=0; i<frame->fn->numLineNumbers; i++) {
-      LineNumber *l = &frame->fn->lineNumbers[i];
+      LineNumber *l = &fnLineNumbers(frame->fn)[i];
       if (l->startInstructionIndex >= frame->pc) {
         break;
       }
@@ -3295,7 +3205,7 @@ bool getLineNumber(ExecFrame *frame, uint64_t *lineNumber) {
 
 bool getFileName(ExecFrame_t frame, Text *fileName) {
   if (frame->fn->hasSourceTable) {
-    fileName->value = frame->fn->sourceFileName;
+    fileName->value = fnSourceFileName(frame->fn);
     fileName->length = frame->fn->sourceFileNameLength;
     return true;
   }

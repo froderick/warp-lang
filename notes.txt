@@ -217,3 +217,71 @@ Profuse swearing guaranteed.
  *
  * TODO: are lists builtins the VM supplies, or things that are implemented on top of it?
  */
+
+/*
+ * compute pointer value from offset
+ * if the pointer points to the new space, skip it (already moved)
+ * else if the pointer points to a forwarding pointer
+ *   update the root value to point to the new copy
+ * else
+ *   dereference it
+ *   determine its size
+ *   copy it to allocptr, increment allocptr
+ *   update the root value to point to the new copy
+ *   update the old space with a forwarding pointer to the new space
+ */
+
+  /*
+   * TODO: scanptr requires that objects in the heap be scannable, meaning that they must contain
+   * type information, and may as well contain size information too
+   *
+   * This probably means we need to make a union container for the objects.
+   * As an upside, this will make computing object sizes faster. As a downside, it will increase object sizes.
+   * We can probably pack both into a 32 or 64-bit word.
+   *
+   * TODO: port alloc/deref calling code to work with Object struct
+   */
+
+  /*
+   * iterate over the objects in the new space that need to be scanned, for each:
+   *   traverse the value references within, foreach:
+   *
+   *     compute pointer value from offset
+   *     if the pointer points to the new space, skip it (already moved)
+   *     else if the pointer points to a forwarding pointer
+   *       update the reference value to point to the new copy
+   *     else
+   *       dereference it
+   *       determine its size
+   *       copy it to allocptr, increment allocptr
+   *       update the root value to point to the new copy
+   *       update the old space with a forwarding pointer to the new space
+   *
+   */
+
+/*
+ * if heap has space for allocated value, allocate:
+ *   write object at allocPtr
+ *   save allocPtr as new value location
+ *   increase allocPtr by length of object
+ *
+ * else
+ *   collect
+ *   if heap has space for allocated value, allocate
+ *   else fail
+ */
+
+// TODO: when hydrating a function, determine its fn declaration depth and keep these in a mapping table after hydration is complete
+// TODO: while hydrating, keep a growing list of the constant specs and pointers to the values that should reference functions
+// TODO: after hydrating, iterate over the unresolved references, match them up by typeIndex
+
+// during analysis
+// - grant a unique id to each function
+// - within the function, when adding a binding for the function name, use this id for the binding typeIndex
+// during compilation
+// - include function ids in functions
+// - include function ids in constants that reference functions
+// during hydration
+// - collect a list of function references, along with pointers to their intended value locations, while hydrating a function
+// - before completing hydration, resolve any matching references with the function's hydrated value
+// - explode if there are any references that the current function can't satisfy, since we don't support closures yet
