@@ -1,4 +1,4 @@
-#include <string.h>
+  #include <string.h>
 #include <libgen.h>
 #include "repl.h"
 #include "compiler.h"
@@ -52,7 +52,8 @@ RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit
     return ret;
 }
 
-RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
+RetVal tryReplEvalConf(wchar_t *inputText, wchar_t **outputText, bool useStdLib, Error *error) {
+
   RetVal ret;
 
   CodeUnit unit;
@@ -69,8 +70,10 @@ RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
   throws(tryStreamMake(source, &stream, error));
   throws(tryVMMake(&vm, error));
 
-  char *stdLib = "/Users/ddcmhenry/dev/funtastic/branches/warp-lang/core.lsp";
-  throws(tryLoad(vm, stdLib, error));
+  if (useStdLib) {
+    char *stdLib = "/Users/ddcmhenry/dev/funtastic/branches/warp-lang/core.lsp";
+    throws(tryLoad(vm, stdLib, error));
+  }
 
   FileInfo fileInfo;
   fileInfoInitContents(&fileInfo);
@@ -99,6 +102,10 @@ RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
     vmFreeContents(vm);
     codeUnitFreeContents(&unit);
     return ret;
+}
+
+RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
+  return tryReplEvalConf(inputText, outputText, true, error);
 }
 
 RetVal tryTextMakeFromChar(char *filename, Text *to, Error *error) {

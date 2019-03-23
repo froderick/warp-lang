@@ -733,6 +733,8 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
   vm->gc.currentHeapEnd = vm->gc.currentHeap + vm->gc.heapSize;
   vm->gc.allocPtr = vm->gc.currentHeap;
 
+  memset(vm->gc.currentHeap, 0, vm->gc.heapSize);
+
   // relocate var roots
   for (uint64_t i=0; i<vm->namespaces.numNamespaces; i++) {
     Namespace *ns = &vm->namespaces.namespaces[i];
