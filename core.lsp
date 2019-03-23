@@ -79,20 +79,17 @@
     a
     (if b b nil)))
 
-;; (let (a 1 b 2)
-;;   (if a
-;;     (if b true false)
-;;     false))
+(defn not (a)
+  (if a false true))
 
-;; (defn take (n coll)
-;;   (let (_take (fn _take (accum n coll)
-;;                  (if (zero? n)
-;;                    (if (nil? coll)
-;;                    (reverse accum)
-;;                    (_take (cons (
-;;                  ))
-;;     (take nil n coll)))
+(defn take (n coll)
+  (let (_take (fn _take (accum n coll)
+                 (if (or (zero? n) (nil? coll))
+                   (reverse accum)
+                   (_take (cons (first coll) accum)
+                          (dec n)
+                          (rest coll)))))
+    (_take nil n coll)))
 
 
-;; todo: or, and, not, cond, print-bytecode for vars and for arbitrary expressions, deref vars / @
-;; todo:
+;; todo: not, cond, print-bytecode for vars and for arbitrary expressions, deref vars / @

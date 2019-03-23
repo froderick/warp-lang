@@ -791,6 +791,14 @@ START_TEST(repl) {
     assertEval(L"(or false 10)", L"10");
     assertEval(L"(or 11 false)", L"11");
     assertEval(L"(or 11 12)", L"11");
+    assertEval(L"(not false)", L"true");
+    assertEval(L"(not true)", L"false");
+    assertEval(L"(not nil)", L"true");
+    assertEval(L"(not 100)", L"false");
+
+    assertEval(L"(take 3 nil)", L"nil");
+    assertEval(L"(take 3 '(1 2 3 4))", L"(1 2 3)");
+    assertEval(L"(take 5 '(1 2 3 4))", L"(1 2 3 4)");
 
   }
 END_TEST
