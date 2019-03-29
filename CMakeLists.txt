@@ -7,6 +7,9 @@ set(CMAKE_C_STANDARD 11)
 #SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} ${GCC_FLAGS}")
 #SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} ${GCC_FLAGS}")
 
+include_directories(/usr/local/include)
+link_directories(/usr/local/lib)
+
 # TODO: figure out how to turn this off by default/back on when developing locally
 add_compile_definitions(DEBUG=1)
 
