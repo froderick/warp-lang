@@ -2437,19 +2437,64 @@ RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
 }
 
 // (8),             | (name -> bool)
-  RetVal tryGCEval(VM *vm, ExecFrame_t frame, Error *error) {
-    RetVal ret;
+RetVal tryGCEval(VM *vm, ExecFrame_t frame, Error *error) {
+  RetVal ret;
 
-    collect(vm, frame, error);
+  collect(vm, frame, error);
 
-    throws(pushOperand(frame, nil(), error));
+  throws(pushOperand(frame, nil(), error));
 
-    return R_SUCCESS;
+  return R_SUCCESS;
 
-    failure:
+  failure:
+  return ret;
+}
+
+// (8),             | (value -> value)
+RetVal tryGetTypeEval(VM *vm, ExecFrame_t frame, Error *error) {
+  RetVal ret;
+
+  Value value;
+  throws(popOperand(frame, &value, error));
+
+  Value typeId;
+  typeId.type = VT_UINT;
+  typeId.value = value.type;
+
+  throws(pushOperand(frame, typeId, error));
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error);
+
+// (8),             | (value -> value)
+RetVal tryPrnEval(VM *vm, ExecFrame_t frame, Error *error) {
+  RetVal ret;
+
+  Value value;
+  throws(popOperand(frame, &value, error));
+
+  Expr expr;
+  throws(tryVMPrn(vm, value, &expr, error));
+  throws(tryExprPrn(&expr, error));
+  printf("\n");
+
+  throws(pushOperand(frame, nil(), error));
+
+  ret = R_SUCCESS;
+  goto done;
+
+  failure:
+    goto done;
+
+  done:
+    exprFreeContents(&expr);
     return ret;
-  }
-
+}
 
 void printInst(int *i, const char* name, uint8_t *code) {
   printf("%i:\t%s\n", *i, name);
@@ -2509,6 +2554,8 @@ InstTable instTableCreate() {
       [I_SET_MACRO]        = { .name = "I_SET_MACRO",       .print = printInst,           .tryEval = trySetMacroEval},
       [I_GET_MACRO]        = { .name = "I_GET_MACRO",       .print = printInst,           .tryEval = tryGetMacroEval},
       [I_GC]               = { .name = "I_GC",              .print = printInst,           .tryEval = tryGCEval},
+      [I_GET_TYPE]         = { .name = "I_GET_TYPE",        .print = printInst,           .tryEval = tryGetTypeEval },
+      [I_PRN]              = { .name = "I_PRN",             .print = printInst,           .tryEval = tryPrnEval },
 
 
 //      [I_NEW]         = { .name = "I_NEW",         .print = printUnknown},
@@ -2708,10 +2755,10 @@ RetVal tryExceptionPrint(VMException *e, wchar_t **ptr, Error *error) {
     VMExceptionFrame *f = &e->frames.elements[i];
 
     if (f->unknownSource) {
-      swprintf(msg, ERROR_MSG_LENGTH, L"\t%at ls(Unknown Source)\n", f->functionName.value);
+      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(Unknown Source)\n", f->functionName.value);
     }
     else {
-      swprintf(msg, ERROR_MSG_LENGTH, L"\t%at ls(%ls:%llu)\n", f->functionName.value, f->fileName.value, f->lineNumber);
+      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(%ls:%llu)\n", f->functionName.value, f->fileName.value, f->lineNumber);
     }
     throws(tryStringBufferAppendStr(b, msg, error));
   }

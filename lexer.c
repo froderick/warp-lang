@@ -268,6 +268,8 @@ bool isSymbolContinue(wchar_t ch) {
          || ch == L'_'
          || ch == L'?'
          || ch == L'/'
+         || ch == L'>'
+         || ch == L'<'
          || ch == L'*';
 }
 

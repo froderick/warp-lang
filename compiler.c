@@ -902,6 +902,32 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     uint8_t addCode[] = { I_GC };
     throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
   }
+  else if (wcscmp(builtin->name.value, L"type") == 0) {
+
+    if (builtin->args.numForms != 1) {
+      throwCompilerError(error, "type takes only one argument, got %u", builtin->args.numForms);
+    }
+
+    for (int i=0; i < form->builtin.args.numForms; i++) {
+      throws(tryCompile(&form->builtin.args.forms[i], output, error));
+    }
+
+    uint8_t addCode[] = { I_GET_TYPE };
+    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+  }
+  else if (wcscmp(builtin->name.value, L"prn") == 0) {
+
+    if (builtin->args.numForms != 1) {
+      throwCompilerError(error, "prn takes only one argument, got %u", builtin->args.numForms);
+    }
+
+    for (int i=0; i < form->builtin.args.numForms; i++) {
+      throws(tryCompile(&form->builtin.args.forms[i], output, error));
+    }
+
+    uint8_t addCode[] = { I_PRN };
+    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+  }
   else {
     throwCompilerError(error, "unsupported builtin '%ls'", builtin->name.value);
   }
