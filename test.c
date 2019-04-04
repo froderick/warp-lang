@@ -689,7 +689,7 @@ START_TEST(repl) {
                L"2");
 
     assertEval(L"(if 0 2 3)",
-               L"3");
+               L"2");
 
     assertEval(L"(let ()"
                 "  (def + (fn (a b) (builtin :add a b)))"

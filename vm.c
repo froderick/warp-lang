@@ -280,38 +280,28 @@ void objectHeaderInitContents(ObjectHeader *h) {
   h->size = 0;
 }
 
-/*
- * The constant part of a function is the FnDef. This is what gets hydrated at eval time.
- * The variable part of a function is the Fn. It holds a value reference to the FnDef?
- */
-
 typedef struct Fn {
   ObjectHeader header;
 
   bool hasName;
   uint64_t nameLength;
-//  wchar_t *name;
   size_t nameOffset;
   uint16_t numCaptures;
   uint16_t numArgs;
   bool usesVarArgs;
 
   uint16_t numConstants;
-//  Value *constants;
   size_t constantsOffset;
 
   uint16_t numLocals;           // the number of local bindings this code unit uses
   uint64_t maxOperandStackSize; // the maximum number of items this code pushes onto the operand stack at one time
   uint64_t codeLength;          // the number of bytes in this code block
-//  uint8_t *code;                // this code block's actual instructions
   size_t codeOffset;
 
   bool hasSourceTable;
   uint64_t sourceFileNameLength;
-//  wchar_t *sourceFileName;
   size_t sourceFileNameOffset;
   uint64_t numLineNumbers;
-//  LineNumber *lineNumbers;
   size_t lineNumbersOffset;
 
 } Fn;
@@ -327,7 +317,6 @@ typedef struct Closure {
 
   Value fn;
   uint16_t numCaptures;
-//  Value *captures;
   size_t capturesOffset;
 } Closure;
 
@@ -337,7 +326,6 @@ typedef struct String {
   ObjectHeader header;
 
   uint64_t length;
-//  wchar_t *value;
   size_t valueOffset;
 } String;
 
@@ -347,7 +335,6 @@ typedef struct Symbol {
   ObjectHeader header;
 
   uint64_t length;
-//  wchar_t *value;
   size_t valueOffset;
 } Symbol;
 
@@ -357,7 +344,6 @@ typedef struct Keyword {
   ObjectHeader header;
 
   uint64_t length;
-//  wchar_t *value;
   size_t valueOffset;
 } Keyword;
 
@@ -432,12 +418,38 @@ typedef struct InstTable {
   Inst instructions[256];
 } InstTable;
 
+// value type definitions
+
+typedef struct Invocable {
+  Value fnRef;
+  Fn *fn;
+  bool hasClosure;
+  Closure *closure;
+} Invocable;
+
+typedef RetVal (*TryRelocateChildren)(VM_t vm, void *oldHeap, void *obj, Error *error);
+typedef RetVal (*TryPrn)(VM_t vm, Value result, Expr *expr, Error *error);
+
+typedef struct ValueTypeInfo {
+  const char *name;
+  bool isHeapObject;
+  bool (*isTruthy)(Value value);
+  TryRelocateChildren tryRelocateChildren;
+  TryPrn tryPrn;
+} ValueTypeInfo;
+
+typedef struct ValueTypeTable {
+  uint8_t numValueTypes;
+  ValueTypeInfo valueTypes[256];
+} ValueTypeTable;
+
 // vm state
 
 typedef struct VM {
   GC gc;
   Namespaces namespaces;
   InstTable instTable;
+  ValueTypeTable valueTypeTable;
 } VM;
 
 // frames
@@ -463,51 +475,77 @@ Value nil() {
  * The ExecFrame and operations it supports
  */
 
-  RetVal readInstruction(ExecFrame_t frame, uint8_t *ptr, Error *error);
-  RetVal readIndex(ExecFrame_t frame, uint16_t *ptr, Error *error);
-  RetVal setPc(ExecFrame_t frame, uint16_t newPc, Error *error);
-  RetVal getConst(ExecFrame_t frame, uint16_t constantIndex, Value *ptr, Error *error);
-  RetVal getLocal(ExecFrame_t frame, uint16_t localIndex, Value *ptr, Error *error);
-  RetVal setLocal(ExecFrame_t frame, uint16_t localIndex, Value value, Error *error);
-  RetVal getLocalRef(ExecFrame_t frame, uint16_t localIndex, Value **ptr, Error *error);
-  uint16_t numLocals(ExecFrame_t frame);
-  uint64_t numOperands(ExecFrame_t frame);
-  RetVal getOperandRef(ExecFrame_t frame, uint64_t opIndex, Value **ptr, Error *error);
-  uint16_t pushOperand(ExecFrame_t frame, Value value, Error *error);
-  uint16_t popOperand(ExecFrame_t frame, Value *value, Error *error);
-  Value getFnRef(ExecFrame_t frame);
-  RetVal setFnRef(VM *vm, ExecFrame_t frame, Value value, Error *error);
+RetVal readInstruction(ExecFrame_t frame, uint8_t *ptr, Error *error);
+RetVal readIndex(ExecFrame_t frame, uint16_t *ptr, Error *error);
+RetVal setPc(ExecFrame_t frame, uint16_t newPc, Error *error);
+RetVal getConst(ExecFrame_t frame, uint16_t constantIndex, Value *ptr, Error *error);
+RetVal getLocal(ExecFrame_t frame, uint16_t localIndex, Value *ptr, Error *error);
+RetVal setLocal(ExecFrame_t frame, uint16_t localIndex, Value value, Error *error);
+RetVal getLocalRef(ExecFrame_t frame, uint16_t localIndex, Value **ptr, Error *error);
+uint16_t numLocals(ExecFrame_t frame);
+uint64_t numOperands(ExecFrame_t frame);
+RetVal getOperandRef(ExecFrame_t frame, uint64_t opIndex, Value **ptr, Error *error);
+uint16_t pushOperand(ExecFrame_t frame, Value value, Error *error);
+uint16_t popOperand(ExecFrame_t frame, Value *value, Error *error);
+Value getFnRef(ExecFrame_t frame);
+RetVal setFnRef(VM *vm, ExecFrame_t frame, Value value, Error *error);
 
-  bool hasResult(ExecFrame_t frame);
-  bool hasParent(ExecFrame_t frame);
-  RetVal getParent(ExecFrame_t frame, ExecFrame_t *ptr, Error *error);
-  RetVal setResult(ExecFrame_t frame, Value result, Error *error);
-  RetVal getResult(ExecFrame_t frame, Value *ptr, Error *error);
+bool hasResult(ExecFrame_t frame);
+bool hasParent(ExecFrame_t frame);
+RetVal getParent(ExecFrame_t frame, ExecFrame_t *ptr, Error *error);
+RetVal setResult(ExecFrame_t frame, Value result, Error *error);
+RetVal getResult(ExecFrame_t frame, Value *ptr, Error *error);
 
-  typedef struct ExceptionHandler {
-    uint16_t jumpAddress;
-    uint16_t localIndex;
-  } ExceptionHandler;
+typedef struct ExceptionHandler {
+  uint16_t jumpAddress;
+  uint16_t localIndex;
+} ExceptionHandler;
 
-  bool hasHandler(ExecFrame_t frame);
-  RetVal getHandler(ExecFrame_t frame, ExceptionHandler *ptr, Error *error);
-  void setHandler(ExecFrame_t frame, ExceptionHandler handler);
-  void clearHandler(ExecFrame_t frame);
+bool hasHandler(ExecFrame_t frame);
+RetVal getHandler(ExecFrame_t frame, ExceptionHandler *ptr, Error *error);
+void setHandler(ExecFrame_t frame, ExceptionHandler handler);
+void clearHandler(ExecFrame_t frame);
 
-  bool hasFnName(ExecFrame_t frame);
-  RetVal getFnName(ExecFrame_t frame, Text *name, Error *error);
+bool hasFnName(ExecFrame_t frame);
+RetVal getFnName(ExecFrame_t frame, Text *name, Error *error);
 
-  bool hasSourceTable(ExecFrame_t frame);
-  bool getLineNumber(ExecFrame_t frame, uint64_t *lineNumber);
-  bool getFileName(ExecFrame_t frame, Text *fileName);
+bool hasSourceTable(ExecFrame_t frame);
+bool getLineNumber(ExecFrame_t frame, uint64_t *lineNumber);
+bool getFileName(ExecFrame_t frame, Text *fileName);
 
-  bool hasException(ExecFrame_t frame);
-  void setException(ExecFrame_t frame, VMException e);
-  RetVal getException(ExecFrame_t frame, VMException *e, Error *error);
+bool hasException(ExecFrame_t frame);
+void setException(ExecFrame_t frame, VMException e);
+RetVal getException(ExecFrame_t frame, VMException *e, Error *error);
 
-  RetVal pushFrame(VM *vm, ExecFrame_t *frame, Value newFn, Error *error);
-  RetVal replaceFrame(VM *vm, ExecFrame_t frame, Value newFn, Error *error);
-  void popFrame(ExecFrame_t frame);
+RetVal pushFrame(VM *vm, ExecFrame_t *frame, Value newFn, Error *error);
+RetVal replaceFrame(VM *vm, ExecFrame_t frame, Value newFn, Error *error);
+void popFrame(ExecFrame_t frame);
+
+/*
+ * value type protocols
+ */
+
+const char* getValueTypeName(VM *vm, uint8_t type) {
+  return vm->valueTypeTable.valueTypes[type].name;
+}
+
+bool isHeapObject(VM *vm, Value value) {
+  return vm->valueTypeTable.valueTypes[value.type].isHeapObject;
+}
+
+bool isTruthy(VM *vm, Value value) {
+  return vm->valueTypeTable.valueTypes[value.type].isTruthy(value);
+}
+
+RetVal tryRelocateChildren(VM *vm, ValueType type, void *oldHeap, void *obj, Error *error) {
+  TryRelocateChildren relocate = vm->valueTypeTable.valueTypes[type].tryRelocateChildren;
+  if (relocate != NULL) {
+    return relocate(vm, oldHeap, obj, error);
+  }
+  else {
+    return R_SUCCESS;
+  }
+}
 
 /*
  * NEW alloc/gc impl
@@ -628,25 +666,9 @@ bool inCurrentHeap(GC *gc, void *ptr) {
 RetVal relocate(VM *vm, void *oldHeap, Value *value, Error *error) {
   RetVal ret;
 
-  switch (value->type) {
-
-    case VT_NIL:
-    case VT_UINT:
-    case VT_BOOL:
-      // these do not live as objects on the heap
-      return R_SUCCESS;
-
-    case VT_FN:
-    case VT_STR:
-    case VT_SYMBOL:
-    case VT_KEYWORD:
-    case VT_LIST:
-    case VT_CLOSURE:
-      // these are on the heap and require relocation
-      break;
-
-    default:
-      throwRuntimeError(error, "unknown value type: %u", value->type);
+  if (!isHeapObject(vm, *value)) {
+    // only relocate heap objects
+    return R_SUCCESS;
   }
 
   GC *gc = &vm->gc;
@@ -762,46 +784,10 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
 
   void *scanptr = vm->gc.currentHeap;
 
+  // relocate all the objects this object references
   while (scanptr < vm->gc.allocPtr) {
-
-    // relocate all the objects this object references
     ObjectHeader *header = scanptr;
-    switch (header->type) {
-
-      case VT_STR:
-      case VT_SYMBOL:
-      case VT_KEYWORD:
-        // no references
-        break;
-
-      case VT_FN: {
-        Fn *fn = scanptr;
-        for (uint16_t i=0; i<fn->numConstants; i++) {
-          throws(relocate(vm, oldHeap, &fnConstants(fn)[i], error));
-        }
-        break;
-      }
-
-      case VT_LIST: {
-        Cons *cons = scanptr;
-        throws(relocate(vm, oldHeap, &cons->value, error));
-        throws(relocate(vm, oldHeap, &cons->next, error));
-        break;
-      }
-
-      case VT_CLOSURE: {
-        Closure *closure = scanptr;
-        throws(relocate(vm, oldHeap, &closure->fn, error));
-        for (uint16_t i=0; i<closure->numCaptures; i++) {
-          throws(relocate(vm, oldHeap, &closureCaptures(closure)[i], error));
-        }
-        break;
-      }
-
-      default:
-        throwRuntimeError(error, "unknown or unexpected value type: %u", header->type);
-    }
-
+    throws(tryRelocateChildren(vm, header->type, oldHeap, scanptr, error));
     scanptr += header->size;
   }
 
@@ -1308,100 +1294,14 @@ RetVal tryHydrateConstants(VM *vm, Value *constants, CodeUnit *codeUnit, Error *
 RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
   RetVal ret;
 
-  switch (result.type) {
-    case VT_NIL:
-      expr->type = N_NIL;
-      break;
-    case VT_UINT: {
-      expr->type = N_NUMBER;
-      expr->number.value = result.value;
-      break;
-    }
-    case VT_BOOL:
-      expr->type = N_BOOLEAN;
-      expr->boolean.value = result.value;
-      break;
-    case VT_FN: {
-      expr->type = N_STRING;
-      wchar_t function[] = L"<function>";
-      expr->string.length = wcslen(function);
-      throws(tryCopyText(function, &expr->string.value, expr->string.length, error));
-      break;
-    }
-    case VT_CLOSURE: {
-      expr->type = N_STRING;
-      wchar_t function[] = L"<closure>";
-      expr->string.length = wcslen(function);
-      throws(tryCopyText(function, &expr->string.value, expr->string.length, error));
-      break;
-    }
-    case VT_STR: {
-
-      String *str = NULL;
-      throws(deref(&vm->gc, (void*)&str, result.value, error));
-
-      expr->type = N_STRING;
-      expr->string.length = str->length;
-      throws(tryCopyText(stringValue(str), &expr->string.value, expr->string.length, error));
-      break;
-    }
-    case VT_SYMBOL: {
-
-      Symbol *sym = NULL;
-      throws(deref(&vm->gc, (void*)&sym, result.value, error));
-
-      expr->type = N_SYMBOL;
-      expr->symbol.length = sym->length;
-      throws(tryCopyText(symbolValue(sym), &expr->symbol.value, expr->string.length, error));
-      break;
-    }
-    case VT_KEYWORD: {
-
-      Keyword *kw = NULL;
-      throws(deref(&vm->gc, (void*)&kw, result.value, error));
-
-      expr->type = N_KEYWORD;
-      expr->keyword.length = kw->length;
-      throws(tryCopyText(keywordValue(kw), &expr->keyword.value, expr->string.length, error));
-      break;
-    }
-    case VT_LIST: {
-
-      Cons *cons;
-      throws(deref(&vm->gc, (void*)&cons, result.value, error));
-
-      expr->type = N_LIST;
-      listInitContents(&expr->list);
-      Expr *elem;
-
-      tryMalloc(elem, sizeof(Expr), "Expr");
-      throws(tryVMPrn(vm, cons->value, elem, error));
-      throws(tryListAppend(&expr->list, elem, error));
-
-      while (cons->next.type != VT_NIL) {
-
-        if (cons->next.type != VT_LIST) {
-          throwRuntimeError(error, "this should always be a type of VT_LIST");
-        }
-
-        throws(deref(&vm->gc, (void*)&cons, cons->next.value, error));
-
-        tryMalloc(elem, sizeof(Expr), "Expr");
-        throws(tryVMPrn(vm, cons->value, elem, error));
-        throws(tryListAppend(&expr->list, elem, error));
-      }
-
-      break;
-    }
-    default:
-    throwRuntimeError(error, "unsuported value type: %u", result.type);
-  }
+  TryPrn prn = vm->valueTypeTable.valueTypes[result.type].tryPrn;
+  throws(prn(vm, result, expr, error));
 
   return R_SUCCESS;
 
   failure:
-  exprFree(expr);
-  return ret;
+    exprFreeContents(expr);
+    return ret;
 }
 
 /*
@@ -1638,7 +1538,7 @@ RetVal tryAllocateCons(VM *vm, ExecFrame_t frame, Value value, Value next, Value
   RetVal ret;
 
   if (next.type != VT_NIL && next.type != VT_LIST) {
-    throwRuntimeError(error, "a Cons next must be nil or a list: %u", next.type);
+    throwRuntimeError(error, "a Cons next must be nil or a list: %s", getValueTypeName(vm, next.type));
   }
 
   Cons *cons = NULL;
@@ -1729,13 +1629,6 @@ RetVal tryStoreLocalEval(VM *vm, ExecFrame_t frame, Error *error) {
  * - see https://www.quora.com/What-are-some-best-practices-in-using-the-Java-8-JVM-Metaspace
  */
 
-typedef struct Invocable {
-  Value fnRef;
-  Fn *fn;
-  bool hasClosure;
-  Closure *closure;
-} Invocable;
-
 void invocableInitContents(Invocable *i) {
   i->fnRef = nil();
   i->fn = NULL;
@@ -1773,7 +1666,8 @@ RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *e
     }
     default:
       // fail: not all values are invocable
-      throwRuntimeError(error, "cannot invoke this value type as a function: %u", invocable->fnRef.type);
+      throwRuntimeError(error, "cannot invoke this value type as a function: %s",
+          getValueTypeName(vm, invocable->fnRef.type));
   }
 
   return R_SUCCESS;
@@ -1796,7 +1690,8 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
   throws(popOperand(parent, &numArgsSupplied, error));
 
   if (numArgsSupplied.type != VT_UINT) {
-    throwRuntimeError(error, "first argument must be number of arguments supplied: %u", numArgsSupplied.type);
+    throwRuntimeError(error, "first argument must be number of arguments supplied: %s",
+        getValueTypeName(vm, numArgsSupplied.type));
   }
 
   if (numArgsSupplied.value > invocable.fn->numArgs) {
@@ -2003,19 +1898,7 @@ RetVal tryJmpIfEval(VM *vm, ExecFrame_t frame, Error *error) {
   Value test;
   throws(popOperand(frame, &test, error));
 
-  bool truthy;
-  if (test.type == VT_BOOL) {
-    truthy = test.value > 0;
-  }
-  else if (test.type == VT_UINT) {
-    truthy = test.value > 0;
-  }
-  else if (test.type == VT_NIL) {
-    truthy = false;
-  }
-  else {
-    throwRuntimeError(error, "unhandled truth");
-  }
+  bool truthy = isTruthy(vm, test);
 
   uint16_t newPc;
   throws(readIndex(frame, &newPc, error));
@@ -2036,19 +1919,7 @@ RetVal tryJmpIfNotEval(VM *vm, ExecFrame_t frame, Error *error) {
   Value test;
   throws(popOperand(frame, &test, error));
 
-  bool truthy;
-  if (test.type == VT_BOOL) {
-    truthy = test.value > 0;
-  }
-  else if (test.type == VT_UINT) {
-    truthy = test.value > 0;
-  }
-  else if (test.type == VT_NIL) {
-    truthy = false;
-  }
-  else {
-    throwRuntimeError(error, "unhandled truth");
-  }
+  bool truthy = isTruthy(vm, test);
 
   uint16_t newPc;
   throws(readIndex(frame, &newPc, error));
@@ -2070,9 +1941,11 @@ RetVal tryAddEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(popOperand(frame, &b, error));
   throws(popOperand(frame, &a, error));
 
-  if (a.type != VT_UINT || b.type != VT_UINT) {
-    // fail: not all values are addable
-    throwRuntimeError(error, "can only add two integers");
+  if (a.type != VT_UINT) {
+    throwRuntimeError(error, "can only add integers: %s", getValueTypeName(vm, a.type));
+  }
+  if (b.type != VT_UINT) {
+    throwRuntimeError(error, "can only add integers: %s", getValueTypeName(vm, b.type));
   }
 
   Value c;
@@ -2095,9 +1968,11 @@ RetVal trySubEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(popOperand(frame, &b, error));
   throws(popOperand(frame, &a, error));
 
-  if (a.type != VT_UINT || b.type != VT_UINT) {
-    // fail: not all values are subtractable
-    throwRuntimeError(error, "can only subtract two integers");
+  if (a.type != VT_UINT) {
+    throwRuntimeError(error, "can only subtract integers: %s", getValueTypeName(vm, a.type));
+  }
+  if (b.type != VT_UINT) {
+    throwRuntimeError(error, "can only subtract integers: %s", getValueTypeName(vm, b.type));
   }
 
   Value c;
@@ -2152,7 +2027,7 @@ RetVal tryLoadVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(getConst(frame, constantIndex, &varName, error));
 
   if (varName.type != VT_STR) {
-    throwRuntimeError(error, "expected a string: %u", varName.type);
+    throwRuntimeError(error, "expected a string: %s", getValueTypeName(vm, varName.type));
   }
 
   String *str = NULL;
@@ -2191,7 +2066,8 @@ RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(getConst(frame, constantIndex, &fnValue, error));
 
   if (fnValue.type != VT_FN) {
-    throwRuntimeError(error, "cannot create a closure from this value type: %u", fnValue.type);
+    throwRuntimeError(error, "cannot create a closure from this value type: %s",
+        getValueTypeName(vm, fnValue.type));
   }
 
   Fn *fn;
@@ -2293,7 +2169,7 @@ RetVal tryConsEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(popOperand(frame, &x, error));
 
   if (seq.type != VT_NIL && seq.type != VT_LIST) {
-    throwRuntimeError(error, "cannot cons onto a value of type %u", seq.type);
+    throwRuntimeError(error, "cannot cons onto a value of type %s", getValueTypeName(vm, seq.type));
   }
 
   Cons *cons = NULL;
@@ -2327,8 +2203,7 @@ RetVal tryFirstEval(VM *vm, ExecFrame_t frame, Error *error) {
     result = cons->value;
   }
   else {
-    // TODO: we need to print the actual type here, should make a metadata table for value types
-    throwRuntimeError(error, "cannot get first from a value of type %u", seq.type);
+    throwRuntimeError(error, "cannot get first from a value of type %s", getValueTypeName(vm, seq.type));
   }
 
   throws(pushOperand(frame, result, error));
@@ -2359,8 +2234,7 @@ RetVal tryRestEval(VM *vm, ExecFrame_t frame, Error *error) {
     result = cons->next;
   }
   else {
-    // TODO: we need to print the actual type here, should make a metadata table for value types
-    throwRuntimeError(error, "cannot get rest from a value of type %u", seq.type);
+    throwRuntimeError(error, "cannot get rest from a value of type %s", getValueTypeName(vm, seq.type));
   }
 
   throws(pushOperand(frame, result, error));
@@ -2379,7 +2253,7 @@ RetVal trySetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(popOperand(frame, &strValue, error));
 
   if (strValue.type != VT_STR) {
-    throwRuntimeError(error, "only symbols can identify vars: %u", strValue.type);
+    throwRuntimeError(error, "only symbols can identify vars: %s", getValueTypeName(vm, strValue.type));
   }
 
   String *str = NULL;
@@ -2392,7 +2266,8 @@ RetVal trySetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   if (!var->isMacro) {
     if (var->value.type != VT_FN) {
-      throwRuntimeError(error, "only vars referring to functions can be macros: %ls, %u", stringValue(str), var->value.type);
+      throwRuntimeError(error, "only vars referring to functions can be macros: %ls -> %s",
+          stringValue(str),  getValueTypeName(vm, var->value.type));
     }
     var->isMacro = true;
   }
@@ -2413,7 +2288,7 @@ RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(popOperand(frame, &strValue, error));
 
   if (strValue.type != VT_STR) {
-    throwRuntimeError(error, "only symbols can identify vars: %u", strValue.type);
+    throwRuntimeError(error, "only symbols can identify vars: %s", getValueTypeName(vm, strValue.type));
   }
 
   String *str = NULL;
@@ -2618,6 +2493,229 @@ void _printCodeUnit(InstTable *table, CodeUnit *unit) {
 
   printf("code:\n");
   _printCodeArray(table, unit->code.code, unit->code.codeLength);
+}
+
+/*
+ * value type definitions
+ */
+
+bool isTruthyYes(Value v) { return true; }
+bool isTruthyNo(Value v) { return false; }
+bool isTruthyBool(Value v) { return v.value; }
+
+RetVal tryRelocateChildrenFn(VM_t vm, void *oldHeap, void *obj, Error *error) {
+  RetVal ret;
+
+  Fn *fn = obj;
+  for (uint16_t i=0; i<fn->numConstants; i++) {
+    throws(relocate(vm, oldHeap, &fnConstants(fn)[i], error));
+  }
+
+  return R_SUCCESS;
+  failure:
+    return ret;
+}
+
+RetVal tryRelocateChildrenList(VM_t vm, void *oldHeap, void *obj, Error *error) {
+  RetVal ret;
+
+  Cons *cons = obj;
+  throws(relocate(vm, oldHeap, &cons->value, error));
+  throws(relocate(vm, oldHeap, &cons->next, error));
+
+  return R_SUCCESS;
+  failure:
+    return ret;
+}
+
+RetVal tryRelocateChildrenClosure(VM_t vm, void *oldHeap, void *obj, Error *error) {
+  RetVal ret;
+
+  Closure *closure = obj;
+  throws(relocate(vm, oldHeap, &closure->fn, error));
+  for (uint16_t i=0; i<closure->numCaptures; i++) {
+    throws(relocate(vm, oldHeap, &closureCaptures(closure)[i], error));
+  }
+
+  return R_SUCCESS;
+  failure:
+    return ret;
+}
+
+RetVal tryPrnNil(VM_t vm, Value result, Expr *expr, Error *error) {
+  expr->type = N_NIL;
+  return R_SUCCESS;
+}
+
+RetVal tryPrnInt(VM_t vm, Value result, Expr *expr, Error *error) {
+  expr->type = N_NUMBER;
+  expr->number.value = result.value;
+  return R_SUCCESS;
+}
+
+RetVal tryPrnBool(VM_t vm, Value result, Expr *expr, Error *error) {
+  expr->type = N_BOOLEAN;
+  expr->boolean.value = result.value;
+  return R_SUCCESS;
+}
+
+RetVal tryPrnFn(VM_t vm, Value result, Expr *expr, Error *error) {
+  expr->type = N_STRING;
+  wchar_t function[] = L"<function>";
+  expr->string.length = wcslen(function);
+  return tryCopyText(function, &expr->string.value, expr->string.length, error);
+}
+
+RetVal tryPrnClosure(VM_t vm, Value result, Expr *expr, Error *error) {
+  expr->type = N_STRING;
+  wchar_t function[] = L"<closure>";
+  expr->string.length = wcslen(function);
+  return tryCopyText(function, &expr->string.value, expr->string.length, error);
+}
+
+RetVal tryPrnStr(VM_t vm, Value result, Expr *expr, Error *error) {
+  RetVal ret;
+
+  String *str = NULL;
+  throws(deref(&vm->gc, (void*)&str, result.value, error));
+
+  expr->type = N_STRING;
+  expr->string.length = str->length;
+  throws(tryCopyText(stringValue(str), &expr->string.value, expr->string.length, error));
+
+  return R_SUCCESS;
+  failure:
+    return ret;
+}
+
+RetVal tryPrnSymbol(VM_t vm, Value result, Expr *expr, Error *error) {
+  RetVal ret;
+
+  Symbol *sym = NULL;
+  throws(deref(&vm->gc, (void*)&sym, result.value, error));
+
+  expr->type = N_SYMBOL;
+  expr->symbol.length = sym->length;
+  throws(tryCopyText(symbolValue(sym), &expr->symbol.value, expr->string.length, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryPrnKeyword(VM_t vm, Value result, Expr *expr, Error *error) {
+  RetVal ret;
+
+  Keyword *kw = NULL;
+  throws(deref(&vm->gc, (void*)&kw, result.value, error));
+
+  expr->type = N_KEYWORD;
+  expr->keyword.length = kw->length;
+  throws(tryCopyText(keywordValue(kw), &expr->keyword.value, expr->string.length, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryPrnList(VM_t vm, Value result, Expr *expr, Error *error) {
+  RetVal ret;
+
+  Cons *cons;
+  throws(deref(&vm->gc, (void*)&cons, result.value, error));
+
+  expr->type = N_LIST;
+  listInitContents(&expr->list);
+  Expr *elem;
+
+  tryMalloc(elem, sizeof(Expr), "Expr");
+  throws(tryVMPrn(vm, cons->value, elem, error));
+  throws(tryListAppend(&expr->list, elem, error));
+
+  while (cons->next.type != VT_NIL) {
+
+    if (cons->next.type != VT_LIST) {
+      throwRuntimeError(error, "this should always be a type of VT_LIST: %s",
+                        getValueTypeName(vm, cons->next.type));
+    }
+
+    throws(deref(&vm->gc, (void *) &cons, cons->next.value, error));
+
+    tryMalloc(elem, sizeof(Expr), "Expr");
+    throws(tryVMPrn(vm, cons->value, elem, error));
+    throws(tryListAppend(&expr->list, elem, error));
+  }
+
+  return R_SUCCESS;
+  failure:
+    return ret;
+}
+
+ValueTypeTable valueTypeTableCreate() {
+  ValueTypeTable table;
+
+  // init table with blanks
+  uint16_t valueTypesAllocated = sizeof(table.valueTypes) / sizeof(table.valueTypes[0]);
+  for (int i=0; i<valueTypesAllocated; i++) {
+    table.valueTypes[i].name = NULL;
+    table.valueTypes[i].isHeapObject = false;
+    table.valueTypes[i].isTruthy = NULL;
+    table.valueTypes[i].tryRelocateChildren = NULL;
+    table.valueTypes[i].tryPrn = NULL;
+  }
+
+  // init with known value types
+  ValueTypeInfo valueTypes [] = {
+      [VT_NIL]       = {.name = "nil",
+                        .isHeapObject = false,
+                        .isTruthy = &isTruthyNo,
+                        .tryRelocateChildren = NULL,
+                        .tryPrn = &tryPrnNil},
+      [VT_UINT]      = {.name = "uint",
+                        .isHeapObject = false,
+                        .isTruthy = &isTruthyYes,
+                        .tryRelocateChildren = NULL,
+                        .tryPrn = &tryPrnInt},
+      [VT_BOOL]      = {.name = "bool",
+                        .isHeapObject = false,
+                        .isTruthy = &isTruthyBool,
+                        .tryRelocateChildren = NULL,
+                        .tryPrn = &tryPrnBool},
+      [VT_FN]        = {.name = "fn",
+                        .isHeapObject = true,
+                        .isTruthy = &isTruthyYes,
+                        .tryRelocateChildren = &tryRelocateChildrenFn,
+                        .tryPrn = &tryPrnFn},
+      [VT_STR]       = {.name = "str",
+                        .isHeapObject = true,
+                        .isTruthy = &isTruthyYes,
+                        .tryRelocateChildren = NULL,
+                        .tryPrn = &tryPrnStr},
+      [VT_SYMBOL]    = {.name = "symbol",
+                        .isHeapObject = true,
+                        .isTruthy = &isTruthyYes,
+                        .tryRelocateChildren = NULL,
+                        .tryPrn = &tryPrnSymbol},
+      [VT_KEYWORD]   = {.name = "keyword",
+                        .isHeapObject = true,
+                        .isTruthy = &isTruthyYes,
+                        .tryRelocateChildren = NULL,
+                        .tryPrn = &tryPrnKeyword},
+      [VT_LIST]      = {.name = "list",
+                        .isHeapObject = true,
+                        .isTruthy = &isTruthyYes,
+                        .tryRelocateChildren = &tryRelocateChildrenList,
+                        .tryPrn = &tryPrnList},
+      [VT_CLOSURE]   = {.name = "closure",
+                        .isHeapObject = true,
+                        .isTruthy = &isTruthyYes,
+                        .tryRelocateChildren = &tryRelocateChildrenClosure,
+                        .tryPrn = &tryPrnClosure},
+  };
+  memcpy(table.valueTypes, valueTypes, sizeof(valueTypes));
+  table.numValueTypes = sizeof(valueTypes) / sizeof(valueTypes[0]);
+
+  return table;
 }
 
 void printEvalError(ExecFrame_t frame, Error *error) {
@@ -3454,6 +3552,7 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
   RetVal ret;
 
   vm->instTable = instTableCreate();
+  vm->valueTypeTable = valueTypeTableCreate();
   throws(tryGCInitContents(&vm->gc, 1024 * 1000, error));
   throws(tryNamespacesInitContents(&vm->namespaces, error));
 
