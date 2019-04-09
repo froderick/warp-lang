@@ -74,6 +74,9 @@
     (if b true false)
     false))
 
+(defn example ()
+  (and (+ 1 2) (+ 3 'x)))
+
 (defn or (a b)
   (if a
     a

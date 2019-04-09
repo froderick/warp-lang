@@ -94,6 +94,16 @@ typedef enum ConstantType {
 
 typedef struct Constant Constant;
 
+typedef struct ConstantMetaProperty {
+  uint16_t keyIndex;
+  uint16_t valueIndex;
+} ConstantMetaProperty;
+
+typedef struct ConstantMeta {
+  uint64_t numProperties;
+  ConstantMetaProperty *properties;
+} ConstantMeta;
+
 typedef struct StringConstant {
   uint64_t length;
   wchar_t *value;
@@ -129,6 +139,7 @@ typedef struct KeywordConstant {
 typedef struct ListConstant {
   uint16_t length;
   uint16_t *constants;
+  ConstantMeta meta;
 } ListConstant;
 
 typedef struct FnRefConstant {
@@ -169,6 +180,10 @@ void _constantFreeContents(Constant *c);
 
 void codeUnitInitContents(CodeUnit *codeUnit);
 void codeUnitFreeContents(CodeUnit *codeUnit);
+
+void constantMetaPropertyInit(ConstantMetaProperty *p);
+void constantMetaInit(ConstantMeta *c);
+void constantMetaFreeContents(ConstantMeta *c);
 
 typedef struct VM *VM_t;
 

@@ -57,6 +57,24 @@ void codeFreeContents(Code *code) {
   }
 }
 
+void constantMetaPropertyInit(ConstantMetaProperty *p) {
+  p->keyIndex = 0;
+  p->valueIndex = 0;
+}
+
+void constantMetaInit(ConstantMeta *c) {
+  c->numProperties = 0;
+  c->properties = NULL;
+}
+
+void constantMetaFreeContents(ConstantMeta *c) {
+  if (c != NULL) {
+    free(c->properties);
+    c->properties = NULL;
+    c->numProperties = 0;
+  }
+}
+
 void constantFnInitContents(FnConstant *fnConst) {
   fnConst->fnId = 0;
   fnConst->hasName = 0;
@@ -273,12 +291,8 @@ typedef struct Value {
 typedef struct ObjectHeader {
   ValueType type : 4;
   size_t size : 60;
+  Value metadata;
 } ObjectHeader;
-
-void objectHeaderInitContents(ObjectHeader *h) {
-  h->type = VT_NIL;
-  h->size = 0;
-}
 
 typedef struct Fn {
   ObjectHeader header;
@@ -469,6 +483,12 @@ Value nil() {
   v.type = VT_NIL;
   v.value = 0;
   return v;
+}
+
+void objectHeaderInitContents(ObjectHeader *h) {
+  h->type = VT_NIL;
+  h->size = 0;
+  h->metadata = nil();
 }
 
 /*
@@ -1129,7 +1149,7 @@ void consInitContents(Cons *c) {
   c->next = nil();
 }
 
-RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value *ptr, Error *error) {
+RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value meta, Value *ptr, Error *error) {
   RetVal ret;
 
   if (next.type != VT_NIL && next.type != VT_LIST) {
@@ -1151,6 +1171,7 @@ RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value *ptr, Error *erro
   consInitContents(cons);
   cons->header.type = VT_LIST;
   cons->header.size = size;
+  cons->header.metadata = meta;
   cons->value = value;
   cons->next = next;
 
@@ -1159,19 +1180,31 @@ RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value *ptr, Error *erro
   return ret;
 }
 
+/*
+ * alreadyHydratedConstants is a pointer to the array of all values materialized for the current fn or codeunit, so far.
+ * it is included so that references to already-hydrated values can be resolved by constant index.
+ */
 RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant listConst, Value *value, Error *error) {
   RetVal ret;
 
-  // build up list with conses
+  // build up meta property list with conses
+  Value meta = nil();
 
+  for (uint64_t i=0; i<listConst.meta.numProperties; i++) {
+    ConstantMetaProperty *p = &listConst.meta.properties[i];
+    throws(_tryAllocateCons(vm, alreadyHydratedConstants[p->valueIndex], meta, nil(), &meta, error));
+    throws(_tryAllocateCons(vm, alreadyHydratedConstants[p->keyIndex], meta, nil(), &meta, error));
+  }
+
+  // build up list with conses, each cons gets the same meta
   Value seq = nil();
 
-  for (uint16_t i=0; i < listConst.length; i++) {
+  for (uint16_t i = 0; i < listConst.length; i++) {
 
     uint16_t listConstEnd = listConst.length - 1;
     uint16_t valueIndex = listConst.constants[listConstEnd - i];
 
-    throws(_tryAllocateCons(vm, alreadyHydratedConstants[valueIndex], seq, &seq, error));
+    throws(_tryAllocateCons(vm, alreadyHydratedConstants[valueIndex], seq, meta, &seq, error));
   }
 
   *value = seq;
@@ -1180,6 +1213,9 @@ RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant list
   failure:
   return ret;
 }
+
+// TODO: I had a thought, can we get rid of CodeUnit entirely and just replace it with FnConstant?
+// TODO: I had another thought, can we get rid of the nested graph of constants and flatten it entirely?
 
 RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, uint16_t constantIndex, UnresolvedFnRefs *unresolved, Error *error) {
   RetVal ret;
@@ -2620,6 +2656,47 @@ RetVal tryPrnKeyword(VM_t vm, Value result, Expr *expr, Error *error) {
   return ret;
 }
 
+bool isEmpty(Value value) {
+  return value.type == VT_NIL;
+}
+
+typedef struct Property {
+  Keyword *key;
+  Value value;
+} Property;
+
+RetVal tryReadProperty(VM *vm, Value *ptr, Property *p, Error *error) {
+  RetVal ret;
+
+  if (ptr->type != VT_LIST) {
+    throwRuntimeError(error, "expected property list: %s",
+                      getValueTypeName(vm, ptr->type));
+  }
+
+  Cons *properties;
+  throws(deref(&vm->gc, (void*)&properties, ptr->value, error));
+
+  if (properties->value.type != VT_KEYWORD) {
+    throwRuntimeError(error, "expected keyword for property key: %s",
+                      getValueTypeName(vm, properties->value.type));
+  }
+
+  throws(deref(&vm->gc, (void*)&p->key, properties->value.value, error));
+
+  if (isEmpty(properties->next)) {
+    throwRuntimeError(error, "expected value for property but only found a key: %ls", keywordValue(p->key));
+  }
+
+  throws(deref(&vm->gc, (void*)&properties, properties->next.value, error));
+  p->value = properties->value;
+
+  *ptr = properties->next;
+  return R_SUCCESS;
+
+  failure:
+    return ret;
+}
+
 RetVal tryPrnList(VM_t vm, Value result, Expr *expr, Error *error) {
   RetVal ret;
 
@@ -2627,6 +2704,28 @@ RetVal tryPrnList(VM_t vm, Value result, Expr *expr, Error *error) {
   throws(deref(&vm->gc, (void*)&cons, result.value, error));
 
   expr->type = N_LIST;
+
+  Value metadata = cons->header.metadata;
+  while (!isEmpty(metadata)) {
+
+    Property p;
+    throws(tryReadProperty(vm, &metadata, &p, error));
+
+    if (wcscmp(L"line-number", keywordValue(p.key)) == 0) {
+
+      if (p.value.type != VT_UINT) {
+        throwRuntimeError(error, "expected line-number property value to be an int: %s",
+                          getValueTypeName(vm, p.value.type));
+      }
+
+      expr->source.isSet = true;
+      expr->source.lineNumber = p.value.value;
+    }
+    else {
+      // ignore property
+    }
+  }
+
   listInitContents(&expr->list);
   Expr *elem;
 

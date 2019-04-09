@@ -628,6 +628,33 @@ RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *erro
       c->list.length = constant->list.length;
       tryMalloc(c->list.constants, sizeof(uint16_t) * c->list.length, "typeIndex array");
 
+      {
+        constantMetaInit(&c->list.meta);
+        c->list.meta.numProperties = 1;
+        tryMalloc(c->list.meta.properties, sizeof(uint16_t) * c->list.meta.numProperties, "ConstantMetaProperty array");
+        ConstantMetaProperty *lineNo = &c->list.meta.properties[0];
+
+        {
+          wchar_t *keyName = L"line-number";
+          Constant key;
+          key.type = CT_KEYWORD;
+          key.keyword.length = wcslen(keyName);
+          throws(tryCopyText(keyName, &key.keyword.value, key.keyword.length, error));
+          throws(tryAppendConstant(output.constants, key, error));
+          uint16_t index = output.constants->numUsed - 1;
+          lineNo->keyIndex = index;
+        }
+
+        {
+          Constant value;
+          value.type = CT_INT;
+          value.integer = constant->source.lineNumber;
+          throws(tryAppendConstant(output.constants, value, error));
+          uint16_t index = output.constants->numUsed - 1;
+          lineNo->valueIndex = index;
+        }
+      }
+
       ListElement *elem = constant->list.head;
       uint16_t elemIndex = 0;
       while (elem != NULL) {
