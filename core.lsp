@@ -55,6 +55,13 @@
                 `(def ~name (fn ~name ~fnargs ~@forms)))))
 (builtin :setmacro "defn")
 
+
+(defn list? (x)
+  (let (t (builtin :type x))
+    (or (= t 0) (= t 7))))
+
+(defn prn (x) (builtin :prn x))
+
 (defn fib (n)
   (let (_fib (fn _fib (prev1 prev2 n)
                  (if (= n 0)
