@@ -1294,6 +1294,8 @@ RetVal tryHydrateConstants(VM *vm, Value *constants, CodeUnit *codeUnit, Error *
 RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
   RetVal ret;
 
+  exprInitContents(expr);
+
   TryPrn prn = vm->valueTypeTable.valueTypes[result.type].tryPrn;
   throws(prn(vm, result, expr, error));
 

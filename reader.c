@@ -670,6 +670,11 @@ RetVal tryExprRead(TokenStream_t stream, Expr **ptr, Error *error) {
     return ret;
 }
 
+void exprInitContents(Expr *expr) {
+  expr->type = N_NONE;
+  sourceLocationInitContents(&expr->source);
+}
+
 void exprFreeContents(Expr *expr) {
   if (expr != NULL) {
     if (expr->type == N_STRING) {

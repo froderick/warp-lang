@@ -201,6 +201,10 @@ RetVal tryAppendSource(Form *form, Output output, Error *error) {
 
   if (form->source.isSet) {
 
+    if (form->source.lineNumber == 0) {
+      throwCompilerError(error, "line number is zero");
+    }
+
     LineNumber lineNumber;
     lineNumberInitContents(&lineNumber);
     lineNumber.lineNumber = form->source.lineNumber;

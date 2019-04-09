@@ -1611,6 +1611,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
         if (wcscmp(sym, L"quote") == 0) {
           form->type = F_CONST;
           throws(tryQuoteAnalyze(expr, &form->constant, error));
+          form->source = form->constant->source;
           break;
         }
 

@@ -70,6 +70,8 @@ typedef struct Expr {
   SourceLocation source;
 } Expr;
 
+void exprInitContents(Expr *expr);
+
 RetVal tryExprRead(TokenStream_t stream, Expr **expr, Error *error);
 void exprFreeContents(Expr *expr);
 void exprFree(Expr *expr);

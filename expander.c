@@ -36,21 +36,25 @@ RetVal tryIsMacro(Expander_t expander, Text sym, bool *isMacro, Error *error) {
   wchar_t getMacro[] = L"getmacro";
 
   Expr builtin;
+  exprInitContents(&builtin);
   builtin.type = N_SYMBOL;
   builtin.symbol.length = wcslen(builtinSym);
   builtin.symbol.value = builtinSym;
 
   Expr getmacro;
+  exprInitContents(&getmacro);
   getmacro.type = N_KEYWORD;
   getmacro.symbol.length = wcslen(getMacro);
   getmacro.symbol.value = getMacro;
 
   Expr macro;
+  exprInitContents(&macro);
   macro.type = N_STRING;
   macro.string.length = sym.length;
   macro.string.value = sym.value;
 
   Expr callExpr;
+  exprInitContents(&callExpr);
   callExpr.type = N_LIST;
   listInitContents(&callExpr.list);
 
@@ -97,22 +101,26 @@ RetVal tryExpand(Expander *expander, Text sym, Expr *input, VMEvalResult *output
   }
 
   Expr macro;
+  exprInitContents(&macro);
   macro.type = N_SYMBOL;
   macro.string.length = sym.length;
   macro.string.value = sym.value;
 
   Expr quoteSym;
+  exprInitContents(&quoteSym);
   quoteSym.type = N_SYMBOL;
   quoteSym.symbol.value = L"quote";
   quoteSym.symbol.length = wcslen(L"quote");
 
   Expr quote;
+  exprInitContents(&quote);
   quote.type = N_LIST;
   listInitContents(&quote.list);
   throws(tryListAppend(&quote.list, &quoteSym, error)); // all macro functions take a single argument, a list of the supplied arguments
   throws(tryListAppend(&quote.list, input, error)); // all macro functions take a single argument, a list of the supplied arguments
 
   Expr callExpr;
+  exprInitContents(&callExpr);
   callExpr.type = N_LIST;
   listInitContents(&callExpr.list);
 
