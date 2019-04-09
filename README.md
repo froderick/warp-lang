@@ -106,3 +106,5 @@ out of the code.
     +    printf("\n}\n");
     ```
 
+- bump arena allocators would greatly simplify de-allocation/cleaning up after compiler toolchain runs
+

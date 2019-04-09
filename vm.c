@@ -2611,6 +2611,25 @@ RetVal tryPrnClosure(VM_t vm, Value result, Expr *expr, Error *error) {
   return tryCopyText(function, &expr->string.value, expr->string.length, error);
 }
 
+RetVal equalsString(VM *vm, Value value, wchar_t *cmpStr, bool *equals, Error *error) {
+  RetVal ret;
+
+  *equals = false;
+  if (value.type == VT_STR) {
+
+    String *str = NULL;
+    throws(deref(&vm->gc, (void*)&str, value.value, error));
+
+    if (wcscmp(stringValue(str), cmpStr) == 0) {
+      *equals = true;
+    }
+  }
+
+  return R_SUCCESS;
+  failure:
+    return ret;
+}
+
 RetVal tryPrnStr(VM_t vm, Value result, Expr *expr, Error *error) {
   RetVal ret;
 
