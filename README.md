@@ -94,3 +94,15 @@ out of the code.
 // Semantic errors are reported back in a way that can be helpfully rendered
 // to the user via an Errors struct.
 ```
+
+
+## More TODOs
+- implement macroexpand:
+    ```
+    +    printf("macroexpand occurred {\n    ");
+    +    throws(tryExprPrn(expr, error));
+    +    printf("\n    =>\n    ");
+    +    throws(tryExprPrn(&output.result, error));
+    +    printf("\n}\n");
+    ```
+
