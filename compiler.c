@@ -628,8 +628,13 @@ RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *erro
       c->list.length = constant->list.length;
       tryMalloc(c->list.constants, sizeof(uint16_t) * c->list.length, "typeIndex array");
 
-      {
-        constantMetaInit(&c->list.meta);
+      constantMetaInit(&c->list.meta);
+      if (constant->source.isSet) {
+
+        if (constant->source.lineNumber == 0) {
+          throwRuntimeError(error, "line number is required if source has been set");
+        }
+
         c->list.meta.numProperties = 1;
         tryMalloc(c->list.meta.properties, sizeof(uint16_t) * c->list.meta.numProperties, "ConstantMetaProperty array");
         ConstantMetaProperty *lineNo = &c->list.meta.properties[0];

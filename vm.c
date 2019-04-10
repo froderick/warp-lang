@@ -2749,6 +2749,8 @@ RetVal tryPrnList(VM_t vm, Value result, Expr *expr, Error *error) {
   Expr *elem;
 
   tryMalloc(elem, sizeof(Expr), "Expr");
+  exprInitContents(elem);
+
   throws(tryVMPrn(vm, cons->value, elem, error));
   throws(tryListAppend(&expr->list, elem, error));
 
@@ -2762,6 +2764,8 @@ RetVal tryPrnList(VM_t vm, Value result, Expr *expr, Error *error) {
     throws(deref(&vm->gc, (void *) &cons, cons->next.value, error));
 
     tryMalloc(elem, sizeof(Expr), "Expr");
+    exprInitContents(elem);
+
     throws(tryVMPrn(vm, cons->value, elem, error));
     throws(tryListAppend(&expr->list, elem, error));
   }
