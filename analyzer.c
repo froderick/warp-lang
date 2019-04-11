@@ -1524,6 +1524,7 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *err
   macroName.value = sym.value;
 
   Expr input;
+  exprInitContents(&input);
   input.type = N_LIST;
   listInitContents(&input.list);
   input.list.length = expr->list.length - 1;
