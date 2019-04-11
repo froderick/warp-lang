@@ -147,6 +147,10 @@ typedef struct AnalyzerContext {
   uint16_t fnCount;
 } AnalyzerContext;
 
+void formInitContents(Form *form) {
+  form->type = F_NONE;
+  sourceLocationInitContents(&form->source);
+}
 
 void bindingInitContents(Binding *binding) {
   textInitContents(&binding->name);
@@ -1531,6 +1535,13 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *err
   throws(tryExpand(ctx->options.expander, macroName, &input, &output, error));
 
   if (output.type == RT_RESULT) {
+
+    printf("macroexpand occurred {\n    ");
+    throws(tryExprPrn(expr, error));
+    printf("\n    =>\n    ");
+    throws(tryExprPrn(&output.result, error));
+    printf("\n}\n");
+
     throws(tryFormAnalyzeContents(ctx, &output.result, form, error));
     return R_SUCCESS;
   }

@@ -163,6 +163,9 @@ typedef struct Form {
   SourceLocation source;
 } Form;
 
+void formInitContents(Form *form);
+void formsInitContents(Forms *forms);
+
 typedef struct FormRoot {
   BindingTable table;
   Form *form;
