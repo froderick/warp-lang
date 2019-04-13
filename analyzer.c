@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <inttypes.h>
 
 #include "analyzer.h"
 #include "utils.h"
@@ -529,6 +530,9 @@ RetVal tryFormsAllocate(Forms *forms, uint16_t length, Error *error) {
 
   forms->numForms = length;
   tryMalloc(forms->forms, sizeof(Form) * forms->numForms, "Forms array");
+  for (uint16_t i=0; i<forms->numForms; i++) {
+      formInitContents(&forms->forms[i]);
+  }
 
   return R_SUCCESS;
 
@@ -1216,7 +1220,7 @@ RetVal tryQuoteAnalyze(Expr* expr, Expr **constant, Error *error) {
   RetVal ret;
 
   if (expr->list.length != 2) {
-    throwSyntaxError(error, expr->source.position, "wrong number of args passed to quote (%llu instead of 1)",
+    throwSyntaxError(error, expr->source.position, "wrong number of args passed to quote (%" PRIu64 " instead of 1)",
                      expr->list.length - 1);
   }
 
@@ -1425,7 +1429,7 @@ RetVal trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error
   RetVal ret;
 
   if (expr->list.length != 2) {
-    throwSyntaxError(error, expr->source.position, "wrong number of args passed to syntax-quote (%llu instead of 1)",
+    throwSyntaxError(error, expr->source.position, "wrong number of args passed to syntax-quote (%" PRIu64 " instead of 1)",
                      expr->list.length - 1);
   }
 

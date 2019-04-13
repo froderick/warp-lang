@@ -71,8 +71,9 @@ RetVal tryReplEvalConf(wchar_t *inputText, wchar_t **outputText, bool useStdLib,
   throws(tryVMMake(&vm, error));
 
   if (useStdLib) {
-    char *stdLib = "/Users/ddcmhenry/dev/funtastic/branches/warp-lang/core.lsp";
-    throws(tryLoad(vm, stdLib, error));
+//    char *stdLib = "/Users/ddcmhenry/dev/funtastic/branches/warp-lang/core.lsp";
+//    char *stdLib = "/warp/core.lsp";
+    throws(tryLoad(vm, STD_LIB, error));
   }
 
   FileInfo fileInfo;

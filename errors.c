@@ -1,7 +1,9 @@
-  #include <wchar.h>
+#include <wchar.h>
 #include <string.h>
 #include <errno.h>
 #include <libgen.h>
+#include<stdio.h>
+#include <inttypes.h>
 #include "errors.h"
 
 void errorInitContents(Error *error) {
@@ -13,7 +15,7 @@ void errorInitContents(Error *error) {
 
 void printError(Error *error) {
   char* fileName = basename((char *) error->fileName);
-  printf("(debug) error at %s(%s:%llu): %ls\n", error->functionName, fileName, error->lineNumber, error->message);
+  printf("(debug) error at %s(%s:%" PRIu64 "): %ls\n", error->functionName, fileName, error->lineNumber, error->message);
 }
 
 /*

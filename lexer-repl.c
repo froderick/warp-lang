@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <inttypes.h>
 #include "lexer.h"
 
 int main(void) {
@@ -27,7 +28,7 @@ int main(void) {
       printf("> encountered lexer error\n\n");
     }
     else if (read == R_SUCCESS) {
-      printf("token: %ls (%s) %llu %llu\n", t->text, t->typeName, t->source.position, t->source.length);
+      printf("token: %ls (%s) %" PRIu64 " %" PRIu64 "\n", t->text, t->typeName, t->source.position, t->source.length);
     }
     else {
       printf("encountered unknown response from lexer: %i\n", read);

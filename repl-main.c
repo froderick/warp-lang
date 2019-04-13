@@ -4,7 +4,8 @@
 int main(void) {
   RetVal ret;
 
-  char *stdLib = "/Users/ddcmhenry/dev/funtastic/branches/warp-lang/core.lsp";
+  //char *stdLib = "/Users/ddcmhenry/dev/funtastic/branches/warp-lang/core.lsp";
+//  char *stdLib = "/warp/core.lsp";
 
   Error error;
   VM_t vm;
@@ -14,7 +15,7 @@ int main(void) {
   errorInitContents(&error);
 
   throws(tryVMMake(&vm, &error));
-  throws(tryLoad(vm, stdLib, &error));
+  throws(tryLoad(vm, STD_LIB, &error));
 
   throws(tryFileInputStreamMake(stdin, &source, &error));
   throws(tryStreamMake(source, &stream, &error));

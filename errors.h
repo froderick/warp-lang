@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <wchar.h>
+#include<stdio.h>
 
 typedef enum ErrorType {
   E_MEMORY,

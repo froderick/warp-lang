@@ -391,7 +391,7 @@ START_TEST(compilerBasic) {
       };
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
-      ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
+      ck_assert(memcmp(expectedCode, codeUnit.code.code, codeUnit.code.codeLength) == 0);
 
       codeUnitFreeContents(&codeUnit);
     }
@@ -419,7 +419,7 @@ START_TEST(compilerBasic) {
       };
 
       ck_assert_int_eq(fn.code.codeLength, sizeof(fnCode));
-      ck_assert_mem_eq(fnCode, fn.code.code, fn.code.codeLength);
+      ck_assert(memcmp(fnCode, fn.code.code, fn.code.codeLength) == 0);
 
       // verify fnCall
 
@@ -445,7 +445,7 @@ START_TEST(compilerBasic) {
       };
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(fnCallCode));
-      ck_assert_mem_eq(fnCallCode, codeUnit.code.code, codeUnit.code.codeLength);
+      ck_assert(memcmp(fnCallCode, codeUnit.code.code, codeUnit.code.codeLength) == 0);
 
 
       codeUnitFreeContents(&codeUnit);
@@ -475,7 +475,7 @@ START_TEST(compilerBasic) {
 //      printCodeArray(expectedCode, sizeof(expectedCode));
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
-      ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
+      ck_assert(memcmp(expectedCode, codeUnit.code.code, codeUnit.code.codeLength) == 0);
 
       codeUnitFreeContents(&codeUnit);
     }
@@ -512,7 +512,7 @@ START_TEST(compilerBasic) {
 //      printCodeArray(expectedCode, sizeof(expectedCode));
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
-      ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
+      ck_assert(memcmp(expectedCode, codeUnit.code.code, codeUnit.code.codeLength) == 0);
 
       codeUnitFreeContents(&codeUnit);
     }
@@ -550,7 +550,7 @@ START_TEST(compilerBasic) {
       //printCodeArray(expectedCode, sizeof(expectedCode));
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
-      ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
+      ck_assert(memcmp(expectedCode, codeUnit.code.code, codeUnit.code.codeLength) == 0);
 
       codeUnitFreeContents(&codeUnit);
     }
@@ -588,7 +588,7 @@ START_TEST(compilerBasic) {
 //      printCodeArray(expectedCode, sizeof(expectedCode));
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
-      ck_assert_mem_eq(expectedCode, codeUnit.code.code, codeUnit.code.codeLength);
+      ck_assert(memcmp(expectedCode, codeUnit.code.code, codeUnit.code.codeLength) == 0);
 
       codeUnitFreeContents(&codeUnit);
     }

@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <wctype.h>
 #include <errno.h>
+#include <inttypes.h>
 
 #include "utils.h"
 #include "lexer.h"
@@ -774,7 +775,7 @@ RetVal _tryExprPrnStr(Expr *expr, StringBuffer_t b, Error *error) {
       break;
     case N_NUMBER: {
       wchar_t text[256];
-      swprintf(text, sizeof(text), L"%llu", expr->number.value);
+      swprintf(text, sizeof(text), L"%" PRIu64, expr->number.value);
       throws(tryStringBufferAppendStr(b, text, error));
       break;
     }

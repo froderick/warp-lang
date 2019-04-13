@@ -108,3 +108,7 @@ out of the code.
 
 - bump arena allocators would greatly simplify de-allocation/cleaning up after compiler toolchain runs
 
+## some things needed to build on linux, or in linux containers
+        apt-get install cmake clang check pkg-config gdbserver
+        docker run -it --mount src="$(pwd)/../",target=/warp,type=bind ubuntu
+        https://github.com/shuhaoliu/docker-clion-dev

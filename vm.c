@@ -2,6 +2,7 @@
 #include <string.h>
 #include <libgen.h>
 #include <time.h>
+#include <inttypes.h>
 #include "vm.h"
 #include "utils.h"
 
@@ -656,7 +657,7 @@ RetVal alloc(VM *vm, ExecFrame_t frame, uint64_t length, void **ptr, uint64_t *o
     success = _alloc(&vm->gc, length, ptr, offset);
 
     if (success == R_OOM) {
-      throwRuntimeError(error, "out of memory, failed to allocate %llu bytes", length);
+      throwRuntimeError(error, "out of memory, failed to allocate %" PRIu64 " bytes", length);
     }
   }
 
@@ -737,7 +738,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
   uint64_t oldHeapUsed = vm->gc.allocPtr - vm->gc.currentHeap;
 
   uint64_t start = now();
-  printf("gc: starting, %llu bytes used\n", oldHeapUsed);
+  printf("gc: starting, %" PRIu64 " bytes used\n", oldHeapUsed);
 
   // flip heaps
   void *oldHeap = vm->gc.currentHeap;
@@ -816,7 +817,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
   uint64_t end = now();
   uint64_t duration = end - start;
 
-  printf("gc: completed, %llu bytes recovered, %llu bytes used, took %llums\n", sizeRecovered, newHeapUsed, duration);
+  printf("gc: completed, %" PRIu64 " bytes recovered, %" PRIu64 " bytes used, took %" PRIu64 "ms\n", sizeRecovered, newHeapUsed, duration);
 
   return;
 
@@ -978,7 +979,7 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
         fnConstants(fn)[ref.constantIndex] = *value;
       }
       else {
-        throwRuntimeError(error, "cannot hydrate a reference to a function other than the current one: %llu", ref.fnRef.fnId);
+        throwRuntimeError(error, "cannot hydrate a reference to a function other than the current one: %" PRIu64, ref.fnRef.fnId);
       }
     }
   }
@@ -1356,13 +1357,13 @@ void varInitContents(Var *var) {
   var->isMacro = false;
 }
 
-RetVal tryVarInit(wchar_t *namespace, wchar_t *name, Value value, Var *var, Error *error) {
+RetVal tryVarInit(wchar_t *namespace, wchar_t *name, uint64_t symbolNameLength, Value value, Var *var, Error *error) {
   RetVal ret;
 
   varInitContents(var);
 
   throws(tryCopyText(namespace, &var->namespace, wcslen(namespace), error));
-  throws(tryCopyText(name, &var->name, wcslen(name), error));
+  throws(tryCopyText(name, &var->name, symbolNameLength, error));
   var->value = value;
 
   return R_SUCCESS;
@@ -1496,7 +1497,7 @@ RetVal tryDefVar(Namespaces *namespaces, wchar_t *symbolName, uint64_t symbolNam
   Var *resolvedVar = NULL;
   if (!resolveVar(namespaces, symbolName, symbolNameLength, &resolvedVar)) {
     Namespace *ns = namespaces->currentNamespace;
-    throws(tryVarInit(ns->name, symbolName, value, &createdVar, error));
+    throws(tryVarInit(ns->name, symbolName, symbolNameLength, value, &createdVar, error));
     throws(tryAppendVar(&ns->localVars, createdVar, error));
   }
   else {
@@ -1735,9 +1736,8 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
   if (numArgsSupplied.value > invocable.fn->numArgs) {
 
     if (!invocable.fn->usesVarArgs) {
-      // fail: wrong number of arguments
-      throwRuntimeError(error, "extra arguments supplied, expected %u but got %llu", invocable.fn->numArgs,
-          numArgsSupplied.value);
+      throwRuntimeError(error, "extra arguments supplied, expected %u but got %s", invocable.fn->numArgs,
+          getValueTypeName(vm, numArgsSupplied.value));
     }
 
 
@@ -1784,9 +1784,8 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
   if (numArgsSupplied.value < invocable.fn->numArgs) {
 
     if (!invocable.fn->usesVarArgs) {
-      // fail: wrong number of arguments
-      throwRuntimeError(error, "required arguments not supplied, expected %u but got %llu", invocable.fn->numArgs,
-                        numArgsSupplied.value);
+      throwRuntimeError(error, "required arguments not supplied, expected %u but got %s", invocable.fn->numArgs,
+                        getValueTypeName(vm, numArgsSupplied.value));
     }
 
     // make sure the list is present on the stack
@@ -2070,6 +2069,10 @@ RetVal tryLoadVarEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   String *str = NULL;
   throws(deref(&vm->gc, (void*)&str, varName.value, error));
+
+  if (wcscmp(stringValue(str), L"second") == 0) {
+      printf("what\n");
+  }
 
   Var *var = NULL;
   if (!resolveVar(&vm->namespaces, stringValue(str), str->length, &var)) {
@@ -2980,7 +2983,8 @@ RetVal tryExceptionPrint(VMException *e, wchar_t **ptr, Error *error) {
       swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(Unknown Source)\n", f->functionName.value);
     }
     else {
-      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(%ls:%llu)\n", f->functionName.value, f->fileName.value, f->lineNumber);
+      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(%ls:%" PRIu64 ")\n", f->functionName.value, f->fileName.value,
+          f->lineNumber);
     }
     throws(tryStringBufferAppendStr(b, msg, error));
   }
@@ -3117,7 +3121,7 @@ RetVal tryOpStackPush(OpStack *stack, Value v, Error *error) {
   RetVal ret;
 
   if (stack->maxDepth == stack->usedDepth + 1) {
-    throwRuntimeError(error, "cannot allocate op stack greater than max %llu", stack->maxDepth);
+    throwRuntimeError(error, "cannot allocate op stack greater than max %" PRIu64, stack->maxDepth);
   }
 
   stack->stack[stack->usedDepth] = v;
@@ -3307,7 +3311,7 @@ RetVal getOperandRef(ExecFrame *frame, uint64_t opIndex, Value **ptr, Error *err
   RetVal ret;
 
   if (opIndex >= frame->opStack->usedDepth) {
-    throwRuntimeError(error, "no such operand: %llu", opIndex);
+    throwRuntimeError(error, "no such operand: %" PRIu64, opIndex);
   }
 
   *ptr = &frame->opStack->stack[opIndex];
