@@ -62,7 +62,7 @@ RetVal tryTokenInit(TokenType type, wchar_t *text, uint64_t position, uint64_t l
 
   Token *t;
 
-  tryMalloc(t, sizeof(Token) + (sizeof(wchar_t) * length) + 1, "Token");
+  tryMalloc(t, sizeof(Token) + (sizeof(wchar_t) * (length + 1)), "Token");
 
   t->type = type;
   t->typeName = tokenName(type);

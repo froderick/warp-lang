@@ -13,7 +13,7 @@ RetVal tryCopyText(wchar_t* from, wchar_t **ptr, uint64_t len, Error *error) {
   RetVal ret;
 
   wchar_t *to;
-  tryMalloc(to, ((sizeof(wchar_t) * len) + 1), "wchar_t string");
+  tryMalloc(to, sizeof(wchar_t) * (len + 1), "wchar_t string");
 
   wcsncpy(to, from, len);
   to[len] = L'\0';

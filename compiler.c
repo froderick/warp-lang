@@ -636,7 +636,7 @@ RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *erro
         }
 
         c->list.meta.numProperties = 1;
-        tryMalloc(c->list.meta.properties, sizeof(uint16_t) * c->list.meta.numProperties, "ConstantMetaProperty array");
+        tryMalloc(c->list.meta.properties, sizeof(ConstantMetaProperty) * c->list.meta.numProperties, "ConstantMetaProperty array");
         ConstantMetaProperty *lineNo = &c->list.meta.properties[0];
 
         {

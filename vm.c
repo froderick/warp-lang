@@ -959,7 +959,9 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   fn->hasName = fnConst->hasName;
   if (fn->hasName) {
     fn->nameLength = fnConst->name.length;
-    memcpy(fnName(fn), fnConst->name.value, nameSize);
+    size_t copySize = fnConst->name.length * sizeof(wchar_t);
+
+    memcpy(fnName(fn), fnConst->name.value, copySize);
     fnName(fn)[fn->nameLength] = L'\0';
   }
 
@@ -996,7 +998,9 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   if (fn->hasSourceTable) {
 
       fn->sourceFileNameLength = fnConst->code.sourceTable.fileName.length;
-      memcpy(fnSourceFileName(fn), fnConst->code.sourceTable.fileName.value, sourceFileNameSize);
+      size_t copySize = fnConst->code.sourceTable.fileName.length * sizeof(wchar_t);
+
+      memcpy(fnSourceFileName(fn), fnConst->code.sourceTable.fileName.value, copySize);
       fnSourceFileName(fn)[fn->sourceFileNameLength] = L'\0';
 
       fn->numLineNumbers = fnConst->code.sourceTable.numLineNumbers;
