@@ -1318,7 +1318,8 @@ RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form
     throws(tryTextMake(concat, &ref.name, wcslen(concat), error));
 
     Form *fnCallable;
-    tryMalloc(fnCallable, sizeof(FormFnCall), "FormFnCall");
+    tryMalloc(fnCallable, sizeof(Form), "Form");
+    formInitContents(fnCallable);
     fnCallable->type = F_VAR_REF;
     fnCallable->varRef = ref;
 
@@ -1688,6 +1689,7 @@ RetVal _tryFormAnalyze(AnalyzerContext *ctx, Expr* expr, Form **ptr, Error *erro
   Form *form; // clean up on fail
 
   tryMalloc(form, sizeof(Form), "Form");
+  formInitContents(form);
   throws(tryFormAnalyzeContents(ctx, expr, form, error));
 
   *ptr = form;
