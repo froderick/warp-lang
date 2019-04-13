@@ -1,17 +1,15 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.10.2)
 project(warp_lang C)
 
 set(CMAKE_C_STANDARD 11)
-
-#set(GCC_FLAGS "-g -fno-pie")
-#SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} ${GCC_FLAGS}")
-#SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} ${GCC_FLAGS}")
 
 include_directories(/usr/local/include)
 link_directories(/usr/local/lib)
 
 # TODO: figure out how to turn this off by default/back on when developing locally
-add_compile_definitions(DEBUG=1)
+#set(CMAKE_VERBOSE_MAKEFILE ON)
+
+add_definitions(-DDEBUG=1 -DSTD_LIB="${CMAKE_CURRENT_LIST_DIR}/core.lsp")
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(check REQUIRED check)
