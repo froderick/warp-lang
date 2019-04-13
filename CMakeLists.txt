@@ -12,12 +12,18 @@ link_directories(/usr/local/lib)
 add_definitions(-DDEBUG=1 -DSTD_LIB="${CMAKE_CURRENT_LIST_DIR}/core.lsp")
 
 find_package(PkgConfig REQUIRED)
+find_package(Threads REQUIRED)
 pkg_check_modules(check REQUIRED check)
 
-add_library(compiler errors.c reader.c analyzer.c vm.c utils.c compiler.h compiler.c lexer.h lexer.c source.h repl.h repl.c source.c expander.h expander.c)
+add_library(compiler errors.c reader.c analyzer.c vm.c utils.c compiler.c lexer.c repl.c source.c expander.c)
 
 add_executable(tests test.c)
 target_link_libraries(tests check compiler)
+
+if (UNIX AND NOT APPLE)
+    target_link_libraries(tests -lm -lrt ${CMAKE_THREAD_LIBS_INIT} -lsubunit)
+endif()
+
 target_compile_options(tests PRIVATE -g)
 
 add_executable(lexer-repl lexer-repl.c)
