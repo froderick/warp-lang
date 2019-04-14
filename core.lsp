@@ -57,6 +57,18 @@
   (let (t (builtin :type x))
     (or (= t 0) (= t 7))))
 
+(defn -> (x & exprs)
+  (let (->helper (fn ->helper (x exprs)
+                   (if (nil? exprs)
+                     x
+                     (let (expr (first exprs)
+                           val (if (list? expr)
+                                 `(~(first expr) ~x ~@(rest expr))
+                                 (list expr x)))
+                       (->helper val (rest exprs))))))
+  (->helper x exprs)))
+(builtin :setmacro "->")
+
 (defn prn (x) (builtin :prn x))
 
 (defn fib (n)

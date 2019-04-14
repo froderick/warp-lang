@@ -800,6 +800,8 @@ START_TEST(repl) {
     assertEval(L"(take 3 '(1 2 3 4))", L"(1 2 3)");
     assertEval(L"(take 5 '(1 2 3 4))", L"(1 2 3 4)");
 
+    assertEval(L"(-> 10 inc (- 5) (+ 100))", L"106");
+
   }
 END_TEST
 
