@@ -2297,22 +2297,34 @@ RetVal trySetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   Value strValue;
   throws(popOperand(frame, &strValue, error));
 
-  if (strValue.type != VT_STR) {
-    throwRuntimeError(error, "only symbols can identify vars: %s", getValueTypeName(vm, strValue.type));
+  wchar_t *sym = NULL;
+  uint64_t symLength = 0;
+
+  if (strValue.type == VT_STR) {
+    String *str = NULL;
+    throws(deref(&vm->gc, (void*)&str, strValue.value, error));
+    sym = stringValue(str);
+    symLength = str->length;
+  }
+  else if (strValue.type == VT_SYMBOL) {
+    Symbol *s = NULL;
+    throws(deref(&vm->gc, (void*)&s, strValue.value, error));
+    sym = symbolValue(s);
+    symLength = s->length;
+  }
+  else {
+    throwRuntimeError(error, "only strings or symbols can identify vars: %s", getValueTypeName(vm, strValue.type));
   }
 
-  String *str = NULL;
-  throws(deref(&vm->gc, (void*)&str, strValue.value, error));
-
   Var *var;
-  if (!resolveVar(&vm->namespaces, stringValue(str), str->length, &var)) {
-    throwRuntimeError(error, "no such var exists: %ls", stringValue(str));
+  if (!resolveVar(&vm->namespaces, sym, symLength, &var)) {
+    throwRuntimeError(error, "no such var exists: %ls", sym);
   }
 
   if (!var->isMacro) {
     if (var->value.type != VT_FN) {
       throwRuntimeError(error, "only vars referring to functions can be macros: %ls -> %s",
-          stringValue(str),  getValueTypeName(vm, var->value.type));
+          sym,  getValueTypeName(vm, var->value.type));
     }
     var->isMacro = true;
   }
