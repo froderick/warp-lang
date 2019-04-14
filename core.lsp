@@ -52,12 +52,17 @@
             `(def ~name (fn ~name ~fnargs ~@forms))))
 (builtin :setmacro "defn")
 
+(def defmacro (fn defmacro (name fnargs & forms)
+                `(let (asdf nil)
+                   (def ~name (fn ~name ~fnargs ~@forms))
+                   (builtin :setmacro (quote ~name)))))
+(builtin :setmacro "defmacro")
 
 (defn list? (x)
   (let (t (builtin :type x))
     (or (= t 0) (= t 7))))
 
-(defn -> (x & exprs)
+(defmacro -> (x & exprs)
   (let (->helper (fn ->helper (x exprs)
                    (if (nil? exprs)
                      x
@@ -67,7 +72,6 @@
                                  (list expr x)))
                        (->helper val (rest exprs))))))
   (->helper x exprs)))
-(builtin :setmacro "->")
 
 (defn prn (x) (builtin :prn x))
 
