@@ -100,42 +100,38 @@ RetVal tryExpand(Expander *expander, Text sym, Expr *input, VMEvalResult *output
     throwInternalError(error, "macro input expr must always be a list: %u", input->type);
   }
 
-  Expr macro;
-  exprInitContents(&macro);
-  macro.type = N_SYMBOL;
-  macro.string.length = sym.length;
-  macro.string.value = sym.value;
+  Form fnCallable;
+  formInitContents(&fnCallable);
+  fnCallable.type = F_VAR_REF;
+  fnCallable.varRef.name = sym;
 
-  Expr quoteSym;
-  exprInitContents(&quoteSym);
-  quoteSym.type = N_SYMBOL;
-  quoteSym.symbol.value = L"quote";
-  quoteSym.symbol.length = wcslen(L"quote");
+  Forms args;
+  formsInitContents(&args);
+  args.numForms = input->list.length;
+  tryMalloc(args.forms, sizeof(Form) * args.numForms, "Form array");
 
-  Expr quote;
-  exprInitContents(&quote);
-  quote.type = N_LIST;
-  listInitContents(&quote.list);
-  throws(tryListAppend(&quote.list, &quoteSym, error)); // all macro functions take a single argument, a list of the supplied arguments
-  throws(tryListAppend(&quote.list, input, error)); // all macro functions take a single argument, a list of the supplied arguments
+  ListElement *elem = input->list.head;
+  for (uint64_t i=0; i<args.numForms; i++) {
+    Form *arg = &args.forms[i];
+    formInitContents(arg);
+    arg->type = F_CONST;
+    arg->constant = elem->expr;
+    elem = elem->next;
+  }
 
-  Expr callExpr;
-  exprInitContents(&callExpr);
-  callExpr.type = N_LIST;
-  listInitContents(&callExpr.list);
+  Form fnCall;
+  formInitContents(&fnCall);
+  fnCall.type = F_FN_CALL;
+  fnCall.fnCall.fnCallable = &fnCallable;
+  fnCall.fnCall.args = args;
 
-  throws(tryListAppend(&callExpr.list, &macro, error));
-  throws(tryListAppend(&callExpr.list, &quote, error)); // all macro functions take a single argument, a list of the supplied arguments
+  FormRoot root;
+  rootInitContents(&root);
+  root.form = &fnCall;
 
-  AnalyzeOptions options;
-  analyzeOptionsInitContents(&options);
-  options.expander = NULL; // prevents expansion
-
-  FormRoot *root = NULL;
   CodeUnit codeUnit;
 
-  throws(tryFormAnalyzeOptions(options, &callExpr, &root, error));
-  throws(tryCompileTopLevel(root, &codeUnit, error));
+  throws(tryCompileTopLevel(&root, &codeUnit, error));
   throws(tryVMEval(expander->vm, &codeUnit, output, error));
 
   return R_SUCCESS;

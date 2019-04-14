@@ -1323,6 +1323,7 @@ RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form
     fnCallable->type = F_VAR_REF;
     fnCallable->varRef = ref;
 
+    formInitContents(form);
     form->type = F_FN_CALL;
     fnCallInitContents(&form->fnCall);
     form->fnCall.fnCallable = fnCallable;
