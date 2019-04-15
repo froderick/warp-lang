@@ -48,15 +48,14 @@
                 (concat-n '() seqs)))
 ;; end temporary concat
 
-(def defn (fn defn (name fnargs & forms)
-            `(def ~name (fn ~name ~fnargs ~@forms))))
-(builtin :setmacro "defn")
-
 (def defmacro (fn defmacro (name fnargs & forms)
                 `(let (asdf nil)
                    (def ~name (fn ~name ~fnargs ~@forms))
                    (builtin :setmacro (quote ~name)))))
 (builtin :setmacro "defmacro")
+
+(defmacro defn (name fnargs & forms)
+  `(def ~name (fn ~name ~fnargs ~@forms)))
 
 (defn list? (x)
   (let (t (builtin :type x))
