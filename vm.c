@@ -80,6 +80,7 @@ void constantFnInitContents(FnConstant *fnConst) {
   fnConst->fnId = 0;
   fnConst->hasName = 0;
   textInitContents(&fnConst->name);
+  fnConst->bindingSlotIndex = 0;
   fnConst->numArgs = 0;
   fnConst->usesVarArgs = false;
   fnConst->numConstants = 0;
@@ -152,8 +153,6 @@ void _constantFreeContents(Constant *c) {
           free(c->list.constants);
           c->list.constants = NULL;
         }
-        break;
-      case CT_FN_REF:
         break;
     }
   }
@@ -301,6 +300,8 @@ typedef struct Fn {
   bool hasName;
   uint64_t nameLength;
   size_t nameOffset;
+  uint16_t bindingSlotIndex;
+
   uint16_t numCaptures;
   uint16_t numArgs;
   bool usesVarArgs;
@@ -436,6 +437,7 @@ typedef struct InstTable {
 // value type definitions
 
 typedef struct Invocable {
+  Value ref;
   Value fnRef;
   Fn *fn;
   bool hasClosure;
@@ -830,69 +832,9 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
  * Loading Constants as Values
  */
 
-typedef struct UnresolvedFnRef {
-  FnRefConstant fnRef;
-  uint16_t constantIndex;
-} UnresolvedFnRef;
+RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, uint16_t constantIndex, Error *error);
 
-typedef struct UnresolvedFnRefs {
-  uint64_t allocatedSpace;
-  uint64_t usedSpace;
-  UnresolvedFnRef *references;
-} UnresolvedFnRefs;
-
-void unresolvedFnRefsInitContents(UnresolvedFnRefs *r) {
-  r->allocatedSpace = 0;
-  r->usedSpace = 0;
-  r->references = NULL;
-}
-
-void unresolvedFnRefsFreeContents(UnresolvedFnRefs *r) {
-  if (r != NULL) {
-    r->allocatedSpace = 0;
-    r->usedSpace = 0;
-    if (r->references != NULL) {
-      free(r->references);
-      r->references = NULL;
-    }
-  }
-}
-
-RetVal tryUnresolvedFnRefsAppend(UnresolvedFnRefs *references, UnresolvedFnRef ref, Error *error) {
-  RetVal ret;
-
-  if (references->references == NULL) {
-    uint16_t len = 16;
-    tryMalloc(references->references, len * sizeof(UnresolvedFnRef), "UnresolvedFnRef array");
-    references->allocatedSpace = len;
-  }
-  else if (references->usedSpace == references->allocatedSpace) {
-    uint64_t newAllocatedLength = references->allocatedSpace * 2;
-
-    UnresolvedFnRef* resizedReferences = realloc(references->references, newAllocatedLength * sizeof(UnresolvedFnRef));
-    if (resizedReferences == NULL) {
-      ret = memoryError(error, "realloc UnresolvedFnRef array");
-      goto failure;
-    }
-
-    references->allocatedSpace = newAllocatedLength;
-    references->references = resizedReferences;
-  }
-
-  uint64_t index = references->usedSpace;
-  references->references[index] = ref;
-  references->usedSpace = index + 1;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, uint16_t constantIndex, UnresolvedFnRefs *unresolved, Error *error);
-
-RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values,
-                            UnresolvedFnRefs *unresolved, Error *error);
+RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values, Error *error);
 
 void fnInitContents(Fn *fn) {
 
@@ -901,6 +843,8 @@ void fnInitContents(Fn *fn) {
   fn->hasName = false;
   fn->nameLength = 0;
   fn->nameOffset = 0;
+  fn->bindingSlotIndex = 0;
+
   fn->numCaptures = 0;
   fn->numArgs = 0;
   fn->usesVarArgs = false;
@@ -921,10 +865,6 @@ void fnInitContents(Fn *fn) {
 
 RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   RetVal ret;
-
-  // always clean up
-  UnresolvedFnRefs unresolved;
-  unresolvedFnRefsInitContents(&unresolved);
 
   // cleanup on failure
   Fn *fn = NULL;
@@ -963,28 +903,16 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 
     memcpy(fnName(fn), fnConst->name.value, copySize);
     fnName(fn)[fn->nameLength] = L'\0';
+
+    fn->bindingSlotIndex = fnConst->bindingSlotIndex;
   }
 
   fn->numCaptures = fnConst->numCaptures;
   fn->numArgs = fnConst->numArgs;
   fn->usesVarArgs = fnConst->usesVarArgs;
 
-  {
-    fn->numConstants = fnConst->numConstants;
-    throws(_tryHydrateConstants(vm, fn->numConstants, fnConst->constants, fnConstants(fn), &unresolved, error));
-
-    for (uint16_t i=0; i<unresolved.usedSpace; i++) {
-      UnresolvedFnRef ref = unresolved.references[i];
-
-      if (ref.fnRef.fnId == fnConst->fnId) {
-        // resolve the reference
-        fnConstants(fn)[ref.constantIndex] = *value;
-      }
-      else {
-        throwRuntimeError(error, "cannot hydrate a reference to a function other than the current one: %" PRIu64, ref.fnRef.fnId);
-      }
-    }
-  }
+  fn->numConstants = fnConst->numConstants;
+  throws(_tryHydrateConstants(vm, fn->numConstants, fnConst->constants, fnConstants(fn), error));
 
   fn->numLocals = fnConst->code.numLocals;
   fn->maxOperandStackSize = fnConst->code.maxOperandStackSize;
@@ -1007,12 +935,9 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
       memcpy(fnLineNumbers(fn), fnConst->code.sourceTable.lineNumbers, lineNumbersSize);
   }
 
-  unresolvedFnRefsFreeContents(&unresolved);
-
   return R_SUCCESS;
 
   failure:
-    unresolvedFnRefsFreeContents(&unresolved);
     return ret;
 }
 
@@ -1222,7 +1147,8 @@ RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant list
 // TODO: I had a thought, can we get rid of CodeUnit entirely and just replace it with FnConstant?
 // TODO: I had another thought, can we get rid of the nested graph of constants and flatten it entirely?
 
-RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, uint16_t constantIndex, UnresolvedFnRefs *unresolved, Error *error) {
+RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, uint16_t constantIndex,
+    Error *error) {
   RetVal ret;
 
   Value v;
@@ -1258,20 +1184,6 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
     case CT_LIST:
       throws(tryListHydrate(vm, alreadyHydratedConstants, c.list, &v, error));
       break;
-    case CT_FN_REF: {
-
-      // capture this for later
-      UnresolvedFnRef ref;
-      ref.fnRef = c.fnRef;
-      ref.constantIndex = constantIndex;
-      throws(tryUnresolvedFnRefsAppend(unresolved, ref, error));
-
-      // leave the value nil for now
-      v.type = VT_NIL;
-      v.value = 0;
-
-      break;
-    }
     case CT_NONE:
     default:
       throwInternalError(error, "invalid constant: %u", c.type);
@@ -1284,8 +1196,7 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
   return ret;
 }
 
-RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values,
-                            UnresolvedFnRefs *unresolved, Error *error) {
+RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values, Error *error) {
   RetVal ret;
 
   for (uint16_t i=0; i<numConstants; i++) {
@@ -1293,37 +1204,13 @@ RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, 
     Constant c = constants[i];
     Value v;
 
-    throws(tryHydrateConstant(vm, values, c, &v, i, unresolved, error));
+    throws(tryHydrateConstant(vm, values, c, &v, i, error));
 
     values[i] = v;
   }
 
   return R_SUCCESS;
   failure:
-    return ret;
-}
-
-// TODO: this is not being used. is this still needed? what problem was this solving?
-RetVal tryHydrateConstants(VM *vm, Value *constants, CodeUnit *codeUnit, Error *error) {
-  RetVal ret;
-
-  UnresolvedFnRefs unresolved;
-  unresolvedFnRefsInitContents(&unresolved);
-
-  throws(_tryHydrateConstants(vm, codeUnit->numConstants, codeUnit->constants, constants, &unresolved, error));
-
-  if (unresolved.usedSpace > 0) {
-    throwRuntimeError(error, "no unresolved function references should be present in the top level");
-  }
-
-  ret = R_SUCCESS;
-  goto done;
-
-  failure:
-  goto done;
-
-  done:
-    unresolvedFnRefsFreeContents(&unresolved);
     return ret;
 }
 
@@ -1673,7 +1560,8 @@ RetVal tryStoreLocalEval(VM *vm, ExecFrame_t frame, Error *error) {
  */
 
 void invocableInitContents(Invocable *i) {
-  i->fnRef = nil();
+  i->ref = nil();    // the reference to the initially invoked value (could be closure or fn)
+  i->fnRef = nil();  // always points to the actual fn
   i->fn = NULL;
   i->hasClosure = false;
   i->closure = NULL;
@@ -1687,6 +1575,7 @@ RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *e
   Value pop = nil();
   throws(popOperand(frame, &pop, error));
 
+  invocable->ref = pop;
   invocable->fnRef = pop;
 
   switch (invocable->fnRef.type) {
@@ -1819,6 +1708,10 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
       throws(setLocal(child, nextLocalIdx, closureCaptures(invocable.closure)[i], error));
       nextLocalIdx = nextLocalIdx + 1;
     }
+  }
+
+  if (invocable.fn->hasName) {
+    throws(setLocal(child, invocable.fn->bindingSlotIndex, invocable.ref, error));
   }
 
   return R_SUCCESS;

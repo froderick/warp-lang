@@ -416,9 +416,9 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   codesInitContents(&fnCodes);
   lineNumbersInitContents(&lineNumbers);
 
-  {
-    throws(trySlotsTableBuild(&form->fn.table, &slotsTable, error));
+  throws(trySlotsTableBuild(&form->fn.table, &slotsTable, error));
 
+  {
     Output fnOutput;
     fnOutput.constants = &fnConstants;
     fnOutput.codes = &fnCodes;
@@ -426,22 +426,6 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
     fnOutput.lineNumbers = &lineNumbers;
     fnOutput.hasFileName = output.hasFileName;
     fnOutput.fileName = output.fileName;
-
-    // create fn ref constant, emit code to load it and store it at local[0]
-    if (form->fn.hasName) {
-
-      Constant c;
-      c.type = CT_FN_REF;
-      c.fnRef.fnId = form->fn.id;
-      throws(tryAppendConstant(fnOutput.constants, c, error));
-
-      uint16_t constantIndex = fnOutput.constants->numUsed - 1;
-      uint16_t slotIndex = fnOutput.slotsTable[form->fn.bindingIndex];
-
-      uint8_t code[] = { I_LOAD_CONST,  constantIndex >> 8, constantIndex & 0xFF,
-                         I_STORE_LOCAL, slotIndex >> 8,     slotIndex & 0xFF };
-      throws(tryCodeAppend(fnOutput.codes, sizeof(code), code, error));
-    }
 
     for (uint16_t i = 0; i < form->fn.forms.numForms; i++) {
       throws(tryCompile(&form->fn.forms.forms[i], fnOutput, error));
@@ -459,6 +443,8 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   textInitContents(&fnConst.name);
   if (fnConst.hasName) {
     throws(tryTextCopy(&form->fn.name, &fnConst.name, error));
+    uint16_t slotIndex = slotsTable[form->fn.bindingIndex];
+    fnConst.bindingSlotIndex = slotIndex;
   }
   fnConst.numArgs = form->fn.numArgs;
   fnConst.usesVarArgs = form->fn.usesVarArgs;

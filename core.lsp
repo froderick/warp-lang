@@ -30,23 +30,18 @@
                                         (_reverse old (cons n new))))))
                    (_reverse seq nil))))
 
-
-;; begin temporary concat
-(def concat-two (fn concat-two (seq-a seq-b)
-                    (if (nil? seq-a)
-                        seq-b
-                      (concat-two (rest seq-a) (cons (first seq-a) seq-b)))))
-
-(def concat-n (fn concat-fn (concated remaining)
-                  (if (nil? remaining)
-                      concated
-                    (let (next (first remaining)
-                               todo (rest remaining))
-                      (concat-n (concat-two (reverse concated) next) todo)))))
-
 (def concat (fn concat (& seqs)
-                (concat-n '() seqs)))
-;; end temporary concat
+              (let (concat-two (fn concat-two (seq-a seq-b)
+                                 (if (nil? seq-a)
+                                   seq-b
+                                   (concat-two (rest seq-a) (cons (first seq-a) seq-b))))
+                    concat-n (fn concat-n (concated remaining)
+                               (if (nil? remaining)
+                                 concated
+                                 (let (next (first remaining)
+                                       todo (rest remaining))
+                                   (concat-n (concat-two (reverse concated) next) todo)))))
+                (concat-n '() seqs))))
 
 (def defmacro (fn defmacro (name fnargs & forms)
                 `(let (asdf nil)
@@ -115,3 +110,4 @@
 
 
 ;; todo: not, cond, print-bytecode for vars and for arbitrary expressions, deref vars / @
+

@@ -88,8 +88,7 @@ typedef enum ConstantType {
   CT_VAR_REF,
   CT_SYMBOL,
   CT_KEYWORD,
-  CT_LIST,
-  CT_FN_REF,
+  CT_LIST
 } ConstantType;
 
 typedef struct Constant Constant;
@@ -113,6 +112,7 @@ typedef struct FnConstant {
   uint64_t fnId;
   bool hasName;
   Text name;
+  uint16_t bindingSlotIndex;
   uint64_t numArgs;
   bool usesVarArgs;
   uint16_t numConstants;
@@ -157,7 +157,6 @@ typedef struct Constant {
     SymbolConstant symbol;
     KeywordConstant keyword;
     ListConstant list;
-    FnRefConstant fnRef;
   };
 } Constant;
 
