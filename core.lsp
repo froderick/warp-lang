@@ -43,8 +43,6 @@
                                    (concat-n (concat-two (reverse concated) next) todo)))))
                 (concat-n '() seqs))))
 
-;; TODO: make gensym, and the macro-syntax support for generating let-bindings with it to avoid lexical capture
-
 (def defmacro (fn defmacro (name fnargs & forms)
                 `(let '()
                    (def ~name (fn ~name ~fnargs ~@forms))
@@ -92,10 +90,20 @@
   (nil? seq))
 
 ;; TODO: rewrite these boolean ops as macros
-(defn and (a b)
-  (if a
-    (if b true false)
-    false))
+;; TODO: make gensym, and the macro-syntax support for generating let-bindings with it to avoid lexical capture
+;; TODO: fix if/else, it breaks without else clause
+(defmacro and (& seq)
+  (if (empty? seq)
+    true
+    (let (n (first seq)
+          seq (rest seq))
+      (if (empty? seq)
+        `(let (a1 ~n)
+           (if a1 true false))
+        `(let (a1 ~n)
+           (if a1
+             (and ~@seq)
+             false))))))
 
 (defn example ()
   (and (+ 1 2) (+ 3 'x)))
