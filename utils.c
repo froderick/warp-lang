@@ -298,7 +298,7 @@ void stringBufferFree(StringBuffer *b) {
 RetVal tryStringBufferAppendChar(StringBuffer *b, wchar_t ch, Error *error) {
   RetVal ret;
 
-  if (b->usedChars + 1 == (b->allocatedChars - 1)) {
+  if (b->usedChars + 2 >= (b->allocatedChars - 1)) {
 
     unsigned long oldSizeInBytes = stringBufferAllocatedBytes(b);
     unsigned long newSizeInBytes = oldSizeInBytes * 2;
