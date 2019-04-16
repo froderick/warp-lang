@@ -791,8 +791,12 @@ START_TEST(repl) {
     // this was a bug where ifs could not be nested
     assertEval(L"(if true (if true 'x 'y) 'z)", L"x");
 
+    assertEval(L"(and)", L"true");
     assertEval(L"(and nil true)", L"false");
     assertEval(L"(and 1 true)", L"true");
+    assertEval(L"(and 'x 'y 'z)", L"true");
+    assertEval(L"(and 'x false 'z)", L"false");
+
     assertEval(L"(or false false)", L"nil");
     assertEval(L"(or false 10)", L"10");
     assertEval(L"(or 11 false)", L"11");

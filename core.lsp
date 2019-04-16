@@ -91,7 +91,6 @@
 
 ;; TODO: rewrite these boolean ops as macros
 ;; TODO: make gensym, and the macro-syntax support for generating let-bindings with it to avoid lexical capture
-;; TODO: fix if/else, it breaks without else clause
 (defmacro and (& seq)
   (if (empty? seq)
     true
