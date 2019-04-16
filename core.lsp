@@ -46,13 +46,16 @@
 ;; TODO: make gensym, and the macro-syntax support for generating let-bindings with it to avoid lexical capture
 
 (def defmacro (fn defmacro (name fnargs & forms)
-                `(let (asdf nil) ;; TODO: make it so we don't have to set fake values here
+                `(let '()
                    (def ~name (fn ~name ~fnargs ~@forms))
                    (builtin :setmacro (quote ~name)))))
 (builtin :setmacro "defmacro")
 
 (defmacro defn (name fnargs & forms)
   `(def ~name (fn ~name ~fnargs ~@forms)))
+
+(defmacro do (& forms)
+  `(let '() ~@forms))
 
 (defn list? (x)
   (let (t (builtin :type x))
@@ -84,6 +87,9 @@
                     seq
                     (_large (dec n) (cons n seq)))))
     (_large n nil)))
+
+(defn empty? (seq)
+  (nil? seq))
 
 ;; TODO: rewrite these boolean ops as macros
 (defn and (a b)
