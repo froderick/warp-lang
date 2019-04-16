@@ -1162,8 +1162,6 @@ void fnCallInitContents(FormFnCall *fnCall) {
   fnCall->tailPosition = false;
 }
 
-void fnCallFreeContents(FormFnCall *fnCall);
-
 RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Expr *expr, FormFnCall *fnCall, Error *error) {
 
   RetVal ret;

@@ -122,6 +122,7 @@ RetVal tryExpand(Expander *expander, Text sym, Expr *input, VMEvalResult *output
   Form fnCall;
   formInitContents(&fnCall);
   fnCall.type = F_FN_CALL;
+  fnCallInitContents(&fnCall.fnCall);
   fnCall.fnCall.fnCallable = &fnCallable;
   fnCall.fnCall.args = args;
 
