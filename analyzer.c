@@ -483,11 +483,15 @@ RetVal tryIfAnalyze(AnalyzerContext *ctx, Expr* ifExpr, FormIf *iff, Error *erro
 
   Expr *testExpr = ifExpr->list.head->next->expr;
   Expr *ifBranchExpr = ifExpr->list.head->next->next->expr;
-  Expr *elseBranchExpr = ifExpr->list.head->next->next->next->expr;
 
   throws(_tryFormAnalyze(ctx, testExpr, &iff->test, error));
   throws(_tryFormAnalyze(ctx, ifBranchExpr, &iff->ifBranch, error));
-  throws(_tryFormAnalyze(ctx, elseBranchExpr, &iff->elseBranch, error));
+
+  bool hasElse = ifExpr->list.length == 4;
+  if (hasElse) {
+    Expr *elseBranchExpr = ifExpr->list.head->next->next->next->expr;
+    throws(_tryFormAnalyze(ctx, elseBranchExpr, &iff->elseBranch, error));
+  }
 
   return R_SUCCESS;
 
@@ -877,7 +881,9 @@ void _markTailCalls(Form *last) {
   switch (last->type) {
     case F_IF:
       _markTailCalls(last->iff.ifBranch);
-      _markTailCalls(last->iff.elseBranch);
+      if (last->iff.elseBranch != NULL) {
+        _markTailCalls(last->iff.elseBranch);
+      }
       break;
     case F_LET: {
       if (last->let.forms.numForms > 0) {

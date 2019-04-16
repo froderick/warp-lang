@@ -226,11 +226,25 @@ void setIndexAtOffset(Output output, uint16_t index, uint16_t value) {
 
 RetVal tryCompile(Form *form, Output output, Error *error);
 
+RetVal nilConstantGetIndex(Output output, uint16_t *index, Error *error);
+
 // TODO: stop using temporary compilation spaces, they don't work when ifs are nested
 // *instead*, compile everything inline, but keep pointers to the forward-jump addresses that need to be updated once
 // the sizes of the compiled then/else blocks are known
 RetVal tryCompileIf(Form *form, Output output, Error *error) {
   RetVal ret;
+
+  // emit test
+  // emit I_JMP_IF_NOT $ELSE_ADDR
+  // emit ifBranch {
+  //   - do stuff
+  //   - JMP to $END_ADDR
+  // }
+  // $ELSE_ADDR
+  // emit elseBranch {
+  //   - do stuff
+  // }
+  // $END_ADDR
 
   // emit the test code
   throws(tryCompile(form->iff.test, output, error));
@@ -246,55 +260,35 @@ RetVal tryCompileIf(Form *form, Output output, Error *error) {
   // emit ifBranch form code
   throws(tryCompile(form->iff.ifBranch, output, error));
 
-  if (form->iff.elseBranch == NULL) {
+  // emit the jumpToEnd code to terminate the if branch, keep a pointer to the jump address
+  uint16_t jumpToEndAddrOffset;
+  {
+    uint8_t jumpToEndCode[] = {I_JMP, 0, 0};
+    throws(tryCodeAppend(output.codes, sizeof(jumpToEndCode), jumpToEndCode, error));
+    jumpToEndAddrOffset = output.codes->numUsed - 2;
+  }
 
-    // emit test
-    // emit I_JMP_IF_NOT $END_ADDR
-    // emit ifBranch {
-    //  - do stuff
-    // }
-    // $END_ADDR
-
-    // the testFailedJumpAddr should point to the first address after the ifBranch
+  // the testFailedJumpAddr should point to the first address after the ifBranch
+  {
     uint16_t nextCodeAddr = output.codes->numUsed;
     setIndexAtOffset(output, testFailedJumpAddrOffset, nextCodeAddr);
   }
-  else {
 
-    // emit test
-    // emit I_JMP_IF_NOT $ELSE_ADDR
-    // emit ifBranch {
-    //   - do stuff
-    //   - JMP to $END_ADDR
-    // }
-    // $ELSE_ADDR
-    // emit elseBranch {
-    //   - do stuff
-    // }
-    // $END_ADDR
-
-    // emit the jumpToEnd code to terminate the if branch, keep a pointer to the jump address
-    uint16_t jumpToEndAddrOffset;
-    {
-      uint8_t jumpToEndCode[] = {I_JMP, 0, 0};
-      throws(tryCodeAppend(output.codes, sizeof(jumpToEndCode), jumpToEndCode, error));
-      jumpToEndAddrOffset = output.codes->numUsed - 2;
-    }
-
-    // the testFailedJumpAddr should point to the first address after the ifBranch
-    {
-      uint16_t nextCodeAddr = output.codes->numUsed;
-      setIndexAtOffset(output, testFailedJumpAddrOffset, nextCodeAddr);
-    }
-
-    // emit elseBranch form code
+  // emit elseBranch form code
+  if (form->iff.elseBranch != NULL) {
     throws(tryCompile(form->iff.elseBranch, output, error));
+  }
+  else {
+    uint16_t index;
+    throws(nilConstantGetIndex(output, &index, error));
+    uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
+    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+  }
 
-    // the jumpToEndAddr should point to the first address after the elseBranch
-    {
-      uint16_t nextCodeAddr = output.codes->numUsed;
-      setIndexAtOffset(output, jumpToEndAddrOffset, nextCodeAddr);
-    }
+  // the jumpToEndAddr should point to the first address after the elseBranch
+  {
+    uint16_t nextCodeAddr = output.codes->numUsed;
+    setIndexAtOffset(output, jumpToEndAddrOffset, nextCodeAddr);
   }
 
   return R_SUCCESS;

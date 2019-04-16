@@ -691,6 +691,12 @@ START_TEST(repl) {
     assertEval(L"(if 0 2 3)",
                L"2");
 
+    assertEval(L"(if 'x 'y)",
+               L"y");
+
+    assertEval(L"(if false 'y)",
+               L"nil");
+
     assertEval(L"(let ()"
                 "  (def + (fn (a b) (builtin :add a b)))"
                 "  (let (a 100) "
