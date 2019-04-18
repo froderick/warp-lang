@@ -270,13 +270,14 @@ void evalResultFreeContents(VMEvalResult *r) {
    VT_UINT,
    VT_BOOL,
    VT_FN,
-//  VT_CHAR,
    VT_STR,
    VT_SYMBOL,
    VT_KEYWORD,
    VT_LIST,
    VT_CLOSURE,
+   VT_CFN,
 //  VT_OBJECT,
+//  VT_CHAR,
 } ValueType;
 
 typedef struct Value {
@@ -293,6 +294,20 @@ typedef struct ObjectHeader {
   size_t size : 60;
   Value metadata;
 } ObjectHeader;
+
+typedef struct ExecFrame *ExecFrame_t;
+typedef RetVal (*CFnInvoke) (VM_t vm, ExecFrame_t frame, Error *error);
+
+typedef struct CFn {
+  ObjectHeader header;
+
+  uint64_t nameLength;
+  size_t nameOffset;
+  CFnInvoke ptr;
+  uint16_t numArgs;
+} CFn;
+
+wchar_t* cFnName(CFn *fn) { return (void*)fn + fn->nameOffset; }
 
 typedef struct Fn {
   ObjectHeader header;
@@ -420,7 +435,6 @@ typedef struct Namespaces {
 
 // instruction definitions
 
-typedef struct ExecFrame *ExecFrame_t;
 typedef RetVal (*TryEval) (struct VM *vm, ExecFrame_t frame, Error *error);
 
 typedef struct Inst {
@@ -1596,6 +1610,9 @@ RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *e
       throws(deref(&vm->gc, (void*)&invocable->fn, invocable->closure->fn.value, error));
       break;
     }
+    case VT_CFN: {
+      throws(deref(&vm->gc, (void*)&invocable->fn, invocable->fnRef.value, error));
+    }
     default:
       // fail: not all values are invocable
       throwRuntimeError(error, "cannot invoke this value type as a function: %s",
@@ -1677,8 +1694,8 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
   if (numArgsSupplied.value < invocable.fn->numArgs) {
 
     if (!invocable.fn->usesVarArgs) {
-      throwRuntimeError(error, "required arguments not supplied, expected %u but got %s", invocable.fn->numArgs,
-                        getValueTypeName(vm, numArgsSupplied.value));
+      throwRuntimeError(error, "required arguments not supplied, expected %u but got %" PRIu64, invocable.fn->numArgs,
+                        numArgsSupplied.value);
     }
 
     // make sure the list is present on the stack
@@ -2091,6 +2108,33 @@ RetVal tryClearHandlerEval(VM *vm, ExecFrame_t frame, Error *error) {
   failure:
   return ret;
 }
+
+/* 1. It is ok to implement builtin c functions the same way we implement instructions:
+ *    - one signature: RetVal doit(VM *vm, ExecFrame_t frame, Error *error);
+ *    - each function must read its params from the op stack and write its return value to the opstack
+ *    - each function must guard against triggering gc while it is running
+ *
+ * 2. It is ok to manually add builtin c functions and metadata to the registry in vm init code
+ *    - this can be automated in the future
+ *
+ * 3. Builtins are defined entirely by the VM, and require no definitions in the standard library.
+ *    - a VM always hydrates builtins on startup and defines them in vars before evaluating code
+ *    - the 'builtin' special form goes away
+ *
+ * 4. Builtins are invocable just like any other function.
+ *
+ * //////////// old ideas /////////////
+ *
+ * - make a CFn object and add support for creating such objects programmatically within the VM
+ * - when initializing the vm, for each builtin function, create the CFn object and define a var
+ *   with that function's name, and CFn's value.
+ * - make the CFn object invocable, such that it just stops short of invoking a specific c function and then bombs out
+ * - make code to dynamically invoke such a c function based on the function's metadata stored in the CFn
+ * - use a special comment format to identify functions and their arguments that can be called as CFn's, write code
+ *   to scan c files as a part of the build process and generate metadata for the VM to load on start
+ * // DECL_FN(name, arg1, arg2)
+ *
+ */
 
 // (8),             | (x, seq -> newseq)
 RetVal tryConsEval(VM *vm, ExecFrame_t frame, Error *error) {
@@ -2516,6 +2560,13 @@ RetVal tryPrnFn(VM_t vm, Value result, Expr *expr, Error *error) {
   return tryCopyText(function, &expr->string.value, expr->string.length, error);
 }
 
+RetVal tryPrnCFn(VM_t vm, Value result, Expr *expr, Error *error) {
+  expr->type = N_STRING;
+  wchar_t function[] = L"<c-function>";
+  expr->string.length = wcslen(function);
+  return tryCopyText(function, &expr->string.value, expr->string.length, error);
+}
+
 RetVal tryPrnClosure(VM_t vm, Value result, Expr *expr, Error *error) {
   expr->type = N_STRING;
   wchar_t function[] = L"<closure>";
@@ -2747,6 +2798,11 @@ ValueTypeTable valueTypeTableCreate() {
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = &tryRelocateChildrenClosure,
                         .tryPrn = &tryPrnClosure},
+      [VT_CFN]       = {.name = "cfn",
+                        .isHeapObject = true,
+                        .isTruthy = &isTruthyYes,
+                        .tryRelocateChildren = NULL,
+                        .tryPrn = &tryPrnCFn},
   };
   memcpy(table.valueTypes, valueTypes, sizeof(valueTypes));
   table.numValueTypes = sizeof(valueTypes) / sizeof(valueTypes[0]);
@@ -3585,6 +3641,72 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, VMEvalResult *result, Error *error)
     return ret;
 }
 
+void cFnInitContents(CFn *fn) {
+  objectHeaderInitContents(&fn->header);
+  fn->nameLength = 0;
+  fn->nameOffset = 0;
+  fn->numArgs = 0;
+  fn->ptr = NULL;
+}
+
+RetVal tryMakeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, CFnInvoke ptr, Value *value, Error *error) {
+  RetVal ret;
+
+  CFn *fn = NULL;
+
+  size_t nameLength = wcslen(name);
+  size_t nameSize = (nameLength + 1) * sizeof(wchar_t);
+  size_t fnSize = sizeof(CFn) + nameSize;
+
+  uint64_t offset = 0;
+
+  if (_alloc(&vm->gc, fnSize, (void*)&fn, &offset) == R_OOM) {
+    throwRuntimeError(error, "out of memory, failed to allocate CFn: %ls", name);
+  }
+
+  value->type = VT_CFN;
+  value->value = offset;
+
+  cFnInitContents(fn);
+  fn->header.type = VT_CFN;
+  fn->header.size = fnSize;
+  fn->nameLength = nameLength;
+  fn->numArgs = numArgs;
+  fn->ptr = ptr;
+
+  fn->nameOffset = sizeof(CFn);
+  memcpy(cFnName(fn), name, nameLength * sizeof(wchar_t));
+  cFnName(fn)[nameLength] = L'\0';
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryDefineCFn(VM *vm, wchar_t *name, uint16_t numArgs, CFnInvoke ptr, Error *error) {
+  RetVal ret;
+
+  size_t nameLength = wcslen(name);
+  Value value = nil();
+
+  throws(tryMakeCFn(vm, name, 2, tryConsEval, &value, error));
+  throws(tryDefVar(&vm->namespaces, name, nameLength, value, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryInitCFns(VM *vm, Error *error) {
+  RetVal ret;
+
+  throws(tryDefineCFn(vm, L"consx", 2, tryConsEval, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
 RetVal tryVMInitContents(VM *vm , Error *error) {
   RetVal ret;
 
@@ -3592,6 +3714,7 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
   vm->valueTypeTable = valueTypeTableCreate();
   throws(tryGCInitContents(&vm->gc, 1024 * 1000, error));
   throws(tryNamespacesInitContents(&vm->namespaces, error));
+  throws(tryInitCFns(vm, error));
 
   ret = R_SUCCESS;
   return ret;
