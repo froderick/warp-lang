@@ -32,46 +32,45 @@ void freeExpander(Expander_t expander) {
 RetVal tryIsMacro(Expander_t expander, Text sym, bool *isMacro, Error *error) {
   RetVal ret;
 
-  wchar_t builtinSym[] = L"builtin";
-  wchar_t getMacro[] = L"getmacro";
+  wchar_t getMacro[] = L"get-macro";
 
-  Expr builtin;
-  exprInitContents(&builtin);
-  builtin.type = N_SYMBOL;
-  builtin.symbol.length = wcslen(builtinSym);
-  builtin.symbol.value = builtinSym;
+  Form fnCallable;
+  formInitContents(&fnCallable);
+  fnCallable.type = F_VAR_REF;
+  fnCallable.varRef.name.length = wcslen(getMacro);
+  fnCallable.varRef.name.value = getMacro;
 
-  Expr getmacro;
-  exprInitContents(&getmacro);
-  getmacro.type = N_KEYWORD;
-  getmacro.symbol.length = wcslen(getMacro);
-  getmacro.symbol.value = getMacro;
+  Forms args;
+  formsInitContents(&args);
+  args.numForms = 1;
+  tryMalloc(args.forms, sizeof(Form) * args.numForms, "Form array");
 
-  Expr macro;
-  exprInitContents(&macro);
-  macro.type = N_STRING;
-  macro.string.length = sym.length;
-  macro.string.value = sym.value;
+  Expr varName;
+  exprInitContents(&varName);
+  varName.type = N_SYMBOL;
+  varName.symbol.length = sym.length;
+  varName.symbol.value = sym.value;
 
-  Expr callExpr;
-  exprInitContents(&callExpr);
-  callExpr.type = N_LIST;
-  listInitContents(&callExpr.list);
+  Form *arg = &args.forms[0];
+  formInitContents(arg);
+  arg->type = F_CONST;
+  arg->constant = &varName;
 
-  throws(tryListAppend(&callExpr.list, &builtin, error));
-  throws(tryListAppend(&callExpr.list, &getmacro, error));
-  throws(tryListAppend(&callExpr.list, &macro, error));
+  Form fnCall;
+  formInitContents(&fnCall);
+  fnCall.type = F_FN_CALL;
+  fnCallInitContents(&fnCall.fnCall);
+  fnCall.fnCall.fnCallable = &fnCallable;
+  fnCall.fnCall.args = args;
 
-  AnalyzeOptions options;
-  analyzeOptionsInitContents(&options);
-  options.expander = NULL; // prevents expansion
+  FormRoot root;
+  rootInitContents(&root);
+  root.form = &fnCall;
 
-  FormRoot *root = NULL;
   CodeUnit codeUnit;
   VMEvalResult output;
 
-  throws(tryFormAnalyzeOptions(options, &callExpr, &root, error));
-  throws(tryCompileTopLevel(root, &codeUnit, error));
+  throws(tryCompileTopLevel(&root, &codeUnit, error));
   throws(tryVMEval(expander->vm, &codeUnit, &output, error));
 
   if (output.type == RT_RESULT) {

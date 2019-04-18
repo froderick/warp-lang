@@ -1581,13 +1581,10 @@ void invocableInitContents(Invocable *i) {
   i->closure = NULL;
 }
 
-RetVal tryPopInvocable(VM *vm, ExecFrame_t frame, Invocable *invocable, Error *error) {
+RetVal tryPopInvocable(VM *vm, Value pop, Invocable *invocable, Error *error) {
   RetVal ret;
 
   invocableInitContents(invocable);
-
-  Value pop = nil();
-  throws(popOperand(frame, &pop, error));
 
   invocable->ref = pop;
   invocable->fnRef = pop;
@@ -1737,6 +1734,29 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
   return ret;
 }
 
+RetVal tryInvokeCFn(VM *vm, ExecFrame_t frame, Value cFn, Error *error) {
+  RetVal ret;
+
+  CFn *fn = NULL;
+  throws(deref(&vm->gc, (void*)&fn, cFn.value, error));
+
+  Value numArgs;
+  throws(popOperand(frame, &numArgs, error));
+
+  if (numArgs.type != VT_UINT) {
+    throwRuntimeError(error, "invalid numArgs parameter type: %s", getValueTypeName(vm, numArgs.type));
+  }
+  if (numArgs.value != fn->numArgs) {
+    throwRuntimeError(error, "%ls takes two arguments, received %" PRIu64, cFnName(fn), numArgs.value);
+  }
+
+  throws(fn->ptr(vm, frame, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
 // (8)              | (objectref, args... -> ...)
 RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
@@ -1744,16 +1764,24 @@ RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
   // for cleanup on failure
   bool pushed = false;
 
-  Invocable invocable;
-  throws(tryPopInvocable(vm, frame, &invocable, error));
+  Value pop = nil();
+  throws(popOperand(frame, &pop, error));
 
-  throws(pushFrame(vm, &frame, invocable.fnRef, error));
-  pushed = true;
+  if (pop.type == VT_CFN) {
+    throws(tryInvokeCFn(vm, frame, pop, error));
+  }
+  else {
+    Invocable invocable;
+    throws(tryPopInvocable(vm, pop, &invocable, error));
 
-  ExecFrame_t parent;
-  throws(getParent(frame, &parent, error));
+    throws(pushFrame(vm, &frame, invocable.fnRef, error));
+    pushed = true;
 
-  throws(tryInvokePopulateLocals(vm, parent, frame, invocable, error));
+    ExecFrame_t parent;
+    throws(getParent(frame, &parent, error));
+
+    throws(tryInvokePopulateLocals(vm, parent, frame, invocable, error));
+  }
 
   return R_SUCCESS;
 
@@ -1778,15 +1806,21 @@ RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryInvokeDynTailEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  // fail: not all values are invocable
-  Invocable invocable;
-  throws(tryPopInvocable(vm, frame, &invocable, error));
+  Value pop = nil();
+  throws(popOperand(frame, &pop, error));
 
-  throws(replaceFrame(vm, frame, invocable.fnRef, error));
-  throws(tryInvokePopulateLocals(vm, frame, frame, invocable, error));
+  if (pop.type == VT_CFN) {
+    throws(tryInvokeCFn(vm, frame, pop, error));
+  }
+  else {
+    Invocable invocable;
+    throws(tryPopInvocable(vm, pop, &invocable, error));
+
+    throws(replaceFrame(vm, frame, invocable.fnRef, error));
+    throws(tryInvokePopulateLocals(vm, frame, frame, invocable, error));
+  }
 
   return R_SUCCESS;
-
   failure:
     return ret;
 }
@@ -2140,8 +2174,6 @@ RetVal tryClearHandlerEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryConsEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  // (def d (large 30000))
-
   // gc may occur, so allocate the cons first
   Value result = nil();
   throws(tryAllocateCons(vm, frame, nil(), nil(), &result, error));
@@ -2281,8 +2313,23 @@ RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   Value strValue;
   throws(popOperand(frame, &strValue, error));
 
-  if (strValue.type != VT_STR) {
-    throwRuntimeError(error, "only symbols can identify vars: %s", getValueTypeName(vm, strValue.type));
+  wchar_t *sym = NULL;
+  uint64_t symLength = 0;
+
+  if (strValue.type == VT_STR) {
+    String *str = NULL;
+    throws(deref(&vm->gc, (void*)&str, strValue.value, error));
+    sym = stringValue(str);
+    symLength = str->length;
+  }
+  else if (strValue.type == VT_SYMBOL) {
+    Symbol *s = NULL;
+    throws(deref(&vm->gc, (void*)&s, strValue.value, error));
+    sym = symbolValue(s);
+    symLength = s->length;
+  }
+  else {
+    throwRuntimeError(error, "only strings or symbols can identify vars: %s", getValueTypeName(vm, strValue.type));
   }
 
   String *str = NULL;
@@ -2293,7 +2340,7 @@ RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   result.value = false;
 
   Var *var;
-  if (resolveVar(&vm->namespaces, stringValue(str), str->length, &var)) {
+  if (resolveVar(&vm->namespaces, sym, symLength, &var)) {
     result.value = var->isMacro;
   }
 
@@ -3641,6 +3688,30 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, VMEvalResult *result, Error *error)
     return ret;
 }
 
+/*
+ * builtin procedures
+ */
+
+//RetVal tryConsBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
+//  RetVal ret;
+//
+//  Value numArgs;
+//  throws(popOperand(frame, &numArgs, error));
+//
+//  if (numArgs.type != VT_UINT) {
+//    throwRuntimeError(error, "invalid numArgs parameter type: %s", getValueTypeName(vm, numArgs.type));
+//  }
+//  if (numArgs.value != 2) {
+//    throwRuntimeError(error, "cons takes two arguments, received %" PRIu64, numArgs.value);
+//  }
+//
+//  throws(tryConsEval(vm, frame, error));
+//
+//  return R_SUCCESS;
+//  failure:
+//  return ret;
+//}
+
 void cFnInitContents(CFn *fn) {
   objectHeaderInitContents(&fn->header);
   fn->nameLength = 0;
@@ -3689,7 +3760,7 @@ RetVal tryDefineCFn(VM *vm, wchar_t *name, uint16_t numArgs, CFnInvoke ptr, Erro
   size_t nameLength = wcslen(name);
   Value value = nil();
 
-  throws(tryMakeCFn(vm, name, 2, tryConsEval, &value, error));
+  throws(tryMakeCFn(vm, name, numArgs, ptr, &value, error));
   throws(tryDefVar(&vm->namespaces, name, nameLength, value, error));
 
   return R_SUCCESS;
@@ -3700,7 +3771,17 @@ RetVal tryDefineCFn(VM *vm, wchar_t *name, uint16_t numArgs, CFnInvoke ptr, Erro
 RetVal tryInitCFns(VM *vm, Error *error) {
   RetVal ret;
 
-  throws(tryDefineCFn(vm, L"consx", 2, tryConsEval, error));
+  throws(tryDefineCFn(vm, L"cons", 2, tryConsEval, error));
+  throws(tryDefineCFn(vm, L"first", 1, tryFirstEval, error));
+  throws(tryDefineCFn(vm, L"rest", 1, tryRestEval, error));
+  throws(tryDefineCFn(vm, L"set-macro", 1, trySetMacroEval, error));
+  throws(tryDefineCFn(vm, L"get-macro", 1, tryGetMacroEval, error));
+  throws(tryDefineCFn(vm, L"gc", 0, tryGCEval, error));
+  throws(tryDefineCFn(vm, L"get-type", 1, tryGetTypeEval, error));
+  throws(tryDefineCFn(vm, L"prn", 1, tryPrnEval, error));
+  throws(tryDefineCFn(vm, L"+", 2, tryAddEval, error));
+  throws(tryDefineCFn(vm, L"-", 2, trySubEval, error));
+  throws(tryDefineCFn(vm, L"=", 2, tryCmpEval, error));
 
   return R_SUCCESS;
   failure:

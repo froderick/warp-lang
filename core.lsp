@@ -1,10 +1,3 @@
-(def first (fn first (seq) (builtin :first seq)))
-(def rest (fn rest (seq) (builtin :rest seq)))
-(def cons (fn cons (x seq) (builtin :cons x seq)))
-(def + (fn + (a b) (builtin :add a b)))
-(def - (fn - (a b) (builtin :subtract a b)))
-(def = (fn = (a b) (builtin :compare a b)))
-
 (def nil? (fn nil? (x) (= nil x)))
 (def zero? (fn zero? (n) (= n 0)))
 (def second (fn second (seq) (first (rest seq))))
@@ -46,8 +39,8 @@
 (def defmacro (fn defmacro (name fnargs & forms)
                 `(let '()
                    (def ~name (fn ~name ~fnargs ~@forms))
-                   (builtin :setmacro (quote ~name)))))
-(builtin :setmacro "defmacro")
+                   (set-macro (quote ~name)))))
+(set-macro 'defmacro)
 
 (defmacro defn (name fnargs & forms)
   `(def ~name (fn ~name ~fnargs ~@forms)))
@@ -56,7 +49,7 @@
   `(let '() ~@forms))
 
 (defn list? (x)
-  (let (t (builtin :type x))
+  (let (t (get-type x))
     (or (= t 0) (= t 7))))
 
 (defmacro -> (x & exprs)
@@ -70,7 +63,7 @@
                        (->helper val (rest exprs))))))
   (->helper x exprs)))
 
-(defn prn (x) (builtin :prn x))
+(defn prn (x) (prn x))
 
 (defn fib (n)
   (let (_fib (fn _fib (prev1 prev2 n)

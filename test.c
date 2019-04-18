@@ -836,8 +836,8 @@ START_TEST(gc) {
     // this was failing because of stupid memory errors
     assertEvalNoStd(L"(let () "
                     "   (def x (fn () \"hi\"))"
-                    "   (builtin :gc)"
-                    "   (builtin :gc))", L"nil");
+                    "   (gc)"
+                    "   (gc))", L"nil");
 
   }
 END_TEST
