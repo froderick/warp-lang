@@ -145,7 +145,6 @@ typedef struct AnalyzerContext {
   AnalyzeOptions options;
   BindingTables bindingTables;
   ResolverStack resolverStack;
-  uint16_t fnCount;
 } AnalyzerContext;
 
 void formInitContents(Form *form) {
@@ -926,7 +925,6 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
   formFnInitContents(fn);
   throws(tryFnParse(fnExpr, fn, &formElements, error));
 
-  ctx->fnCount = ctx->fnCount + 1;
 
   // create new binding stack, initialized with the fn args as the first bindings
 
@@ -1776,7 +1774,6 @@ void rootFree(FormRoot *root) {
 }
 
 void analyzerContextInitContents(AnalyzerContext *ctx) {
-  ctx->fnCount = 0;
   bindingTablesInitContents(&ctx->bindingTables);
   resolverStackInitContents(&ctx->resolverStack);
   analyzeOptionsInitContents(&ctx->options);
@@ -1784,7 +1781,6 @@ void analyzerContextInitContents(AnalyzerContext *ctx) {
 
 void analyzerContextFreeContents(AnalyzerContext *ctx) {
   if (ctx != NULL) {
-    ctx->fnCount = 0;
     bindingTablesFreeContents(&ctx->bindingTables);
     resolverStackFreeContents(&ctx->resolverStack);
   }
