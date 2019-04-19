@@ -135,6 +135,8 @@ START_TEST(errors) {
   }
 END_TEST
 
+#define ONE_MB (1024 * 1000)
+
 START_TEST(parser) {
 
     wchar_t* input = L"\"str\" 102 \n himom :rocks true nil (true false) 'nil";
@@ -144,56 +146,53 @@ START_TEST(parser) {
     InputStream_t source;
     TokenStream_t stream;
     Expr *expr;
+    Pool_t pool = NULL;
+
+    ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
 
     ck_assert_int_eq(tryStringInputStreamMake(input, wcslen(input), &source, &e), R_SUCCESS);
     ck_assert_int_eq(tryStreamMake(source, &stream, &e), R_SUCCESS);
 
     // string
-    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_STRING);
     ck_assert(wcscmp(expr->string.value, L"str") == 0);
     ck_assert_int_eq(expr->string.length, 3);
     ck_assert_int_eq(expr->source.lineNumber, 1);
     ck_assert_int_eq(expr->source.colNumber, 1);
-    exprFree(expr);
 
     // number
-    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_NUMBER);
     ck_assert_int_eq(expr->number.value, 102);
     ck_assert_int_eq(expr->source.lineNumber, 1);
     ck_assert_int_eq(expr->source.colNumber, 6);
-    exprFree(expr);
 
     // symbol
-    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_SYMBOL);
     ck_assert(wcscmp(expr->symbol.value, L"himom") == 0);
     ck_assert_int_eq(expr->symbol.length, 5);
     ck_assert_int_eq(expr->source.lineNumber, 2);
     ck_assert_int_eq(expr->source.colNumber, 1);
-    exprFree(expr);
 
     // keyword
-    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_KEYWORD);
     ck_assert(wcscmp(expr->keyword.value, L"rocks") == 0);
     ck_assert_int_eq(expr->keyword.length, 5);
-    exprFree(expr);
 
     // boolean
-    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_BOOLEAN);
     ck_assert(expr->boolean.value == true);
-    exprFree(expr);
 
     // nil
-    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_NIL);
-    exprFree(expr);
 
     // list
-    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_LIST);
     ck_assert(expr->list.length == 2);
     // first element
@@ -204,10 +203,9 @@ START_TEST(parser) {
     ck_assert(expr->list.head->next->expr->boolean.value == false);
     // verify second element is tail
     ck_assert(expr->list.tail == expr->list.head->next);
-    exprFree(expr);
 
     // quote (reader macro)
-    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
     ck_assert(expr->type == N_LIST);
     ck_assert(expr->list.length == 2);
     // first element
@@ -215,13 +213,14 @@ START_TEST(parser) {
     ck_assert(wcscmp(expr->list.head->expr->symbol.value, L"quote") == 0);
     // second element
     ck_assert(expr->list.head->next->expr->type == N_NIL);
-    exprFree(expr);
 
-    ck_assert_int_eq(tryExprRead(stream, &expr, &e), R_EOF);
+    ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_EOF);
+
+    poolFree(pool);
   }
 END_TEST
 
-RetVal tryParse(wchar_t *input, Expr **ptr, Error *error) {
+RetVal tryParse(Pool_t pool, wchar_t *input, Expr **ptr, Error *error) {
 
   RetVal ret;
 
@@ -232,7 +231,7 @@ RetVal tryParse(wchar_t *input, Expr **ptr, Error *error) {
   throws(tryStringInputStreamMake(input, wcslen(input), &source, error));
   throws(tryStreamMake(source, &stream, error));
 
-  throws(tryExprRead(stream, &expr, error));
+  throws(tryExprRead(pool, stream, &expr, error));
 
   throws(tryStreamFree(stream, error));
 
@@ -243,28 +242,29 @@ RetVal tryParse(wchar_t *input, Expr **ptr, Error *error) {
     return ret;
 }
 
-#define ONE_MB (1024 * 1000)
-
 START_TEST(exprPrn)
   {
 
     Error e;
     Expr *expr;
+    Pool_t pool = NULL;
 
     errorInitContents(&e);
+    ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
 
     // constant
-    ck_assert_int_eq(tryParse(L"(himom () '(one :two 102 nil true false) \"str\")", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryParse(pool, L"(himom () '(one :two 102 nil true false) \"str\")", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryExprPrn(expr, &e), R_SUCCESS);
     printf("\n");
-    exprFree(expr);
+
+    poolFree(pool);
   }
 END_TEST
 
 START_TEST(analyzer) {
 
     Error e;
-    Pool_t pool;
+    Pool_t pool = NULL;
     Expr *expr;
     FormRoot *root;
 
@@ -272,60 +272,51 @@ START_TEST(analyzer) {
     ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
 
     // constant
-    ck_assert_int_eq(tryParse(L"\"str\"", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryParse(pool, L"\"str\"", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
-    exprFree(expr);
     ck_assert_int_eq(root->form->type, F_CONST);
 
     // if
-    ck_assert_int_eq(tryParse(L"(if true 10 20)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryParse(pool, L"(if true 10 20)", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
-    exprFree(expr);
     ck_assert_int_eq(root->form->type, F_IF);
 
     // let
-    ck_assert_int_eq(tryParse(L"(let (a nil) true)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryParse(pool, L"(let (a nil) true)", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
-    exprFree(expr);
     ck_assert_int_eq(root->form->type, F_LET);
 
     // env-ref
-    ck_assert_int_eq(tryParse(L"(let (a nil) a)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryParse(pool, L"(let (a nil) a)", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
-    exprFree(expr);
     ck_assert_int_eq(root->form->type, F_LET);
     ck_assert_int_eq(root->form->let.forms.forms[0].type, F_ENV_REF);
     ck_assert_int_eq(root->form->let.forms.forms[0].envRef.bindingIndex, 0);
 
     // def
-    ck_assert_int_eq(tryParse(L"(def money 100)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryParse(pool, L"(def money 100)", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
-    exprFree(expr);
     ck_assert_int_eq(root->form->type, F_DEF);
 
     // var-ref
-    ck_assert_int_eq(tryParse(L"money", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryParse(pool, L"money", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
-    exprFree(expr);
     ck_assert_int_eq(root->form->type, F_VAR_REF);
 
     // fn with args
-    ck_assert_int_eq(tryParse(L"(fn (a b c) a)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryParse(pool, L"(fn (a b c) a)", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
-    exprFree(expr);
     ck_assert_int_eq(root->form->type, F_FN);
     ck_assert_int_eq(root->form->fn.forms.forms[0].type, F_ENV_REF);
     ck_assert_int_eq(root->form->fn.forms.forms[0].envRef.bindingIndex, 0);
 
     // fn-call
-    ck_assert_int_eq(tryParse(L"(def barf (fn () 100))", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryParse(pool, L"(def barf (fn () 100))", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
-    exprFree(expr);
     ck_assert_int_eq(root->form->type, F_DEF);
 
-    ck_assert_int_eq(tryParse(L"(barf)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryParse(pool, L"(barf)", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
-    exprFree(expr);
     ck_assert_int_eq(root->form->type, F_FN_CALL);
     ck_assert_int_eq(root->form->fnCall.fnCallable->type , F_VAR_REF);
 
@@ -343,11 +334,10 @@ RetVal tryTestCompile(wchar_t *input, CodeUnit *codeUnit, Error *error) {
   FormRoot *root;
 
   throws(tryPoolCreate(&pool, ONE_MB, error));
-  throws(tryParse(input, &expr, error));
+  throws(tryParse(pool, input, &expr, error));
   throws(tryFormAnalyze(expr, pool, &root, error));
   throws(tryCompileTopLevel(root, codeUnit, error));
 
-  exprFree(expr);
   poolFree(pool);
 
   return R_SUCCESS;
@@ -596,10 +586,12 @@ END_TEST
 START_TEST(vmBasic) {
 
     Error error;
+    Pool_t pool = NULL;
     VM_t vm = NULL;
     VMEvalResult result;
 
     errorInitContents(&error);
+    ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &error), R_SUCCESS);
     ck_assert_int_eq(tryVMMake(&vm, &error), R_SUCCESS);
 
     uint8_t fnCode[] = {
@@ -647,14 +639,14 @@ START_TEST(vmBasic) {
     unit.code.code = code;
     unit.code.hasSourceTable = false;
 
-    ck_assert_int_eq(tryVMEval(vm, &unit, &result, &error), R_SUCCESS);
+    ck_assert_int_eq(tryVMEval(vm, &unit, pool, &result, &error), R_SUCCESS);
     ck_assert_int_eq(result.type, RT_RESULT);
 
     ck_assert_int_eq(result.result.type, N_NUMBER);
     ck_assert_int_eq(result.result.number.value, 110);
 
-    evalResultFreeContents(&result);
     vmFree(vm);
+    poolFree(pool);
   }
 END_TEST
 

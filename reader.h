@@ -9,6 +9,7 @@
 #include "utils.h"
 #include "source.h"
 #include "lexer.h"
+#include "pool.h"
 
 struct Expr;
 
@@ -72,11 +73,9 @@ typedef struct Expr {
 
 void exprInitContents(Expr *expr);
 
-RetVal tryExprRead(TokenStream_t stream, Expr **expr, Error *error);
-void exprFreeContents(Expr *expr);
-void exprFree(Expr *expr);
+RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Expr **expr, Error *error);
 
-RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error);
+RetVal tryExprDeepCopy(Pool_t pool, Expr *from, Expr **ptr, Error *error);
 
 RetVal tryExprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable, Error *error);
 RetVal tryExprPrnBuf(Expr *expr, StringBuffer_t b, Error *error);
@@ -84,6 +83,6 @@ RetVal tryExprPrnStr(Expr *expr, wchar_t **ptr, Error *error);
 RetVal tryExprPrn(Expr* expr, Error *error);
 
 void listInitContents(ExprList *list);
-RetVal tryListAppend(ExprList *list, Expr *expr, Error *error);
+RetVal tryListAppend(Pool_t pool, ExprList *list, Expr *expr, Error *error);
 
 #endif //WARP_LANG_READER_H

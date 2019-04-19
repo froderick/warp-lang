@@ -179,9 +179,7 @@ void _constantFreeContents(Constant *c);
 void codeUnitInitContents(CodeUnit *codeUnit);
 void codeUnitFreeContents(CodeUnit *codeUnit);
 
-void constantMetaPropertyInit(ConstantMetaProperty *p);
 void constantMetaInit(ConstantMeta *c);
-void constantMetaFreeContents(ConstantMeta *c);
 
 typedef struct VM *VM_t;
 
@@ -222,14 +220,12 @@ typedef struct VMEvalResult {
 } VMEvalResult;
 
 void exceptionInitContents(VMException *e);
-void exceptionFreeContents(VMException *e);
 void evalResultInitContents(VMEvalResult *r);
-void evalResultFreeContents(VMEvalResult *r);
 
 RetVal tryExceptionPrint(VMException *e, wchar_t **ptr, Error *error);
 RetVal tryExceptionPrintf(VMException *e, Error *error);
 
-RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, VMEvalResult *result, Error *error);
+RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, Pool_t pool, VMEvalResult *result, Error *error);
 
 void printCodeArray(uint8_t *code, uint16_t codeLength);
 

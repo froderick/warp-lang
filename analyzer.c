@@ -887,18 +887,18 @@ RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Expr *expr, FormFnCall *fnCall, Er
     return ret;
 }
 
-RetVal tryConstantAnalyze(Expr* expr, Expr **constant, Error *error) {
+RetVal tryConstantAnalyze(Pool_t pool, Expr* expr, Expr **constant, Error *error) {
 
   RetVal ret;
 
-  throws(tryExprDeepCopy(expr, constant, error));
+  throws(tryExprDeepCopy(pool, expr, constant, error));
   return R_SUCCESS;
 
   failure:
     return ret;
 }
 
-RetVal tryQuoteAnalyze(Expr* expr, Expr **constant, Error *error) {
+RetVal tryQuoteAnalyze(Pool_t pool, Expr* expr, Expr **constant, Error *error) {
 
   RetVal ret;
 
@@ -907,7 +907,7 @@ RetVal tryQuoteAnalyze(Expr* expr, Expr **constant, Error *error) {
                      expr->list.length - 1);
   }
 
-  throws(tryConstantAnalyze(expr->list.head->next->expr, constant, error));
+  throws(tryConstantAnalyze(pool, expr->list.head->next->expr, constant, error));
   return R_SUCCESS;
 
   failure:
@@ -1070,13 +1070,13 @@ RetVal _trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form, Er
     case N_BOOLEAN:
     case N_NIL:
       form->type = F_CONST;
-      throws(tryConstantAnalyze(quoted, &form->constant, error));
+      throws(tryConstantAnalyze(ctx->pool, quoted, &form->constant, error));
       break;
 
     case N_SYMBOL:
       form->type = F_CONST;
       // TODO: this should namespace the symbol, but for that we'd have to know what the current namespace is
-      throws(tryConstantAnalyze(quoted, &form->constant, error));
+      throws(tryConstantAnalyze(ctx->pool, quoted, &form->constant, error));
       break;
 
     case N_LIST: {
@@ -1262,7 +1262,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
     case N_BOOLEAN:
     case N_NIL: {
       form->type = F_CONST;
-      throws(tryConstantAnalyze(expr, &form->constant, error));
+      throws(tryConstantAnalyze(ctx->pool, expr, &form->constant, error));
       break;
     }
 
@@ -1276,7 +1276,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
       // empty list
       if (expr->list.length == 0) {
         form->type = F_CONST;
-        throws(tryConstantAnalyze(expr, &form->constant, error));
+        throws(tryConstantAnalyze(ctx->pool, expr, &form->constant, error));
         break;
       }
 
@@ -1310,7 +1310,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
 
         if (wcscmp(sym, L"quote") == 0) {
           form->type = F_CONST;
-          throws(tryQuoteAnalyze(expr, &form->constant, error));
+          throws(tryQuoteAnalyze(ctx->pool, expr, &form->constant, error));
           form->source = form->constant->source;
           break;
         }

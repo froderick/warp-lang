@@ -37,7 +37,7 @@ RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit
     options.fileName = fileInfo.fileName;
   }
 
-  throws(tryExprRead(stream, &expr, error));
+  throws(tryExprRead(pool, stream, &expr, error));
   throws(tryFormAnalyzeOptions(options, expr, pool, &form, error));
   throws(tryCompileTopLevel(form, codeUnit, error));
 
@@ -48,12 +48,7 @@ RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit
     goto finally;
 
   finally:
-    if (pool != NULL) {
-      poolFree(pool);
-    }
-    if (expr != NULL) {
-      exprFree(expr);
-    }
+    poolFree(pool);
     return ret;
 }
 
@@ -65,6 +60,7 @@ RetVal tryReplEvalConf(wchar_t *inputText, wchar_t **outputText, bool useStdLib,
   InputStream_t source = NULL;
   TokenStream_t stream = NULL;
   VM_t vm = NULL;
+  Pool_t pool = NULL;
   VMEvalResult result;
 
   printf("%ls\n", inputText);
@@ -74,10 +70,9 @@ RetVal tryReplEvalConf(wchar_t *inputText, wchar_t **outputText, bool useStdLib,
   throws(tryStringInputStreamMake(inputText, wcslen(inputText), &source, error));
   throws(tryStreamMake(source, &stream, error));
   throws(tryVMMake(&vm, error));
+  throws(tryPoolCreate(&pool, ONE_MB, error));
 
   if (useStdLib) {
-//    char *stdLib = "/Users/ddcmhenry/dev/funtastic/branches/warp-lang/core.lsp";
-//    char *stdLib = "/warp/core.lsp";
     throws(tryLoad(vm, STD_LIB, error));
   }
 
@@ -87,7 +82,7 @@ RetVal tryReplEvalConf(wchar_t *inputText, wchar_t **outputText, bool useStdLib,
   throws(tryReplCompile(stream, fileInfo, vm, &unit, error));
   printCodeUnit(&unit);
 
-  throws(tryVMEval(vm, &unit, &result, error));
+  throws(tryVMEval(vm, &unit, pool, &result, error));
 
   if (result.type == RT_RESULT) {
     throws(tryExprPrnStr(&result.result, outputText, error));
@@ -103,10 +98,10 @@ RetVal tryReplEvalConf(wchar_t *inputText, wchar_t **outputText, bool useStdLib,
   goto done;
 
   done:
-    evalResultFreeContents(&result);
     tryStreamFree(stream, error); // frees input stream also
     vmFreeContents(vm);
     codeUnitFreeContents(&unit);
+    poolFree(pool);
     return ret;
 }
 
@@ -128,6 +123,8 @@ RetVal tryTextMakeFromChar(char *filename, Text *to, Error *error) {
   return ret;
 }
 
+#define ONE_MB (1024 * 1000)
+
 RetVal tryLoad(VM_t vm, char *filename, Error *error) {
   RetVal ret;
 
@@ -144,6 +141,10 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
   throws(tryTextMakeFromChar(baseFileName, &fileInfo.fileName, error));
 
   CodeUnit unit;
+
+  Pool_t pool = NULL;
+  throws(tryPoolCreate(&pool, ONE_MB, error));
+
   VMEvalResult result;
   while (true) {
 
@@ -160,10 +161,9 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
     }
     //printCodeUnit(&unit);
 
-    throws(tryVMEval(vm, &unit, &result, error));
+    throws(tryVMEval(vm, &unit, pool, &result, error));
 
     codeUnitFreeContents(&unit);
-    evalResultFreeContents(&result);
   }
 
   ret = R_SUCCESS;
@@ -174,7 +174,7 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
 
   done:
     codeUnitFreeContents(&unit);
-    evalResultFreeContents(&result);
+    poolFree(pool);
     fileInfoFreeContents(&fileInfo);
     return ret;
 }

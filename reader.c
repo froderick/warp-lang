@@ -11,18 +11,19 @@
 #include "utils.h"
 #include "lexer.h"
 #include "reader.h"
+#include "pool.h"
 
 /*
  * Here is the basic AST implementation.
  */
 
-RetVal tryStringMake(wchar_t *input, uint64_t length, Expr **ptr, Error *error) {
+RetVal tryStringMake(Pool_t pool, wchar_t *input, uint64_t length, Expr **ptr, Error *error) {
 
   RetVal ret;
   wchar_t *text;
 
   Expr *expr;
-  tryMalloc(expr, sizeof(Expr), "Expr");
+  tryPalloc(pool, expr, sizeof(Expr), "Expr");
 
   throws(tryCopyText(input, &text, length, error));
 
@@ -35,13 +36,10 @@ RetVal tryStringMake(wchar_t *input, uint64_t length, Expr **ptr, Error *error) 
   return R_SUCCESS;
 
   failure:
-    if (text != NULL) {
-      free(text);
-    }
     return ret;
 }
 
-RetVal tryStringRead(TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryStringRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -61,37 +59,22 @@ RetVal tryStringRead(TokenStream_t stream, Expr **ptr, Error *error) {
   uint64_t len = token->source.length - 2;
 
   Expr *expr;
-  throws(tryStringMake(text, len, &expr, error));
+  throws(tryStringMake(pool, text, len, &expr, error));
 
   expr->source = token->source;
 
   *ptr = expr;
-  tokenFree(token);
   return R_SUCCESS;
 
   failure:
-    if (token != NULL) {
-      tokenFree(token);
-    }
-    if (text != NULL) {
-      free(text);
-    }
     return ret;
 }
 
-void stringFreeContents(ExprString *string) {
-  if (string != NULL) {
-    if (string->value != NULL) {
-      free(string->value);
-    }
-  }
-}
-
-RetVal tryNumberMake(uint64_t value, Expr **ptr, Error *error) {
+RetVal tryNumberMake(Pool_t pool, uint64_t value, Expr **ptr, Error *error) {
   RetVal ret;
 
   Expr *expr;
-  tryMalloc(expr, sizeof(Expr), "Expr");
+  tryPalloc(pool, expr, sizeof(Expr), "Expr");
 
   expr->type = N_NUMBER;
   expr->number.value = value;
@@ -104,7 +87,7 @@ RetVal tryNumberMake(uint64_t value, Expr **ptr, Error *error) {
     return ret;
 }
 
-RetVal tryNumberRead(TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryNumberRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -125,18 +108,14 @@ RetVal tryNumberRead(TokenStream_t stream, Expr **ptr, Error *error) {
   }
 
   Expr *expr;
-  throws(tryNumberMake(value, &expr, error));
+  throws(tryNumberMake(pool, value, &expr, error));
 
   expr->source = token->source;
 
   *ptr = expr;
-  tokenFree(token);
   return R_SUCCESS;
 
   failure:
-    if (token != NULL) {
-      tokenFree(token);
-    }
     return ret;
 }
 
@@ -144,13 +123,13 @@ RetVal tryNumberRead(TokenStream_t stream, Expr **ptr, Error *error) {
  * This is for dynamically creating symbols, for instance to handle the reader
  * macros where certain tokens (like '`') expand into special forms.
  */
-RetVal trySymbolMake(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
+RetVal trySymbolMake(Pool_t pool, wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
 
   RetVal ret;
   wchar_t *value;
 
   Expr *expr;
-  tryMalloc(expr, sizeof(Expr), "Expr");
+  tryPalloc(pool, expr, sizeof(Expr), "Expr");
 
   throws(tryCopyText(name, &value, len, error));
 
@@ -163,16 +142,10 @@ RetVal trySymbolMake(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
   return R_SUCCESS;
 
   failure:
-    if (expr != NULL) {
-      exprFree(expr);
-    }
-    if (value != NULL) {
-      free(value);
-    }
     return ret;
 }
 
-RetVal trySymbolRead(TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal trySymbolRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -184,30 +157,18 @@ RetVal trySymbolRead(TokenStream_t stream, Expr **ptr, Error *error) {
   }
 
   Expr *expr;
-  throws(trySymbolMake(token->text, token->source.length, &expr, error));
+  throws(trySymbolMake(pool, token->text, token->source.length, &expr, error));
 
   expr->source = token->source;
 
   *ptr = expr;
-  tokenFree(token);
   return R_SUCCESS;
 
   failure:
-    if (token != NULL) {
-      tokenFree(token);
-    }
     return ret;
 }
 
-void symbolFreeContents(ExprSymbol *symbol) {
-  if (symbol != NULL) {
-    if (symbol->value != NULL) {
-      free(symbol->value);
-    }
-  }
-}
-
-RetVal tryKeywordMake(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
+RetVal tryKeywordMake(Pool_t pool, wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
 
   RetVal ret;
   wchar_t *text;
@@ -215,7 +176,7 @@ RetVal tryKeywordMake(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
   throws(tryCopyText(name, &text, len, error));
 
   Expr *expr;
-  tryMalloc(expr, sizeof(Expr), "Expr");
+  tryPalloc(pool, expr, sizeof(Expr), "Expr");
 
   expr->type = N_KEYWORD;
   expr->keyword.length = len;
@@ -232,7 +193,7 @@ RetVal tryKeywordMake(wchar_t *name, uint64_t len, Expr **ptr, Error *error) {
     return ret;
 }
 
-RetVal tryKeywordRead(TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryKeywordRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -247,34 +208,22 @@ RetVal tryKeywordRead(TokenStream_t stream, Expr **ptr, Error *error) {
   wchar_t *text = token->text + 1;
 
   Expr *expr;
-  throws(tryKeywordMake(text, len, &expr, error));
+  throws(tryKeywordMake(pool, text, len, &expr, error));
 
   expr->source = token->source;
 
   *ptr = expr;
-  tokenFree(token);
   return R_SUCCESS;
 
   failure:
-    if (token != NULL) {
-      tokenFree(token);
-    }
     return ret;
 }
 
-void keywordFreeContents(ExprKeyword *keyword) {
-  if (keyword!= NULL) {
-    if (keyword->value != NULL) {
-      free(keyword->value);
-    }
-  }
-}
-
-RetVal tryBooleanMake(bool value, Expr **ptr, Error *error) {
+RetVal tryBooleanMake(Pool_t pool, bool value, Expr **ptr, Error *error) {
   RetVal ret;
 
   Expr *expr;
-  tryMalloc(expr, sizeof(Expr), "Expr");
+  tryPalloc(pool, expr, sizeof(Expr), "Expr");
 
   expr->type = N_BOOLEAN;
   expr->boolean.value = value;
@@ -287,7 +236,7 @@ RetVal tryBooleanMake(bool value, Expr **ptr, Error *error) {
     return ret;
 }
 
-RetVal tryBooleanRead(TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryBooleanRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -301,26 +250,22 @@ RetVal tryBooleanRead(TokenStream_t stream, Expr **ptr, Error *error) {
   bool value = token->type == T_TRUE;
 
   Expr *expr;
-  throws(tryBooleanMake(value, &expr, error));
+  throws(tryBooleanMake(pool, value, &expr, error));
 
   expr->source = token->source;
 
   *ptr = expr;
-  tokenFree(token);
   return R_SUCCESS;
 
   failure:
-    if (token != NULL) {
-      tokenFree(token);
-    }
     return ret;
 }
 
-RetVal tryNilMake(Expr **ptr, Error *error) {
+RetVal tryNilMake(Pool_t pool, Expr **ptr, Error *error) {
   RetVal ret;
 
   Expr *expr;
-  tryMalloc(expr, sizeof(Expr), "Expr");
+  tryPalloc(pool, expr, sizeof(Expr), "Expr");
 
   expr->type = N_NIL;
   expr->source.isSet = false;
@@ -332,7 +277,7 @@ RetVal tryNilMake(Expr **ptr, Error *error) {
     return ret;
 }
 
-RetVal tryNilRead(TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryNilRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -344,34 +289,30 @@ RetVal tryNilRead(TokenStream_t stream, Expr **ptr, Error *error) {
   }
 
   Expr *expr;
-  throws(tryNilMake(&expr, error));
+  throws(tryNilMake(pool, &expr, error));
 
   expr->source = token->source;
 
   *ptr = expr;
-  tokenFree(token);
   return R_SUCCESS;
 
   failure:
-    if (token != NULL) {
-      tokenFree(token);
-    }
     return ret;
 }
 
 // Lists
 
-RetVal tryExprRead(TokenStream_t stream, Expr **ptr, Error *error);
+RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error);
 
 // Assume the opening paren has aready been read.
 // Allocate a list, continue to read expressions and add them to it until a
 // closed-paren is found.
 
-RetVal tryListMake(Expr **ptr, Error *error) {
+RetVal tryListMake(Pool_t pool, Expr **ptr, Error *error) {
   RetVal ret;
 
   Expr *expr;
-  tryMalloc(expr, sizeof(Expr), "Expr");
+  tryPalloc(pool, expr, sizeof(Expr), "Expr");
 
   expr->type = N_LIST;
   expr->list.length = 0;
@@ -395,7 +336,7 @@ void listInitContents(ExprList *list) {
   list->tail = NULL;
 }
 
-RetVal tryListRead(TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryListRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
   RetVal ret;
 
   // these get cleaned up on failure
@@ -405,7 +346,7 @@ RetVal tryListRead(TokenStream_t stream, Expr **ptr, Error *error) {
 
   // convenience
 
-  throws(tryListMake(&expr, error));
+  throws(tryListMake(pool, &expr, error));
 
   throws(tryStreamNext(stream, &oParen, error));
 
@@ -431,14 +372,12 @@ RetVal tryListRead(TokenStream_t stream, Expr **ptr, Error *error) {
       expr->source.length = cParen->source.position - oParen->source.position;
 
       *ptr = expr;
-      tokenFree(oParen);
-      tokenFree(cParen);
       break;
     }
     else { // read a new expression and add it to the list
       cParen = NULL;
-      throws(tryExprRead(stream, &subexpr, error));
-      throws(tryListAppend(&expr->list, subexpr, error));
+      throws(tryExprRead(pool, stream, &subexpr, error));
+      throws(tryListAppend(pool, &expr->list, subexpr, error));
       subexpr = NULL; // subexpr is part of list now
     }
   }
@@ -446,26 +385,14 @@ RetVal tryListRead(TokenStream_t stream, Expr **ptr, Error *error) {
   return R_SUCCESS;
 
   failure:
-    if (oParen != NULL) {
-      tokenFree(oParen);
-    }
-    if (cParen != NULL) {
-      tokenFree(cParen);
-    }
-    if (subexpr != NULL) {
-      exprFree(subexpr);
-    }
-    if (expr != NULL) {
-      exprFree(expr);
-    }
     return ret;
 }
 
-RetVal tryListAppend(ExprList *list, Expr *expr, Error *error) {
+RetVal tryListAppend(Pool_t pool, ExprList *list, Expr *expr, Error *error) {
   RetVal ret;
 
   ListElement *elem;
-  tryMalloc(elem, sizeof(ListElement), "ExprList");
+  tryPalloc(pool, elem, sizeof(ListElement), "ExprList");
 
   elem->expr = expr;
   elem->next = NULL;
@@ -491,16 +418,7 @@ RetVal tryListAppend(ExprList *list, Expr *expr, Error *error) {
     return ret;
 }
 
-void listFreeContents(ExprList *list) {
-  while (list->head != NULL) {
-    ListElement *elem = list->head;
-    list->head = list->head->next;
-    exprFree(elem->expr);
-    free(elem);
-  }
-}
-
-RetVal tryQuoteRead(TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryQuoteRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
 
   RetVal ret;
 
@@ -515,40 +433,28 @@ RetVal tryQuoteRead(TokenStream_t stream, Expr **ptr, Error *error) {
     throwSyntaxError(error, token->source.position, "Quote must begin with ': %u", token->type);
   }
 
-  throws(trySymbolMake(L"quote", wcslen(L"quote"), &quote, error));
+  throws(trySymbolMake(pool, L"quote", wcslen(L"quote"), &quote, error));
   quote->source = token->source;
   token = NULL; // token is now a part of quote symbol
 
-  throws(tryExprRead(stream, &subexpr, error));
+  throws(tryExprRead(pool, stream, &subexpr, error));
 
-  throws(tryListMake(&expr, error));
+  throws(tryListMake(pool, &expr, error));
 
-  throws(tryListAppend(&expr->list, quote, error));
+  throws(tryListAppend(pool, &expr->list, quote, error));
   quote = NULL; // quote is now part of expr
 
-  throws(tryListAppend(&expr->list, subexpr, error));
+  throws(tryListAppend(pool, &expr->list, subexpr, error));
   // subexpr is now part of expr
 
   *ptr = expr;
   return R_SUCCESS;
 
   failure:
-    if (token != NULL) {
-      tokenFree(token);
-    }
-    if (quote != NULL) {
-      exprFree(quote);
-    }
-    if (subexpr != NULL) {
-      exprFree(subexpr);
-    }
-    if (expr != NULL) {
-      exprFree(expr);
-    }
     return ret;
 }
 
-RetVal tryWrapperRead(TokenStream_t stream, wchar_t *symbolName, Expr **ptr, Error *error) {
+RetVal tryWrapperRead(Pool_t pool, TokenStream_t stream, wchar_t *symbolName, Expr **ptr, Error *error) {
   RetVal ret;
 
   Token *token;
@@ -562,36 +468,24 @@ RetVal tryWrapperRead(TokenStream_t stream, wchar_t *symbolName, Expr **ptr, Err
 //    throwSyntaxError(error, token->source.position, "%ls must begin with %lc: %u", symbolName, startsWith, token->type);
 //  }
 
-  throws(trySymbolMake(symbolName, wcslen(symbolName), &quote, error));
+  throws(trySymbolMake(pool, symbolName, wcslen(symbolName), &quote, error));
   quote->source = token->source;
   token = NULL; // token is now a part of quote symbol
 
-  throws(tryExprRead(stream, &subexpr, error));
+  throws(tryExprRead(pool, stream, &subexpr, error));
 
-  throws(tryListMake(&expr, error));
+  throws(tryListMake(pool, &expr, error));
 
-  throws(tryListAppend(&expr->list, quote, error));
+  throws(tryListAppend(pool, &expr->list, quote, error));
   quote = NULL; // quote is now part of expr
 
-  throws(tryListAppend(&expr->list, subexpr, error));
+  throws(tryListAppend(pool, &expr->list, subexpr, error));
   // subexpr is now part of expr
 
   *ptr = expr;
   return R_SUCCESS;
 
   failure:
-  if (token != NULL) {
-    tokenFree(token);
-  }
-  if (quote != NULL) {
-    exprFree(quote);
-  }
-  if (subexpr != NULL) {
-    exprFree(subexpr);
-  }
-  if (expr != NULL) {
-    exprFree(expr);
-  }
   return ret;
 }
 
@@ -600,7 +494,7 @@ RetVal tryWrapperRead(TokenStream_t stream, wchar_t *symbolName, Expr **ptr, Err
 // if it is a symbol, create a symbol
 // else, explode
 
-RetVal tryExprRead(TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
   RetVal ret;
 
   Token *peek;
@@ -613,7 +507,6 @@ RetVal tryExprRead(TokenStream_t stream, Expr **ptr, Error *error) {
 
     Token *discard;
     throws(tryStreamNext(stream, &discard, error)); // discard the thing we peeked
-    tokenFree(discard);
     peek = NULL;
 
     throws(tryStreamPeek(stream, &peek, error));
@@ -623,42 +516,42 @@ RetVal tryExprRead(TokenStream_t stream, Expr **ptr, Error *error) {
 
     // atoms
     case T_STRING:
-      throws(tryStringRead(stream, ptr, error));
+      throws(tryStringRead(pool, stream, ptr, error));
       break;
     case T_NUMBER:
-      throws(tryNumberRead(stream, ptr, error));
+      throws(tryNumberRead(pool, stream, ptr, error));
       break;
     case T_SYMBOL:
-      throws(trySymbolRead(stream, ptr, error));
+      throws(trySymbolRead(pool, stream, ptr, error));
       break;
     case T_KEYWORD:
-      throws(tryKeywordRead(stream, ptr, error));
+      throws(tryKeywordRead(pool, stream, ptr, error));
       break;
     case T_TRUE:
     case T_FALSE:
-      throws(tryBooleanRead(stream, ptr, error));
+      throws(tryBooleanRead(pool, stream, ptr, error));
       break;
     case T_NIL:
-      throws(tryNilRead(stream, ptr, error));
+      throws(tryNilRead(pool, stream, ptr, error));
       break;
 
     // lists
     case T_OPAREN:
-      throws(tryListRead(stream, ptr, error));
+      throws(tryListRead(pool, stream, ptr, error));
       break;
 
     // reader macros
     case T_QUOTE:
-      throws(tryQuoteRead(stream, ptr, error));
+      throws(tryQuoteRead(pool, stream, ptr, error));
       break;
     case T_SYNTAX_QUOTE:
-      throws(tryWrapperRead(stream, L"syntax-quote", ptr, error));
+      throws(tryWrapperRead(pool, stream, L"syntax-quote", ptr, error));
       break;
     case T_UNQUOTE:
-      throws(tryWrapperRead(stream, L"unquote", ptr, error));
+      throws(tryWrapperRead(pool, stream, L"unquote", ptr, error));
       break;
     case T_SPLICING_UNQUOTE:
-      throws(tryWrapperRead(stream, L"splicing-unquote", ptr, error));
+      throws(tryWrapperRead(pool, stream, L"splicing-unquote", ptr, error));
       break;
 
     default:
@@ -676,34 +569,7 @@ void exprInitContents(Expr *expr) {
   sourceLocationInitContents(&expr->source);
 }
 
-void exprFreeContents(Expr *expr) {
-  if (expr != NULL) {
-    if (expr->type == N_STRING) {
-      stringFreeContents(&expr->string);
-    } else if (expr->type == N_NUMBER) {
-      // nothing to do
-    } else if (expr->type == N_SYMBOL) {
-      symbolFreeContents(&expr->symbol);
-    } else if (expr->type == N_KEYWORD) {
-      keywordFreeContents(&expr->keyword);
-    } else if (expr->type == N_BOOLEAN) {
-      // nothing to do
-    } else if (expr->type == N_NIL) {
-      // nothing to do
-    } else if (expr->type == N_LIST) {
-      listFreeContents(&expr->list);
-    }
-  }
-}
-
-void exprFree(Expr *expr) {
-  if (expr != NULL) {
-    exprFreeContents(expr);
-    free(expr);
-  }
-}
-
-RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error) {
+RetVal tryExprDeepCopy(Pool_t pool, Expr *from, Expr **ptr, Error *error) {
 
   RetVal ret;
 
@@ -715,31 +581,31 @@ RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error) {
 
     // atoms
     case N_STRING:
-      throws(tryStringMake(from->string.value, from->string.length, &to, error));
+      throws(tryStringMake(pool, from->string.value, from->string.length, &to, error));
       break;
     case N_NUMBER:
-      throws(tryNumberMake(from->number.value, &to, error));
+      throws(tryNumberMake(pool, from->number.value, &to, error));
       break;
     case N_SYMBOL:
-      throws(trySymbolMake(from->symbol.value, from->symbol.length, &to, error));
+      throws(trySymbolMake(pool, from->symbol.value, from->symbol.length, &to, error));
       break;
     case N_KEYWORD:
-      throws(tryKeywordMake(from->keyword.value, from->keyword.length, &to, error));
+      throws(tryKeywordMake(pool, from->keyword.value, from->keyword.length, &to, error));
       break;
     case N_BOOLEAN:
-      throws(tryBooleanMake(from->boolean.value, &to, error));
+      throws(tryBooleanMake(pool, from->boolean.value, &to, error));
       break;
     case N_NIL:
-      throws(tryNilMake(&to, error));
+      throws(tryNilMake(pool, &to, error));
       break;
     case N_LIST: {
-      throws(tryListMake(&to, error));
+      throws(tryListMake(pool, &to, error));
 
       ListElement *elem = from->list.head;
       while (elem != NULL) {
 
-        throws(tryExprDeepCopy(elem->expr, &listItem, error));
-        throws(tryListAppend(&to->list, listItem, error));
+        throws(tryExprDeepCopy(pool, elem->expr, &listItem, error));
+        throws(tryListAppend(pool, &to->list, listItem, error));
         listItem = NULL; // item is now part of list
 
         elem = elem->next;
@@ -757,12 +623,6 @@ RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error) {
   return R_SUCCESS;
 
   failure:
-    if (to != NULL) {
-      exprFree(to);
-    }
-    if (listItem != NULL) {
-      exprFree(listItem);
-    }
     return ret;
 }
 
@@ -850,13 +710,11 @@ RetVal tryExprPrnStr(Expr *expr, wchar_t **ptr, Error *error) {
 
   wchar_t *output;
   throws(tryCopyText(stringBufferText(b), &output, stringBufferLength(b), error));
-  stringBufferFree(b);
 
   *ptr = output;
   return R_SUCCESS;
 
   failure:
-  stringBufferFree(b);
   return ret;
 }
 

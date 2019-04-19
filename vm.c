@@ -234,21 +234,6 @@ void evalResultInitContents(VMEvalResult *r) {
   r->type = RT_NONE;
 }
 
-void evalResultFreeContents(VMEvalResult *r) {
-  if (r != NULL) {
-    switch (r->type){
-      case RT_RESULT:
-        exprFreeContents(&r->result);
-        break;
-      case RT_EXCEPTION:
-        exceptionFreeContents(&r->exception);
-        break;
-      case RT_NONE:
-        break;
-    }
-  }
-}
-
 /*
  * VM Data Structures
  */
@@ -459,7 +444,7 @@ typedef struct Invocable {
 } Invocable;
 
 typedef RetVal (*TryRelocateChildren)(VM_t vm, void *oldHeap, void *obj, Error *error);
-typedef RetVal (*TryPrn)(VM_t vm, Value result, Expr *expr, Error *error);
+typedef RetVal (*TryPrn)(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error);
 
 typedef struct ValueTypeInfo {
   const char *name;
@@ -1233,18 +1218,17 @@ RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, 
  *
  * Some representations are approximate and cannot be round-tripped through eval, such as functions and closures.
  */
-RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error) {
+RetVal tryVMPrn(VM *vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   RetVal ret;
 
   exprInitContents(expr);
 
   TryPrn prn = vm->valueTypeTable.valueTypes[result.type].tryPrn;
-  throws(prn(vm, result, expr, error));
+  throws(prn(vm, result, pool, expr, error));
 
   return R_SUCCESS;
 
   failure:
-    exprFreeContents(expr);
     return ret;
 }
 
@@ -2388,17 +2372,22 @@ RetVal tryGetTypeEval(VM *vm, ExecFrame_t frame, Error *error) {
   return ret;
 }
 
-RetVal tryVMPrn(VM *vm, Value result, Expr *expr, Error *error);
+RetVal tryVMPrn(VM *vm, Value result, Pool_t pool, Expr *expr, Error *error);
+
+#define ONE_KB 1024
 
 // (8),             | (value -> value)
 RetVal tryPrnEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
+  Pool_t pool = NULL;
+  throws(tryPoolCreate(&pool, ONE_KB, error));
+
   Value value;
   throws(popOperand(frame, &value, error));
 
   Expr expr;
-  throws(tryVMPrn(vm, value, &expr, error));
+  throws(tryVMPrn(vm, value, pool, &expr, error));
   throws(tryExprPrn(&expr, error));
   printf("\n");
 
@@ -2411,7 +2400,7 @@ RetVal tryPrnEval(VM *vm, ExecFrame_t frame, Error *error) {
     goto done;
 
   done:
-    exprFreeContents(&expr);
+    poolFree(pool);
     return ret;
 }
 
@@ -2586,38 +2575,38 @@ RetVal tryRelocateChildrenClosure(VM_t vm, void *oldHeap, void *obj, Error *erro
     return ret;
 }
 
-RetVal tryPrnNil(VM_t vm, Value result, Expr *expr, Error *error) {
+RetVal tryPrnNil(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   expr->type = N_NIL;
   return R_SUCCESS;
 }
 
-RetVal tryPrnInt(VM_t vm, Value result, Expr *expr, Error *error) {
+RetVal tryPrnInt(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   expr->type = N_NUMBER;
   expr->number.value = result.value;
   return R_SUCCESS;
 }
 
-RetVal tryPrnBool(VM_t vm, Value result, Expr *expr, Error *error) {
+RetVal tryPrnBool(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   expr->type = N_BOOLEAN;
   expr->boolean.value = result.value;
   return R_SUCCESS;
 }
 
-RetVal tryPrnFn(VM_t vm, Value result, Expr *expr, Error *error) {
+RetVal tryPrnFn(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   expr->type = N_STRING;
   wchar_t function[] = L"<function>";
   expr->string.length = wcslen(function);
   return tryCopyText(function, &expr->string.value, expr->string.length, error);
 }
 
-RetVal tryPrnCFn(VM_t vm, Value result, Expr *expr, Error *error) {
+RetVal tryPrnCFn(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   expr->type = N_STRING;
   wchar_t function[] = L"<c-function>";
   expr->string.length = wcslen(function);
   return tryCopyText(function, &expr->string.value, expr->string.length, error);
 }
 
-RetVal tryPrnClosure(VM_t vm, Value result, Expr *expr, Error *error) {
+RetVal tryPrnClosure(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   expr->type = N_STRING;
   wchar_t function[] = L"<closure>";
   expr->string.length = wcslen(function);
@@ -2643,7 +2632,7 @@ RetVal equalsString(VM *vm, Value value, wchar_t *cmpStr, bool *equals, Error *e
     return ret;
 }
 
-RetVal tryPrnStr(VM_t vm, Value result, Expr *expr, Error *error) {
+RetVal tryPrnStr(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   RetVal ret;
 
   String *str = NULL;
@@ -2658,7 +2647,8 @@ RetVal tryPrnStr(VM_t vm, Value result, Expr *expr, Error *error) {
     return ret;
 }
 
-RetVal tryPrnSymbol(VM_t vm, Value result, Expr *expr, Error *error) {
+RetVal tryPrnSymbol(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
+
   RetVal ret;
 
   Symbol *sym = NULL;
@@ -2673,7 +2663,7 @@ RetVal tryPrnSymbol(VM_t vm, Value result, Expr *expr, Error *error) {
   return ret;
 }
 
-RetVal tryPrnKeyword(VM_t vm, Value result, Expr *expr, Error *error) {
+RetVal tryPrnKeyword(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   RetVal ret;
 
   Keyword *kw = NULL;
@@ -2729,7 +2719,7 @@ RetVal tryReadProperty(VM *vm, Value *ptr, Property *p, Error *error) {
     return ret;
 }
 
-RetVal tryPrnList(VM_t vm, Value result, Expr *expr, Error *error) {
+RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   RetVal ret;
 
   Cons *cons;
@@ -2764,8 +2754,8 @@ RetVal tryPrnList(VM_t vm, Value result, Expr *expr, Error *error) {
   tryMalloc(elem, sizeof(Expr), "Expr");
   exprInitContents(elem);
 
-  throws(tryVMPrn(vm, cons->value, elem, error));
-  throws(tryListAppend(&expr->list, elem, error));
+  throws(tryVMPrn(vm, cons->value, pool, elem, error));
+  throws(tryListAppend(pool, &expr->list, elem, error));
 
   while (cons->next.type != VT_NIL) {
 
@@ -2779,8 +2769,8 @@ RetVal tryPrnList(VM_t vm, Value result, Expr *expr, Error *error) {
     tryMalloc(elem, sizeof(Expr), "Expr");
     exprInitContents(elem);
 
-    throws(tryVMPrn(vm, cons->value, elem, error));
-    throws(tryListAppend(&expr->list, elem, error));
+    throws(tryVMPrn(vm, cons->value, pool, elem, error));
+    throws(tryListAppend(pool, &expr->list, elem, error));
   }
 
   return R_SUCCESS;
@@ -3666,7 +3656,7 @@ RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, VMException *except
     return ret;
 }
 
-RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, VMEvalResult *result, Error *error) {
+RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t pool, VMEvalResult *result, Error *error) {
 
   RetVal ret;
 
@@ -3682,7 +3672,7 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, VMEvalResult *result, Error *error)
   }
   else {
     result->type = RT_RESULT;
-    throws(tryVMPrn(vm, value, &result->result, error));
+    throws(tryVMPrn(vm, value, pool, &result->result, error));
   }
 
   return R_SUCCESS;
@@ -3819,11 +3809,14 @@ RetVal tryPrStrBuiltinConf(VM *vm, ExecFrame_t frame, bool readable, Error *erro
   throws(popOperand(frame, &value, error));
 
   // note: using off-heap memory to construct the string
+  Pool_t pool = NULL;
   Expr expr;
   exprInitContents(&expr);
   StringBuffer_t b = NULL;
 
-  throws(tryVMPrn(vm, value, &expr, error));
+  throws(tryPoolCreate(&pool, ONE_KB, error));
+
+  throws(tryVMPrn(vm, value, pool, &expr, error));
   throws(tryStringBufferMake(&b, error));
   throws(tryExprPrnBufConf(&expr, b, readable, error));
 
@@ -3844,8 +3837,8 @@ RetVal tryPrStrBuiltinConf(VM *vm, ExecFrame_t frame, bool readable, Error *erro
 
   done:
     // clean up off-heap memory
-    exprFreeContents(&expr);
     stringBufferFree(b);
+    poolFree(pool);
     return ret;
 }
 

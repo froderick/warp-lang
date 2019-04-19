@@ -1,6 +1,8 @@
 #include "repl.h"
 #include <stdio.h>
 
+#define ONE_MB (1024 * 1000)
+
 int main(void) {
   RetVal ret;
 
@@ -11,14 +13,18 @@ int main(void) {
   VM_t vm;
   InputStream_t source;
   TokenStream_t stream;
+  Pool_t pool = NULL;
 
   errorInitContents(&error);
+
+  throws(tryPoolCreate(&pool, ONE_MB, &error));
 
   throws(tryVMMake(&vm, &error));
   throws(tryLoad(vm, STD_LIB, &error));
 
   throws(tryFileInputStreamMake(stdin, &source, &error));
   throws(tryStreamMake(source, &stream, &error));
+
 
   FileInfo fileInfo;
   fileInfoInitContents(&fileInfo);
@@ -43,7 +49,7 @@ int main(void) {
     printCodeUnit(&unit);
 
     VMEvalResult result;
-    ret = tryVMEval(vm, &unit, &result, &error);
+    ret = tryVMEval(vm, &unit, pool, &result, &error);
 
     if (ret != R_SUCCESS) {
       printf("> encountered eval error\n\n");
@@ -64,6 +70,7 @@ int main(void) {
     }
 
     codeUnitFreeContents(&unit);
+    poolClear(pool);
   }
 
   return R_SUCCESS;

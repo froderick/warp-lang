@@ -141,23 +141,25 @@ void poolClear(Pool *pool) {
 }
 
 void poolFree(Pool *pool) {
+  if (pool != NULL) {
 
-  Segment *root = pool->root;
-  while (root != NULL) {
+    Segment *root = pool->root;
+    while (root != NULL) {
 
-    free(root->data);
+      free(root->data);
 
-    root->data = NULL;
-    root->dataEnd = NULL;
-    root->allocPtr = NULL;
-    root->next = NULL;
+      root->data = NULL;
+      root->dataEnd = NULL;
+      root->allocPtr = NULL;
+      root->next = NULL;
 
-    root = root->next;
+      root = root->next;
+    }
+
+    pool->segmentSize = 0;
+    pool->root = NULL;
+    pool->current = NULL;
+
+    free(pool);
   }
-
-  pool->segmentSize = 0;
-  pool->root = NULL;
-  pool->current = NULL;
-
-  free(pool);
 }
