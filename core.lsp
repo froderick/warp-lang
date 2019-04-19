@@ -69,25 +69,9 @@
 (defmacro defn (name fnargs & forms)
   `(def ~name (fn ~name ~fnargs ~@forms)))
 
-(defn list? (x)
-  (let (t (get-type x))
-    (or (= t 0) (= t 7))))
-
 (defn empty? (seq)
   (nil? seq))
 
-(defmacro -> (x & exprs)
-  (let (->helper (fn ->helper (x exprs)
-                   (if (nil? exprs)
-                     x
-                     (let (expr (first exprs)
-                           val (if (list? expr)
-                                 `(~(first expr) ~x ~@(rest expr))
-                                 (list expr x)))
-                       (->helper val (rest exprs))))))
-  (->helper x exprs)))
-
-;; TODO: rewrite these boolean ops as macros, use gensym to avoid lexical capture
 (defmacro and (& seq)
   (if (empty? seq)
     true
@@ -102,13 +86,36 @@
              (and ~@seq)
              false))))))
 
-(defn or (a b)
-  (if a
-    a
-    (if b b nil)))
+(defmacro or (& seq)
+  (if (empty? seq)
+    nil
+    (let (n (first seq)
+          seq (rest seq)
+          sym (gensym))
+      (if (empty? seq)
+        `(let (~sym ~n) ~sym))
+        `(let (~sym ~n)
+           (if ~sym
+             ~sym
+             (or ~@seq))))))
 
 (defn not (a)
   (if a false true))
+
+(defn list? (x)
+  (let (t (get-type x))
+    (or (= t 0) (= t 7))))
+
+(defmacro -> (x & exprs)
+  (let (->helper (fn ->helper (x exprs)
+                   (if (nil? exprs)
+                     x
+                     (let (expr (first exprs)
+                           val (if (list? expr)
+                                 `(~(first expr) ~x ~@(rest expr))
+                                 (list expr x)))
+                       (->helper val (rest exprs))))))
+  (->helper x exprs)))
 
 (defn take (n coll)
   (let (_take (fn _take (accum n coll)

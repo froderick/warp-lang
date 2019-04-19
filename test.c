@@ -797,10 +797,13 @@ START_TEST(repl) {
     assertEval(L"(and 'x 'y 'z)", L"true");
     assertEval(L"(and 'x false 'z)", L"false");
 
+    assertEval(L"(or)", L"nil");
     assertEval(L"(or false false)", L"nil");
     assertEval(L"(or false 10)", L"10");
     assertEval(L"(or 11 false)", L"11");
     assertEval(L"(or 11 12)", L"11");
+    assertEval(L"(or false 11 12)", L"11");
+
     assertEval(L"(not false)", L"true");
     assertEval(L"(not true)", L"false");
     assertEval(L"(not nil)", L"true");
