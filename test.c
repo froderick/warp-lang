@@ -830,6 +830,11 @@ START_TEST(repl) {
 
     assertEval(L"(do 1 2)", L"2");
 
+    assertEval(L"(cond)", L"nil");
+    assertEval(L"(cond 'x 'y)", L"y");
+    assertEval(L"(cond 'false 'y)", L"nil");
+    assertEval(L"(cond 'false 'y 'x 'z)", L"z");
+
     // TODO: this test is brittle, write better test
     // assertEval(L"(list (gensym) (gensym))", L"(gensym-1 gensym-0)")
   }

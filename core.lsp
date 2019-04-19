@@ -126,8 +126,25 @@
                           (rest coll)))))
     (_take nil n coll)))
 
+(defn count (seq)
+  (let (_count (fn _count (i remaining)
+                 (if (empty? remaining)
+                   i
+                   (_count (inc i) (rest remaining)))))
+    (_count 0 seq)))
 
-;; todo: cond, print-bytecode for vars and for arbitrary expressions, deref vars / @, macroexpand
+;; todo: throw exceptions on invalid input
+(defmacro cond (& seq)
+  (if (empty? seq)
+    nil
+    (let (test (first seq)
+          expr (second seq)
+          seq (drop 2 seq))
+      `(if ~test
+         ~expr
+         (cond ~@seq)))))
+
+;; todo: print-bytecode for vars and for arbitrary expressions, deref vars / @, macroexpand
 
 (defmacro do (& forms)
   `(let '() ~@forms))
