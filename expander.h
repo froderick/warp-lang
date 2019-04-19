@@ -3,6 +3,7 @@
 
 #include "reader.h"
 #include "vm.h"
+#include "pool.h"
 
 /*
  * Things that have to be done to implement macros:
@@ -22,7 +23,7 @@
 
 typedef struct Expander *Expander_t;
 
-RetVal tryMakeExpander(Expander_t *expander, VM_t vm, Error *error);
+RetVal tryMakeExpander(Pool_t pool, Expander_t *expander, VM_t vm, Error *error);
 void freeExpander(Expander_t expander);
 
 RetVal tryIsMacro(Expander_t expander, Text sym, bool *isMacro, Error *error);

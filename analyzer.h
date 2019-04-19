@@ -187,11 +187,7 @@ void analyzeOptionsInitContents(AnalyzeOptions *options);
 RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, Pool_t pool, FormRoot **ptr, Error *error);
 
 void rootInitContents(FormRoot *root);
-void rootFreeContents(FormRoot *root);
-void rootFree(FormRoot *root);
-
 void fnCallInitContents(FormFnCall *fnCall);
-void fnCallFreeContents(FormFnCall *fnCall);
 
 #endif //WARP_LANG_ANALYZER_H
 

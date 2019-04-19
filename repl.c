@@ -26,10 +26,10 @@ RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit
 
   throws(tryPoolCreate(&pool, ONE_MB, error));
 
+  throws(tryMakeExpander(pool, &expander, vm, error));
+
   AnalyzeOptions options;
   analyzeOptionsInitContents(&options);
-
-  throws(tryMakeExpander(&expander, vm, error));
   options.expander = expander;
 
   if (fileInfo.hasFileName) {

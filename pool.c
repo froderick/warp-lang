@@ -71,7 +71,9 @@ RetVal tryPoolAllocate(Pool *pool, void **ptr, size_t size, char *description, E
   RetVal ret;
 
   if (size == 0) {
-    throwRuntimeError(error, "cannot allocate a size of zero");
+//    throwRuntimeError(error, "cannot allocate a size of zero");
+    *ptr = NULL;
+    return R_SUCCESS;
   }
 
   if (size > pool->segmentSize) {

@@ -4,16 +4,19 @@
 #include "vm.h"
 #include "expander.h"
 #include "reader.h"
+#include "pool.h"
 
 typedef struct Expander {
+  Pool_t pool;
   VM_t vm;
 } Expander;
 
-RetVal tryMakeExpander(Expander **expander, VM_t vm, Error *error) {
+RetVal tryMakeExpander(Pool_t pool, Expander **expander, VM_t vm, Error *error) {
   RetVal ret;
 
-  tryMalloc(*expander, sizeof(Expander), "Expander");
+  tryPalloc(pool, *expander, sizeof(Expander), "Expander");
 
+  (*expander)->pool = pool;
   (*expander)->vm = vm;
 
   return R_SUCCESS;
@@ -22,14 +25,7 @@ RetVal tryMakeExpander(Expander **expander, VM_t vm, Error *error) {
     return ret;
 }
 
-void freeExpander(Expander_t expander) {
-  if (expander != NULL) {
-    expander->vm = NULL;
-    free(expander);
-  }
-}
-
-RetVal tryIsMacro(Expander_t expander, Text sym, bool *isMacro, Error *error) {
+RetVal tryIsMacro(Expander *expander, Text sym, bool *isMacro, Error *error) {
   RetVal ret;
 
   wchar_t getMacro[] = L"get-macro";
@@ -43,7 +39,7 @@ RetVal tryIsMacro(Expander_t expander, Text sym, bool *isMacro, Error *error) {
   Forms args;
   formsInitContents(&args);
   args.numForms = 1;
-  tryMalloc(args.forms, sizeof(Form) * args.numForms, "Form array");
+  tryPalloc(expander->pool, args.forms, sizeof(Form) * args.numForms, "Form array");
 
   Expr varName;
   exprInitContents(&varName);
@@ -107,7 +103,7 @@ RetVal tryExpand(Expander *expander, Text sym, Expr *input, VMEvalResult *output
   Forms args;
   formsInitContents(&args);
   args.numForms = input->list.length;
-  tryMalloc(args.forms, sizeof(Form) * args.numForms, "Form array");
+  tryPalloc(expander->pool, args.forms, sizeof(Form) * args.numForms, "Form array");
 
   ListElement *elem = input->list.head;
   for (uint64_t i=0; i<args.numForms; i++) {

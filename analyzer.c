@@ -47,28 +47,10 @@ void bindingInitContents(Binding *binding) {
   binding->source = BS_NONE;
 }
 
-void bindingFreeContents(Binding *binding) {
-  if (binding != NULL) {
-    textFreeContents(&binding->name);
-    binding->source = BS_NONE;
-  }
-}
-
 void bindingTableInitContents(BindingTable *table) {
   table->bindings = NULL;
   table->usedSpace = 0;
   table->allocatedSpace = 0;
-}
-
-void bindingTableFreeContents(BindingTable *table) {
-  if (table != NULL) {
-    table->usedSpace = 0;
-    table->allocatedSpace = 0;
-    if (table->bindings != NULL) {
-      free(table->bindings);
-      table->bindings = NULL;
-    }
-  }
 }
 
 void bindingTablesInitContents(BindingTables *tables) {
@@ -77,23 +59,12 @@ void bindingTablesInitContents(BindingTables *tables) {
   tables->tables = NULL;
 }
 
-void bindingTablesFreeContents(BindingTables *tables) {
-  if (tables != NULL) {
-    tables->allocatedSpace = 0;
-    tables->usedSpace = 0;
-    if (tables->tables != NULL) {
-      free(tables->tables);
-      tables->tables = NULL;
-    }
-  }
-}
-
-RetVal tryAddBinding(BindingTable *table, Binding binding, Error *error) {
+RetVal tryAddBinding(Pool_t pool, BindingTable *table, Binding binding, Error *error) {
   RetVal ret;
 
   if (table->bindings == NULL) {
     uint16_t len = 16;
-    tryMalloc(table->bindings, len * sizeof(Binding), "Binding array");
+    tryPalloc(pool, table->bindings, len * sizeof(Binding), "Binding array");
     table->allocatedSpace = len;
   }
   else if (table->usedSpace == table->allocatedSpace) {
@@ -119,12 +90,12 @@ RetVal tryAddBinding(BindingTable *table, Binding binding, Error *error) {
   return ret;
 }
 
-RetVal tryPushBindingTable(BindingTables *tables, BindingTable *table, Error *error) {
+RetVal tryPushBindingTable(Pool_t pool, BindingTables *tables, BindingTable *table, Error *error) {
   RetVal ret;
 
   if (tables->tables == NULL) {
     uint16_t len = 16;
-    tryMalloc(tables->tables, len * sizeof(BindingTable*), "BindingTable pointer array");
+    tryPalloc(pool, tables->tables, len * sizeof(BindingTable*), "BindingTable pointer array");
     tables->allocatedSpace = len;
   }
   else if (tables->usedSpace == tables->allocatedSpace) {
@@ -194,23 +165,12 @@ void resolverStackInitContents(ResolverStack *stack) {
   stack->bindings = NULL;
 }
 
-void resolverStackFreeContents(ResolverStack *stack) {
-  if (stack != NULL) {
-    stack->usedSpace = 0;
-    stack->allocatedSpace = 0;
-    if (stack->bindings != NULL) {
-      free(stack->bindings);
-      stack->bindings = NULL;
-    }
-  }
-}
-
-RetVal tryPushResolverBinding(ResolverStack *stack, ResolverBinding binding, Error *error) {
+RetVal tryPushResolverBinding(Pool_t pool, ResolverStack *stack, ResolverBinding binding, Error *error) {
   RetVal ret;
 
   if (stack->bindings == NULL) {
     uint16_t len = 16;
-    tryMalloc(stack->bindings, len * sizeof(ResolverBinding), "ResolverBinding array");
+    tryPalloc(pool, stack->bindings, len * sizeof(ResolverBinding), "ResolverBinding array");
     stack->allocatedSpace = len;
   }
   else if (stack->usedSpace == stack->allocatedSpace) {
@@ -286,7 +246,7 @@ RetVal tryCreateBinding(AnalyzerContext *ctx, Binding binding, uint16_t *binding
 
   uint16_t tableIndex = ctx->bindingTables.usedSpace - 1;
   BindingTable *table = ctx->bindingTables.tables[tableIndex];
-  throws(tryAddBinding(table, binding, error));
+  throws(tryAddBinding(ctx->pool, table, binding, error));
   uint16_t bindingIndex = table->usedSpace - 1;
   Binding *b = &table->bindings[bindingIndex];
 
@@ -296,7 +256,7 @@ RetVal tryCreateBinding(AnalyzerContext *ctx, Binding binding, uint16_t *binding
   resolver.bindingIndex = bindingIndex;
   resolver.binding = b;
 
-  throws(tryPushResolverBinding(&ctx->resolverStack, resolver, error));
+  throws(tryPushResolverBinding(ctx->pool, &ctx->resolverStack, resolver, error));
 
   *bindingIndexPtr = bindingIndex;
   return R_SUCCESS;
@@ -338,8 +298,6 @@ RetVal tryPopBindings(AnalyzerContext *ctx, uint16_t numBindings, Error *error) 
 
 RetVal _tryFormAnalyze(AnalyzerContext *ctx, Expr* expr, Form **ptr, Error *error);
 RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Error *error);
-void formFreeContents(Form* form);
-void formFree(Form* form);
 
 uint64_t getExprPosition(Expr *expr) {
   return expr->source.position;
@@ -348,8 +306,6 @@ uint64_t getExprPosition(Expr *expr) {
 uint64_t getFormPosition(Form *form) {
   return form->source.position;
 }
-
-void ifFreeContents(FormIf *iff);
 
 RetVal tryIfAnalyze(AnalyzerContext *ctx, Expr* ifExpr, FormIf *iff, Error *error) {
 
@@ -385,27 +341,8 @@ RetVal tryIfAnalyze(AnalyzerContext *ctx, Expr* ifExpr, FormIf *iff, Error *erro
   return R_SUCCESS;
 
   failure:
-    ifFreeContents(iff);
     return ret;
 }
-
-void ifFreeContents(FormIf *iff) {
-  if (iff != NULL) {
-    if (iff->test != NULL) {
-      formFree(iff->test);
-      iff->test = NULL;
-    }
-    if (iff->ifBranch != NULL) {
-      formFree(iff->ifBranch);
-      iff->ifBranch = NULL;
-    }
-    if (iff->elseBranch != NULL) {
-      formFree(iff->elseBranch);
-      iff->elseBranch = NULL;
-    }
-  }
-}
-
 
 /*
  * purposes of the environment stack tracking
@@ -418,11 +355,11 @@ void formsInitContents(Forms *forms) {
   forms->forms = NULL;
 }
 
-RetVal tryFormsAllocate(Forms *forms, uint16_t length, Error *error) {
+RetVal tryFormsAllocate(Pool_t pool, Forms *forms, uint16_t length, Error *error) {
   RetVal ret;
 
   forms->numForms = length;
-  tryMalloc(forms->forms, sizeof(Form) * forms->numForms, "Forms array");
+  tryPalloc(pool, forms->forms, sizeof(Form) * forms->numForms, "Forms array");
   for (uint16_t i=0; i<forms->numForms; i++) {
       formInitContents(&forms->forms[i]);
   }
@@ -431,19 +368,6 @@ RetVal tryFormsAllocate(Forms *forms, uint16_t length, Error *error) {
 
   failure:
     return ret;
-}
-
-void formsFreeContents(Forms *forms) {
-  if (forms != NULL) {
-    if (forms->forms != NULL) {
-      for (uint16_t i=0; i<forms->numForms; i++) {
-        formFreeContents(&forms->forms[i]);
-      }
-      forms->numForms = 0;
-      free(forms->forms);
-      forms->forms = NULL;
-    }
-  }
 }
 
 void letInitContents(FormLet *let) {
@@ -457,19 +381,6 @@ void letBindingInitContents(LetBinding *b) {
   sourceLocationInitContents(&b->source);
   b->value = NULL;
 }
-
-void letBindingFreeContents(LetBinding *b) {
-  if (b != NULL) {
-    textFreeContents(&b->name);
-    sourceLocationFreeContents(&b->source);
-    if (b->value != NULL) {
-      formFree(b->value);
-      b->value = NULL;
-    }
-  }
-}
-
-void letFreeContents(FormLet *let);
 
 RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *error) {
   RetVal ret;
@@ -493,7 +404,7 @@ RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *e
 
   // create the bindings
   let->numBindings = bindingsExpr->list.length / 2;
-  tryMalloc(let->bindings, sizeof(LetBinding) * let->numBindings, "LetBinding array");
+  tryPalloc(ctx->pool, let->bindings, sizeof(LetBinding) * let->numBindings, "LetBinding array");
 
   // add the bindings to the current binding table
   // push the bindings on the current binding stack
@@ -525,7 +436,7 @@ RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *e
   }
 
   // create the forms within this lexical scope
-  throws(tryFormsAllocate(&let->forms, letExpr->list.length - 2, error));
+  throws(tryFormsAllocate(ctx->pool, &let->forms, letExpr->list.length - 2, error));
 
   ListElement *exprElem = letExpr->list.head->next->next;
   for (int i=0; i<let->forms.numForms; i++) {
@@ -535,38 +446,17 @@ RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *e
   }
 
   // discard the registered bindings from the environment stack
-  numBindingsPushed = 0;
   throws(tryPopBindings(ctx, let->numBindings, error));
 
   return R_SUCCESS;
-
   failure:
-    letFreeContents(let);
-    throws(tryPopBindings(ctx, numBindingsPushed, error))
     return ret;
-}
-
-void letFreeContents(FormLet *let) {
-  if (let != NULL) {
-    if (let->bindings != NULL) {
-      for (int i=0; i<let->numBindings; i++) {
-        LetBinding *b = let->bindings + i;
-        letBindingFreeContents(b);
-      }
-      free(let->bindings);
-      let->bindings = NULL;
-      let->numBindings = 0;
-    }
-    formsFreeContents(&let->forms);
-  }
 }
 
 void defInitContents(FormDef *def) {
   textInitContents(&def->name);
   def->value = NULL;
 }
-
-void defFreeContents(FormDef *def);
 
 RetVal tryDefAnalyze(AnalyzerContext *ctx, Expr* defExpr, FormDef *def, Error *error) {
   RetVal ret;
@@ -598,22 +488,8 @@ RetVal tryDefAnalyze(AnalyzerContext *ctx, Expr* defExpr, FormDef *def, Error *e
   return R_SUCCESS;
 
   failure:
-    defFreeContents(def);
     return ret;
 }
-
-void defFreeContents(FormDef *def) {
-  if (def != NULL) {
-    textFreeContents(&def->name);
-    if (def->value != NULL) {
-      formFree(def->value);
-      def->value = NULL;
-    };
-  }
-}
-
-void fnFreeContents(FormFn *fn);
-
 
 void formFnInitContents(FormFn *fn) {
   bindingTableInitContents(&fn->table);
@@ -628,13 +504,6 @@ void formFnInitContents(FormFn *fn) {
 void fnArgInitContents(FormFnArg *arg) {
   textInitContents(&arg->name);
   sourceLocationInitContents(&arg->source);
-}
-
-void fnArgFreeContents(FormFnArg *arg) {
-  if (arg != NULL) {
-    textFreeContents(&arg->name);
-    sourceLocationFreeContents(&arg->source);
-  }
 }
 
 RetVal tryFnValidateArgs(Expr *argsExpr, uint16_t *numArgsPtr, bool *varArgsPtr, Error *error) {
@@ -681,7 +550,7 @@ RetVal tryFnValidateArgs(Expr *argsExpr, uint16_t *numArgsPtr, bool *varArgsPtr,
     return ret;
 }
 
-RetVal tryFnParseArgs(Expr *argsExpr, FormFn *fn, Error *error) {
+RetVal tryFnParseArgs(Pool_t pool, Expr *argsExpr, FormFn *fn, Error *error) {
   RetVal ret;
 
   uint64_t pos = getExprPosition(argsExpr);
@@ -689,7 +558,7 @@ RetVal tryFnParseArgs(Expr *argsExpr, FormFn *fn, Error *error) {
   if (argsExpr->type == N_LIST) {
 
     throws(tryFnValidateArgs(argsExpr, &fn->numArgs, &fn->usesVarArgs, error));
-    tryMalloc(fn->args, sizeof(FormFnArg) * fn->numArgs, "FormFnArg array");
+    tryPalloc(pool, fn->args, sizeof(FormFnArg) * fn->numArgs, "FormFnArg array");
 
     ListElement *argElem = argsExpr->list.head;
     for (int i=0; i<fn->numArgs; i++) {
@@ -720,7 +589,7 @@ RetVal tryFnParseArgs(Expr *argsExpr, FormFn *fn, Error *error) {
     return ret;
 }
 
-RetVal tryFnParse(Expr* fnExpr, FormFn *fn, Expr **formElements, Error *error) {
+RetVal tryFnParse(Pool_t pool, Expr* fnExpr, FormFn *fn, Expr **formElements, Error *error) {
   RetVal ret;
 
   uint64_t pos = getExprPosition(fnExpr);
@@ -743,7 +612,7 @@ RetVal tryFnParse(Expr* fnExpr, FormFn *fn, Expr **formElements, Error *error) {
   }
 
   Expr *argsExpr = itr->expr;
-  throws(tryFnParseArgs(argsExpr, fn, error));
+  throws(tryFnParseArgs(pool, argsExpr, fn, error));
   itr = itr->next;
 
   uint16_t nonFormElems = 2; // 'fn' and 'args list'
@@ -752,7 +621,7 @@ RetVal tryFnParse(Expr* fnExpr, FormFn *fn, Expr **formElements, Error *error) {
   }
 
   fn->forms.numForms = fnExpr->list.length - nonFormElems;
-  tryMalloc(*formElements, sizeof(Expr) * fn->forms.numForms, "Expr array");
+  tryPalloc(pool, *formElements, sizeof(Expr) * fn->forms.numForms, "Expr array");
 
   for (int i=0; i<fn->forms.numForms; i++) {
     *formElements[i] = *itr->expr;
@@ -813,12 +682,11 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
   Expr *formElements = NULL;
 
   formFnInitContents(fn);
-  throws(tryFnParse(fnExpr, fn, &formElements, error));
-
+  throws(tryFnParse(ctx->pool, fnExpr, fn, &formElements, error));
 
   // create new binding stack, initialized with the fn args as the first bindings
 
-  throws(tryPushBindingTable(&ctx->bindingTables, &fn->table, error));
+  throws(tryPushBindingTable(ctx->pool, &ctx->bindingTables, &fn->table, error));
   uint16_t numBindingsPushed = 0;
 
   if (fn->hasName) {
@@ -848,7 +716,7 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
   }
 
   // create the forms within this fn lexical scope
-  throws(tryFormsAllocate(&fn->forms, fn->forms.numForms, error));
+  throws(tryFormsAllocate(ctx->pool, &fn->forms, fn->forms.numForms, error));
   for (int i=0; i<fn->forms.numForms; i++) {
     Expr expr = formElements[i];
     Form *thisForm = fn->forms.forms + i;
@@ -863,46 +731,15 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
   throws(tryPopBindings(ctx, numBindingsPushed, error));
   throws(tryPopBindingTable(&ctx->bindingTables, error));
 
-  ret = R_SUCCESS;
-  goto done;
-
+  return R_SUCCESS;
   failure:
-    fnFreeContents(fn);
-    throws(tryPopBindings(ctx, numBindingsPushed, error));
-    throws(tryPopBindingTable(&ctx->bindingTables, error));
-    goto done;
-
-  done:
-    if (formElements != NULL) {
-      free(formElements);
-    }
     return ret;
-}
-
-
-void fnFreeContents(FormFn *fn) {
-  if (fn != NULL) {
-    bindingTableFreeContents(&fn->table);
-    textFreeContents(&fn->name);
-    if (fn->args != NULL) {
-      for (int i=0; i<fn->numArgs; i++) {
-        FormFnArg *arg = fn->args + i;
-        fnArgFreeContents(arg);
-      }
-      free(fn->args);
-      fn->args = NULL;
-      fn->numArgs = 0;
-    }
-    formsFreeContents(&fn->forms);
-  }
 }
 
 void builtinInitContents(FormBuiltin *builtin) {
   textInitContents(&builtin->name);
   formsInitContents(&builtin->args);
 }
-
-void builtinFreeContents(FormBuiltin *builtin);
 
 RetVal tryBuiltinAnalyze(AnalyzerContext *ctx, Expr *expr, FormBuiltin *builtin, Error *error) {
 
@@ -917,7 +754,7 @@ RetVal tryBuiltinAnalyze(AnalyzerContext *ctx, Expr *expr, FormBuiltin *builtin,
 
   throws(tryTextMake(name->keyword.value, &builtin->name, name->keyword.length, error));
 
-  throws(tryFormsAllocate(&builtin->args, expr->list.length - 2, error));
+  throws(tryFormsAllocate(ctx->pool, &builtin->args, expr->list.length - 2, error));
 
   ListElement *argExpr = expr->list.head->next->next;
   for (int i=0; i<builtin->args.numForms; i++) {
@@ -929,22 +766,12 @@ RetVal tryBuiltinAnalyze(AnalyzerContext *ctx, Expr *expr, FormBuiltin *builtin,
   return R_SUCCESS;
 
   failure:
-    builtinFreeContents(builtin);
     return ret;
-}
-
-void builtinFreeContents(FormBuiltin *builtin) {
-  if (builtin != NULL) {
-    textFreeContents(&builtin->name);
-    formsFreeContents(&builtin->args);
-  }
 }
 
 void _listInitContents(FormList *list) {
   formsInitContents(&list->forms);
 }
-
-void _listFreeContents(FormList *list);
 
 RetVal tryListAnalyze(AnalyzerContext *ctx, Expr *expr, FormList *list, Error *error) {
 
@@ -952,7 +779,7 @@ RetVal tryListAnalyze(AnalyzerContext *ctx, Expr *expr, FormList *list, Error *e
 
   _listInitContents(list);
 
-  throws(tryFormsAllocate(&list->forms, expr->list.length - 1, error));
+  throws(tryFormsAllocate(ctx->pool, &list->forms, expr->list.length - 1, error));
 
   ListElement *argExpr = expr->list.head->next;
   for (int i=0; i<list->forms.numForms; i++) {
@@ -964,23 +791,12 @@ RetVal tryListAnalyze(AnalyzerContext *ctx, Expr *expr, FormList *list, Error *e
   return R_SUCCESS;
 
   failure:
-    _listFreeContents(list);
     return ret;
-}
-
-void _listFreeContents(FormList *list) {
-  if (list != NULL) {
-    formsFreeContents(&list->forms);
-  }
 }
 
 RetVal tryEnvRefAnalyze(AnalyzerContext *ctx, Expr *expr, uint16_t bindingIndex, FormEnvRef *envRef, Error *error) {
   envRef->bindingIndex = bindingIndex;
   return R_SUCCESS;
-}
-
-void envRefFreeContents(FormEnvRef *ref) {
-  // nothing to do
 }
 
 void varRefInitContents(FormVarRef *varRef) {
@@ -1002,12 +818,6 @@ RetVal tryVarRefAnalyze(AnalyzerContext *ctx, Expr *expr, FormVarRef *varRef, Er
 
   failure:
     return ret;
-}
-
-void varRefFreeContents(FormVarRef *ref) {
-  if (ref != NULL) {
-    textFreeContents(&ref->name);
-  }
 }
 
 RetVal assertFnCallable(Form *form, Error *error) {
@@ -1062,7 +872,7 @@ RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Expr *expr, FormFnCall *fnCall, Er
 
   throws(_tryFormAnalyze(ctx, expr->list.head->expr, &fnCall->fnCallable, error));
   throws(assertFnCallable(fnCall->fnCallable, error));
-  throws(tryFormsAllocate(&fnCall->args, expr->list.length - 1, error));
+  throws(tryFormsAllocate(ctx->pool, &fnCall->args, expr->list.length - 1, error));
 
   ListElement *argExpr = expr->list.head->next;
   for (int i=0; i<fnCall->args.numForms; i++) {
@@ -1074,18 +884,7 @@ RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Expr *expr, FormFnCall *fnCall, Er
   return R_SUCCESS;
 
   failure:
-    fnCallFreeContents(fnCall);
     return ret;
-}
-
-void fnCallFreeContents(FormFnCall *fnCall) {
-  if (fnCall != NULL) {
-    if (fnCall->fnCallable != NULL) {
-      formFree(fnCall->fnCallable);
-      fnCall->fnCallable = NULL;
-    }
-    formsFreeContents(&fnCall->args);
-  }
 }
 
 RetVal tryConstantAnalyze(Expr* expr, Expr **constant, Error *error) {
@@ -1097,12 +896,6 @@ RetVal tryConstantAnalyze(Expr* expr, Expr **constant, Error *error) {
 
   failure:
     return ret;
-}
-
-void constantFreeContents(Expr *constant) {
-  if (constant != NULL) {
-    exprFree(constant);
-  }
 }
 
 RetVal tryQuoteAnalyze(Expr* expr, Expr **constant, Error *error) {
@@ -1208,7 +1001,7 @@ RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form
     throws(tryTextMake(concat, &ref.name, wcslen(concat), error));
 
     Form *fnCallable;
-    tryMalloc(fnCallable, sizeof(Form), "Form");
+    tryPalloc(ctx->pool, fnCallable, sizeof(Form), "Form");
     formInitContents(fnCallable);
     fnCallable->type = F_VAR_REF;
     fnCallable->varRef = ref;
@@ -1217,7 +1010,7 @@ RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form
     form->type = F_FN_CALL;
     fnCallInitContents(&form->fnCall);
     form->fnCall.fnCallable = fnCallable;
-    throws(tryFormsAllocate(&form->fnCall.args, numArgs, error));
+    throws(tryFormsAllocate(ctx->pool, &form->fnCall.args, numArgs, error));
   }
 
   uint16_t nextArg = 0;
@@ -1243,7 +1036,7 @@ RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form
         listContainer->type = F_LIST;
         _listInitContents(&listContainer->list);
         throws(
-            tryFormsAllocate(&listContainer->list.forms, quoted->list.length, error)); // allocate max it could ever be
+            tryFormsAllocate(ctx->pool, &listContainer->list.forms, quoted->list.length, error)); // allocate max it could ever be
         listContainer->list.forms.numForms = 0;                                           // pretend it is empty
       }
 
@@ -1332,7 +1125,6 @@ RetVal trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error
   return R_SUCCESS;
 
   failure:
-    formFreeContents(form);
     return ret;
 }
 
@@ -1387,7 +1179,7 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *err
         binding.source = BS_CAPTURED;
         binding.captured.bindingIndex = resolved->bindingIndex;
 
-        throws(tryAddBinding(this, binding, error));
+        throws(tryAddBinding(ctx->pool, this, binding, error));
 
         captured = binding;
       }
@@ -1579,7 +1371,7 @@ RetVal _tryFormAnalyze(AnalyzerContext *ctx, Expr* expr, Form **ptr, Error *erro
 
   Form *form; // clean up on fail
 
-  tryMalloc(form, sizeof(Form), "Form");
+  tryPalloc(ctx->pool, form, sizeof(Form), "Form");
   formInitContents(form);
   throws(tryFormAnalyzeContents(ctx, expr, form, error));
 
@@ -1587,56 +1379,7 @@ RetVal _tryFormAnalyze(AnalyzerContext *ctx, Expr* expr, Form **ptr, Error *erro
   return R_SUCCESS;
 
   failure:
-    if (form != NULL) {
-      free(form);
-    }
-    return ret;
-}
-
-void formFreeContents(Form* form) {
-  if (form != NULL) {
-    switch (form->type) {
-      case F_CONST:
-        constantFreeContents(form->constant);
-        break;
-      case F_IF:
-        ifFreeContents(&form->iff);
-        break;
-      case F_LET:
-        letFreeContents(&form->let);
-        break;
-      case F_DEF:
-        defFreeContents(&form->def);
-        break;
-      case F_ENV_REF:
-        envRefFreeContents(&form->envRef);
-        break;
-      case F_VAR_REF:
-        varRefFreeContents(&form->varRef);
-        break;
-      case F_FN:
-        fnFreeContents(&form->fn);
-        break;
-      case F_BUILTIN:
-        builtinFreeContents(&form->builtin);
-        break;
-      case F_FN_CALL:
-        fnCallFreeContents(&form->fnCall);
-        break;
-      case F_LIST:
-        _listFreeContents(&form->list);
-        break;
-      case F_NONE:
-        break;
-    }
-  }
-}
-
-void formFree(Form* form) {
-  if (form != NULL) {
-    formFreeContents(form);
-    free(form);
-  }
+  return ret;
 }
 
 void rootInitContents(FormRoot *root) {
@@ -1646,35 +1389,11 @@ void rootInitContents(FormRoot *root) {
   root->hasFileName = false;
 }
 
-void rootFreeContents(FormRoot *root) {
-  if (root != NULL) {
-    bindingTableFreeContents(&root->table);
-    if (root->form != NULL) {
-      formFree(root->form);
-      root->form = NULL;
-    }
-  }
-}
-
-void rootFree(FormRoot *root) {
-  if (root != NULL) {
-    rootFreeContents(root);
-    free(root);
-  }
-}
-
 void analyzerContextInitContents(AnalyzerContext *ctx) {
   ctx->pool = NULL;
   bindingTablesInitContents(&ctx->bindingTables);
   resolverStackInitContents(&ctx->resolverStack);
   analyzeOptionsInitContents(&ctx->options);
-}
-
-void analyzerContextFreeContents(AnalyzerContext *ctx) {
-  if (ctx != NULL) {
-    bindingTablesFreeContents(&ctx->bindingTables);
-    resolverStackFreeContents(&ctx->resolverStack);
-  }
 }
 
 void analyzeOptionsInitContents(AnalyzeOptions *options) {
@@ -1694,12 +1413,11 @@ RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, Pool_t pool, Fo
   FormRoot *root = NULL;
   tryPalloc(pool, root, sizeof(FormRoot), "FormRoot");
   rootInitContents(root);
-  throws(tryPushBindingTable(&ctx.bindingTables, &root->table, error));
+  throws(tryPushBindingTable(ctx.pool, &ctx.bindingTables, &root->table, error));
 
   throws(_tryFormAnalyze(&ctx, expr, &root->form, error));
 
   throws(tryPopBindingTable(&ctx.bindingTables, error));
-  analyzerContextFreeContents(&ctx);
 
   if (options.hasFileName) {
     root->hasFileName = true;
@@ -1710,7 +1428,6 @@ RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, Pool_t pool, Fo
   return R_SUCCESS;
 
   failure:
-    analyzerContextFreeContents(&ctx);
     return ret;
 }
 
