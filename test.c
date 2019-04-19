@@ -812,6 +812,16 @@ START_TEST(repl) {
 
     assertEval(L"(-> 10 inc (- 5) (+ 100))", L"106");
 
+    assertEval(L"(join '(\"one\" \"two\" \"three\"))", L"\"onetwothree\"");
+
+    assertEval(L"(pr-str '(1 2 3))", L"\"(1 2 3)\"");
+    assertEval(L"(pr-str \"hi\")", L"\"\"hi\"\"");
+
+    assertEval(L"(print-str '(1 2 3))", L"\"(1 2 3)\"");
+    assertEval(L"(print-str \"hi\")", L"\"hi\"");
+
+    assertEval(L"(str '(1 2 3) '(4 5 6))", L"\"(1 2 3)(4 5 6)\"");
+    assertEval(L"(str \"test-\" 100)", L"\"test-100\"");
   }
 END_TEST
 

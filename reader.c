@@ -766,7 +766,7 @@ RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error) {
     return ret;
 }
 
-RetVal _tryExprPrnStr(Expr *expr, StringBuffer_t b, Error *error) {
+RetVal tryExprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable, Error *error) {
   RetVal ret;
 
   switch (expr->type) {
@@ -788,9 +788,14 @@ RetVal _tryExprPrnStr(Expr *expr, StringBuffer_t b, Error *error) {
       }
       break;
     case N_STRING: {
-      throws(tryStringBufferAppendChar(b, L'"', error));
-      throws(tryStringBufferAppendStr(b, expr->string.value, error));
-      throws(tryStringBufferAppendChar(b, L'"', error));
+      if (readable) {
+        throws(tryStringBufferAppendChar(b, L'"', error));
+        throws(tryStringBufferAppendStr(b, expr->string.value, error));
+        throws(tryStringBufferAppendChar(b, L'"', error));
+      }
+      else {
+        throws(tryStringBufferAppendStr(b, expr->string.value, error));
+      }
       break;
     }
     case N_SYMBOL: {
@@ -808,7 +813,7 @@ RetVal _tryExprPrnStr(Expr *expr, StringBuffer_t b, Error *error) {
       ListElement *elem = expr->list.head;
       for (int i=0; i<expr->list.length; i++) {
 
-        throws(_tryExprPrnStr(elem->expr, b, error));
+        throws(tryExprPrnBufConf(elem->expr, b, readable, error));
 
         if (i + 1 < expr->list.length) {
           throws(tryStringBufferAppendChar(b, L' ', error));
@@ -821,13 +826,17 @@ RetVal _tryExprPrnStr(Expr *expr, StringBuffer_t b, Error *error) {
       break;
     }
     default:
-      throwRuntimeError(error, "unsuported value type: %u", expr->type);
+    throwRuntimeError(error, "unsuported value type: %u", expr->type);
   }
 
   return R_SUCCESS;
 
   failure:
   return ret;
+}
+
+RetVal tryExprPrnBuf(Expr *expr, StringBuffer_t b, Error *error) {
+  return tryExprPrnBufConf(expr, b, true, error);
 }
 
 RetVal tryExprPrnStr(Expr *expr, wchar_t **ptr, Error *error) {
@@ -837,7 +846,7 @@ RetVal tryExprPrnStr(Expr *expr, wchar_t **ptr, Error *error) {
   StringBuffer_t b = NULL;
 
   throws(tryStringBufferMake(&b, error));
-  throws(_tryExprPrnStr(expr, b, error));
+  throws(tryExprPrnBuf(expr, b, error));
 
   wchar_t *output;
   throws(tryCopyText(stringBufferText(b), &output, stringBufferLength(b), error));

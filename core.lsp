@@ -117,9 +117,15 @@
                           (rest coll)))))
     (_take nil n coll)))
 
+(defn str (& args)
+  (let (_str (fn _str (strings remaining)
+               (if (empty? remaining)
+                 (join (reverse strings))
+                 (_str (cons (print-str (first remaining)) strings)
+                       (rest remaining)))))
+    (_str nil args)))
 
 ;; todo: not, cond, print-bytecode for vars and for arbitrary expressions, deref vars / @
-
 
 ;; TODO: figure out how to do c interop, to implement things like string concatenation without creating new vm instructions
 ;;
@@ -158,8 +164,6 @@
 ;; with a basic mechanism to invoke c functions where each c function has to be aware of gc and explicitly register
 ;; references it wants to hold
 
-;; TODO: support coercing values to strings, starting with numbers (str)
-;; TODO: support concatenating strings
 ;; TODO: make gensym, and the macro-syntax support for generating let-bindings with it to avoid lexical capture
 ;(def gensym-state 0)
 ;

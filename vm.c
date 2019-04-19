@@ -1,4 +1,4 @@
-#include <stdlib.h>
+  #include <stdlib.h>
 #include <string.h>
 #include <libgen.h>
 #include <time.h>
@@ -305,6 +305,7 @@ typedef struct CFn {
   size_t nameOffset;
   CFnInvoke ptr;
   uint16_t numArgs;
+  bool usesVarArgs;
 } CFn;
 
 wchar_t* cFnName(CFn *fn) { return (void*)fn + fn->nameOffset; }
@@ -1629,76 +1630,85 @@ RetVal tryPopInvocable(VM *vm, Value pop, Invocable *invocable, Error *error) {
 //*   - we *aways* pass the number of arguments
 //*   - pops number of extra arguments into a list, sets as final argument in local slot
 
-RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, Invocable invocable, Error *error) {
+RetVal tryPreprocessArguments(VM *vm, ExecFrame_t parent, uint16_t numArgs, bool usesVarArgs, Error *error) {
+
   RetVal ret;
 
   Value numArgsSupplied;
   throws(popOperand(parent, &numArgsSupplied, error));
 
   if (numArgsSupplied.type != VT_UINT) {
-    throwRuntimeError(error, "first argument must be number of arguments supplied: %s",
-        getValueTypeName(vm, numArgsSupplied.type));
+    throwRuntimeError(error, "first op stack value must be number of arguments supplied: %s",
+                      getValueTypeName(vm, numArgsSupplied.type));
   }
 
-  if (numArgsSupplied.value > invocable.fn->numArgs) {
-
-    if (!invocable.fn->usesVarArgs) {
-      throwRuntimeError(error, "extra arguments supplied, expected %u but got %s", invocable.fn->numArgs,
-          getValueTypeName(vm, numArgsSupplied.value));
+  if (!usesVarArgs) {
+    if (numArgsSupplied.value != numArgs) {
+      throwRuntimeError(error, "required arguments not supplied, expected %u but got %" PRIu64, numArgs,
+          numArgsSupplied.value);
     }
+  }
+  else {
+    if (numArgsSupplied.value > numArgs) {
 
+      // push empty varargs sequence
+      throws(pushOperand(parent, nil(), error));
 
-    // push empty varargs sequence
-    throws(pushOperand(parent, nil(), error));
+      // read the extra args into that sequence, push it back on the stack
+      uint16_t numVarArgs = (numArgsSupplied.value - numArgs) + 1;
+      for (uint16_t i = 0; i < numVarArgs; i++) {
 
-    // read the extra args into that sequence, push it back on the stack
-    uint16_t numVarArgs = (numArgsSupplied.value - invocable.fn->numArgs) + 1;
-    for (uint16_t i = 0; i < numVarArgs; i++) {
+        Value seq = nil();
+
+        // may gc, so has to happen before we pop anything off the stack
+        throws(tryAllocateCons(vm, parent, nil(), nil(), &seq, error));
+
+        // gc possibility over, so pop sequence and arg from the stack and set them on cons
+        Cons *cons = NULL;
+        throws(deref(&vm->gc, (void*)&cons, seq.value, error));
+        throws(popOperand(parent, &cons->next, error));
+        throws(popOperand(parent, &cons->value, error));
+
+        // put the new sequence back on the stack
+        throws(pushOperand(parent, seq, error));
+      }
+    }
+    else if (numArgsSupplied.value == numArgs) {
+      // wrap the last arg in a list
 
       Value seq = nil();
 
-      // may gc, so has to happen before we pop anything off the stack
+      //may gc, so has to happen before we pop anything off the stack
       throws(tryAllocateCons(vm, parent, nil(), nil(), &seq, error));
 
-      // gc possibility over, so pop sequence and arg from the stack and set them on cons
+      // gc possibility over, so pop arg from the stack and it on cons
       Cons *cons = NULL;
       throws(deref(&vm->gc, (void*)&cons, seq.value, error));
-      throws(popOperand(parent, &cons->next, error));
       throws(popOperand(parent, &cons->value, error));
 
-      // put the new sequence back on the stack
+      // put the one-element sequence back on the stack
       throws(pushOperand(parent, seq, error));
     }
-  }
-
-  if (numArgsSupplied.value == invocable.fn->numArgs && invocable.fn->usesVarArgs) {
-    // wrap the last arg in a list
-
-    Value seq = nil();
-
-    //may gc, so has to happen before we pop anything off the stack
-    throws(tryAllocateCons(vm, parent, nil(), nil(), &seq, error));
-
-    // gc possibility over, so pop arg from the stack and it on cons
-    Cons *cons = NULL;
-    throws(deref(&vm->gc, (void*)&cons, seq.value, error));
-    throws(popOperand(parent, &cons->value, error));
-
-    // put the one-element sequence back on the stack
-    throws(pushOperand(parent, seq, error));
-  }
-
-  if (numArgsSupplied.value < invocable.fn->numArgs) {
-
-    if (!invocable.fn->usesVarArgs) {
-      throwRuntimeError(error, "required arguments not supplied, expected %u but got %" PRIu64, invocable.fn->numArgs,
-                        numArgsSupplied.value);
+    else if (numArgsSupplied.value == numArgs - 1) {
+      // the final argument will be an empty list, make sure the list is present on the op stack
+      throws(pushOperand(parent, nil(), error));
     }
-
-    // make sure the list is present on the stack
-
-    throws(pushOperand(parent, nil(), error));
+    else {
+      throwRuntimeError(error, "required arguments not supplied, expected %u or more arguments but got %" PRIu64,
+          numArgs - 1, numArgsSupplied.value);
+    }
   }
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, Invocable invocable, Error *error) {
+  RetVal ret;
+
+  throws(tryPreprocessArguments(vm, parent, invocable.fn->numArgs, invocable.fn->usesVarArgs, error));
 
   for (uint16_t i = 0; i < invocable.fn->numArgs; i++) {
     Value arg;
@@ -1739,17 +1749,7 @@ RetVal tryInvokeCFn(VM *vm, ExecFrame_t frame, Value cFn, Error *error) {
 
   CFn *fn = NULL;
   throws(deref(&vm->gc, (void*)&fn, cFn.value, error));
-
-  Value numArgs;
-  throws(popOperand(frame, &numArgs, error));
-
-  if (numArgs.type != VT_UINT) {
-    throwRuntimeError(error, "invalid numArgs parameter type: %s", getValueTypeName(vm, numArgs.type));
-  }
-  if (numArgs.value != fn->numArgs) {
-    throwRuntimeError(error, "%ls takes two arguments, received %" PRIu64, cFnName(fn), numArgs.value);
-  }
-
+  throws(tryPreprocessArguments(vm, frame, fn->numArgs, fn->usesVarArgs, error));
   throws(fn->ptr(vm, frame, error));
 
   return R_SUCCESS;
@@ -3692,25 +3692,161 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, VMEvalResult *result, Error *error)
  * builtin procedures
  */
 
-//RetVal tryConsBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
-//  RetVal ret;
-//
-//  Value numArgs;
-//  throws(popOperand(frame, &numArgs, error));
-//
-//  if (numArgs.type != VT_UINT) {
-//    throwRuntimeError(error, "invalid numArgs parameter type: %s", getValueTypeName(vm, numArgs.type));
-//  }
-//  if (numArgs.value != 2) {
-//    throwRuntimeError(error, "cons takes two arguments, received %" PRIu64, numArgs.value);
-//  }
-//
-//  throws(tryConsEval(vm, frame, error));
-//
-//  return R_SUCCESS;
-//  failure:
-//  return ret;
-//}
+#define ASSERT_SEQ(value, ...) {\
+  if (value.type != VT_LIST && value.type != VT_NIL) { \
+    throwRuntimeError(error, "expected a list type: %s", getValueTypeName(vm, value.type)); \
+  } \
+}
+
+#define ASSERT_STR(value, ...) {\
+  if (value.type != VT_STR) { \
+    throwRuntimeError(error, "expected a string type: %s", getValueTypeName(vm, value.type)); \
+  } \
+}
+
+RetVal tryStringMakeBlank(VM *vm, ExecFrame_t frame, uint64_t length, Value *value, Error *error) {
+  RetVal ret;
+
+  String *str = NULL;
+
+  size_t textSize = (length + 1) * sizeof(wchar_t);
+  size_t strSize = sizeof(String) + textSize;
+
+  uint64_t offset = 0;
+
+  throws(alloc(vm, frame, strSize, (void*)&str, &offset, error));
+
+  value->type = VT_STR;
+  value->value = offset;
+
+  stringInitContents(str);
+  str->header.type = VT_STR;
+  str->header.size = strSize;
+  str->length = length;
+
+  str->valueOffset = sizeof(String);
+  stringValue(str)[length] = L'\0';
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+/*
+ * joins a sequence of strings together into one big string
+ *
+ * pop the args list off the stack
+ * iterate over the list and compute the total size of all the strings in the list
+ * push the args list back on the stack so gc can find it
+ * allocate a new string that is the total size
+ * pop the args list back off the stack, deref and copy each one into the new list
+ * push the new string onto the stack
+ */
+RetVal tryStrJoinBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
+  RetVal ret;
+
+  Value strings;
+  throws(popOperand(frame, &strings, error));
+  ASSERT_SEQ(strings);
+
+  uint64_t totalLength = 0;
+
+  Value cursor = strings;
+  while (cursor.type != VT_NIL) {
+
+    Cons *seq = NULL;
+    throws(deref(&vm->gc, (void*)&seq, cursor.value, error));
+
+    ASSERT_STR(seq->value);
+
+    String *string = NULL;
+    throws(deref(&vm->gc, (void*)&string, seq->value.value, error));
+    totalLength += string->length;
+
+    cursor = seq->next;
+  }
+
+  // store the list on the op stack while we allocate since gc may happen
+  throws(pushOperand(frame, strings, error));
+
+  Value resultRef = nil();
+  throws(tryStringMakeBlank(vm, frame, totalLength, &resultRef, error));
+  String *result = NULL;
+  throws(deref(&vm->gc, (void*)&result, resultRef.value, error));
+
+  // get the list back again after allocation
+  throws(popOperand(frame, &strings, error));
+
+  uint64_t totalSizeWritten = 0;
+
+  cursor = strings;
+  while (cursor.type != VT_NIL) {
+    Cons *seq = NULL;
+    throws(deref(&vm->gc, (void*)&seq, cursor.value, error));
+
+    String *string = NULL;
+    throws(deref(&vm->gc, (void*)&string, seq->value.value, error));
+
+    wchar_t *writePtr = (void*)result + result->valueOffset + totalSizeWritten;
+    size_t textSize = string->length * sizeof(wchar_t);
+    memcpy(writePtr, stringValue(string), textSize);
+    totalSizeWritten += textSize;
+
+    cursor = seq->next;
+  }
+
+  throws(pushOperand(frame, resultRef, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryPrStrBuiltinConf(VM *vm, ExecFrame_t frame, bool readable, Error *error) {
+  RetVal ret;
+
+  Value value;
+  throws(popOperand(frame, &value, error));
+
+  // note: using off-heap memory to construct the string
+  Expr expr;
+  exprInitContents(&expr);
+  StringBuffer_t b = NULL;
+
+  throws(tryVMPrn(vm, value, &expr, error));
+  throws(tryStringBufferMake(&b, error));
+  throws(tryExprPrnBufConf(&expr, b, readable, error));
+
+  Value resultRef = nil();
+  throws(tryStringMakeBlank(vm, frame, stringBufferLength(b), &resultRef, error));
+  String *result = NULL;
+  throws(deref(&vm->gc, (void*)&result, resultRef.value, error));
+
+  memcpy(stringValue(result), stringBufferText(b), stringBufferLength(b) * sizeof(wchar_t));
+
+  throws(pushOperand(frame, resultRef, error));
+
+  ret = R_SUCCESS;
+  goto done;
+
+  failure:
+  goto done;
+
+  done:
+    // clean up off-heap memory
+    exprFreeContents(&expr);
+    stringBufferFree(b);
+    return ret;
+}
+
+RetVal tryPrStrBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
+  return tryPrStrBuiltinConf(vm, frame, true, error);
+}
+
+RetVal tryPrintStrBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
+  return tryPrStrBuiltinConf(vm, frame, false, error);
+}
 
 void cFnInitContents(CFn *fn) {
   objectHeaderInitContents(&fn->header);
@@ -3718,9 +3854,10 @@ void cFnInitContents(CFn *fn) {
   fn->nameOffset = 0;
   fn->numArgs = 0;
   fn->ptr = NULL;
+  fn->usesVarArgs = false;
 }
 
-RetVal tryMakeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, CFnInvoke ptr, Value *value, Error *error) {
+RetVal tryMakeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr, Value *value, Error *error) {
   RetVal ret;
 
   CFn *fn = NULL;
@@ -3744,6 +3881,7 @@ RetVal tryMakeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, CFnInvoke ptr, 
   fn->nameLength = nameLength;
   fn->numArgs = numArgs;
   fn->ptr = ptr;
+  fn->usesVarArgs = varArgs;
 
   fn->nameOffset = sizeof(CFn);
   memcpy(cFnName(fn), name, nameLength * sizeof(wchar_t));
@@ -3754,13 +3892,13 @@ RetVal tryMakeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, CFnInvoke ptr, 
   return ret;
 }
 
-RetVal tryDefineCFn(VM *vm, wchar_t *name, uint16_t numArgs, CFnInvoke ptr, Error *error) {
+RetVal tryDefineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr, Error *error) {
   RetVal ret;
 
   size_t nameLength = wcslen(name);
   Value value = nil();
 
-  throws(tryMakeCFn(vm, name, numArgs, ptr, &value, error));
+  throws(tryMakeCFn(vm, name, numArgs, varArgs, ptr, &value, error));
   throws(tryDefVar(&vm->namespaces, name, nameLength, value, error));
 
   return R_SUCCESS;
@@ -3771,17 +3909,20 @@ RetVal tryDefineCFn(VM *vm, wchar_t *name, uint16_t numArgs, CFnInvoke ptr, Erro
 RetVal tryInitCFns(VM *vm, Error *error) {
   RetVal ret;
 
-  throws(tryDefineCFn(vm, L"cons", 2, tryConsEval, error));
-  throws(tryDefineCFn(vm, L"first", 1, tryFirstEval, error));
-  throws(tryDefineCFn(vm, L"rest", 1, tryRestEval, error));
-  throws(tryDefineCFn(vm, L"set-macro", 1, trySetMacroEval, error));
-  throws(tryDefineCFn(vm, L"get-macro", 1, tryGetMacroEval, error));
-  throws(tryDefineCFn(vm, L"gc", 0, tryGCEval, error));
-  throws(tryDefineCFn(vm, L"get-type", 1, tryGetTypeEval, error));
-  throws(tryDefineCFn(vm, L"prn", 1, tryPrnEval, error));
-  throws(tryDefineCFn(vm, L"+", 2, tryAddEval, error));
-  throws(tryDefineCFn(vm, L"-", 2, trySubEval, error));
-  throws(tryDefineCFn(vm, L"=", 2, tryCmpEval, error));
+  throws(tryDefineCFn(vm, L"cons",      2, false, tryConsEval,         error));
+  throws(tryDefineCFn(vm, L"first",     1, false, tryFirstEval,        error));
+  throws(tryDefineCFn(vm, L"rest",      1, false, tryRestEval,         error));
+  throws(tryDefineCFn(vm, L"set-macro", 1, false, trySetMacroEval,     error));
+  throws(tryDefineCFn(vm, L"get-macro", 1, false, tryGetMacroEval,     error));
+  throws(tryDefineCFn(vm, L"gc",        0, false, tryGCEval,           error));
+  throws(tryDefineCFn(vm, L"get-type",  1, false, tryGetTypeEval,      error));
+  throws(tryDefineCFn(vm, L"prn",       1, false, tryPrnEval,          error));
+  throws(tryDefineCFn(vm, L"+",         2, false, tryAddEval,          error));
+  throws(tryDefineCFn(vm, L"-",         2, false, trySubEval,          error));
+  throws(tryDefineCFn(vm, L"=",         2, false, tryCmpEval,          error));
+  throws(tryDefineCFn(vm, L"join",      1, false, tryStrJoinBuiltin,   error));
+  throws(tryDefineCFn(vm, L"pr-str",    1, false, tryPrStrBuiltin,     error));
+  throws(tryDefineCFn(vm, L"print-str", 1, false, tryPrintStrBuiltin,  error));
 
   return R_SUCCESS;
   failure:

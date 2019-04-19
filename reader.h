@@ -78,6 +78,8 @@ void exprFree(Expr *expr);
 
 RetVal tryExprDeepCopy(Expr *from, Expr **ptr, Error *error);
 
+RetVal tryExprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable, Error *error);
+RetVal tryExprPrnBuf(Expr *expr, StringBuffer_t b, Error *error);
 RetVal tryExprPrnStr(Expr *expr, wchar_t **ptr, Error *error);
 RetVal tryExprPrn(Expr* expr, Error *error);
 
