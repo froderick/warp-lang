@@ -3704,6 +3704,12 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, VMEvalResult *result, Error *error)
   } \
 }
 
+#define ASSERT_SYM(value, ...) {\
+  if (value.type != VT_SYMBOL) { \
+    throwRuntimeError(error, "expected a symbol type: %s", getValueTypeName(vm, value.type)); \
+  } \
+}
+
 RetVal tryStringMakeBlank(VM *vm, ExecFrame_t frame, uint64_t length, Value *value, Error *error) {
   RetVal ret;
 
@@ -3848,6 +3854,71 @@ RetVal tryPrintStrBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   return tryPrStrBuiltinConf(vm, frame, false, error);
 }
 
+RetVal trySymbolMakeBlank(VM *vm, ExecFrame_t frame, uint64_t length, Value *result, Error *error) {
+  RetVal ret;
+
+  Symbol *sym = NULL;
+
+  size_t textSize = (length + 1) * sizeof(wchar_t);
+  size_t size = sizeof(Symbol) + textSize;
+
+  uint64_t offset = 0;
+  throws(alloc(vm, frame, size, (void*)&sym, &offset, error));
+
+  result->type = VT_SYMBOL;
+  result->value = offset;
+
+  symbolInitContents(sym);
+  sym->header.type = VT_SYMBOL;
+  sym->header.size = size;
+  sym->length = length;
+
+  sym->valueOffset = sizeof(Symbol);
+  symbolValue(sym)[sym->length] = L'\0';
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal trySymbolBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
+  RetVal ret;
+
+  Value value;
+  throws(popOperand(frame, &value, error));
+
+  ASSERT_STR(value);
+
+  uint64_t length = 0;
+  {
+    String *string = NULL;
+    throws(deref(&vm->gc, (void *) &string, value.value, error));
+    length = string->length;
+  }
+
+  // keep the string safely on the op stack while we allocate
+  throws(pushOperand(frame, value, error));
+
+  Value result;
+  throws(trySymbolMakeBlank(vm, frame, length, &result, error));
+
+  // pop string back off now we're done allocating
+  throws(popOperand(frame, &value, error));
+
+  // actually copy string into symbol
+  String *string = NULL;
+  throws(deref(&vm->gc, (void *) &string, value.value, error));
+  Symbol *sym = NULL;
+  throws(deref(&vm->gc, (void *) &sym, result.value, error));
+  memcpy(symbolValue(sym), stringValue(string), sym->length * sizeof(wchar_t));
+
+  throws(pushOperand(frame, result, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
 void cFnInitContents(CFn *fn) {
   objectHeaderInitContents(&fn->header);
   fn->nameLength = 0;
@@ -3923,6 +3994,7 @@ RetVal tryInitCFns(VM *vm, Error *error) {
   throws(tryDefineCFn(vm, L"join",      1, false, tryStrJoinBuiltin,   error));
   throws(tryDefineCFn(vm, L"pr-str",    1, false, tryPrStrBuiltin,     error));
   throws(tryDefineCFn(vm, L"print-str", 1, false, tryPrintStrBuiltin,  error));
+  throws(tryDefineCFn(vm, L"symbol",    1, false, trySymbolBuiltin,    error));
 
   return R_SUCCESS;
   failure:
