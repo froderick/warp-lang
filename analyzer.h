@@ -8,6 +8,8 @@
 #include "reader.h"
 #include "expander.h"
 
+// TODO: need to support 'ns' special form
+
 typedef enum BindingSource {
   BS_NONE,
   BS_CAPTURED,
