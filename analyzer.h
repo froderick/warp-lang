@@ -7,6 +7,7 @@
 #include "errors.h"
 #include "reader.h"
 #include "expander.h"
+#include "pool.h"
 
 // TODO: need to support 'ns' special form
 
@@ -174,7 +175,7 @@ typedef struct FormRoot {
   bool hasFileName;
 } FormRoot;
 
-RetVal tryFormAnalyze(Expr* expr, FormRoot **form, Error *error);
+RetVal tryFormAnalyze(Expr* expr, Pool_t pool, FormRoot **form, Error *error);
 
 typedef struct AnalyzeOptions {
   Expander_t expander;
@@ -183,7 +184,7 @@ typedef struct AnalyzeOptions {
 } AnalyzeOptions;
 
 void analyzeOptionsInitContents(AnalyzeOptions *options);
-RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, FormRoot **ptr, Error *error);
+RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, Pool_t pool, FormRoot **ptr, Error *error);
 
 void rootInitContents(FormRoot *root);
 void rootFreeContents(FormRoot *root);

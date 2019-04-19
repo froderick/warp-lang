@@ -13,13 +13,18 @@ void fileInfoFreeContents(FileInfo *f) {
   textFreeContents(&f->fileName);
 }
 
+#define ONE_MB (1024 * 1000)
+
 RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit *codeUnit, Error *error) {
 
   RetVal ret;
 
+  Pool_t pool = NULL;
   Expr *expr = NULL;
   FormRoot *form = NULL;
   Expander_t expander = NULL;
+
+  throws(tryPoolCreate(&pool, ONE_MB, error));
 
   AnalyzeOptions options;
   analyzeOptionsInitContents(&options);
@@ -33,7 +38,7 @@ RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit
   }
 
   throws(tryExprRead(stream, &expr, error));
-  throws(tryFormAnalyzeOptions(options, expr, &form, error));
+  throws(tryFormAnalyzeOptions(options, expr, pool, &form, error));
   throws(tryCompileTopLevel(form, codeUnit, error));
 
   ret = R_SUCCESS;
@@ -43,11 +48,11 @@ RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit
     goto finally;
 
   finally:
+    if (pool != NULL) {
+      poolFree(pool);
+    }
     if (expr != NULL) {
       exprFree(expr);
-    }
-    if (form != NULL) {
-      rootFree(form);
     }
     return ret;
 }

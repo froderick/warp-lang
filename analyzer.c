@@ -31,6 +31,7 @@ typedef struct ResolverStack {
 } ResolverStack;
 
 typedef struct AnalyzerContext {
+  Pool_t pool;
   AnalyzeOptions options;
   BindingTables bindingTables;
   ResolverStack resolverStack;
@@ -1663,6 +1664,7 @@ void rootFree(FormRoot *root) {
 }
 
 void analyzerContextInitContents(AnalyzerContext *ctx) {
+  ctx->pool = NULL;
   bindingTablesInitContents(&ctx->bindingTables);
   resolverStackInitContents(&ctx->resolverStack);
   analyzeOptionsInitContents(&ctx->options);
@@ -1681,15 +1683,16 @@ void analyzeOptionsInitContents(AnalyzeOptions *options) {
   textInitContents(&options->fileName);
 }
 
-RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, FormRoot **ptr, Error *error) {
+RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, Pool_t pool, FormRoot **ptr, Error *error) {
   RetVal ret;
   AnalyzerContext ctx;
 
   analyzerContextInitContents(&ctx);
   ctx.options = options;
+  ctx.pool = pool;
 
   FormRoot *root = NULL;
-  tryMalloc(root, sizeof(FormRoot), "FormRoot");
+  tryPalloc(pool, root, sizeof(FormRoot), "FormRoot");
   rootInitContents(root);
   throws(tryPushBindingTable(&ctx.bindingTables, &root->table, error));
 
@@ -1707,15 +1710,14 @@ RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, FormRoot **ptr,
   return R_SUCCESS;
 
   failure:
-    rootFree(root);
     analyzerContextFreeContents(&ctx);
     return ret;
 }
 
-RetVal tryFormAnalyze(Expr* expr, FormRoot **ptr, Error *error) {
+RetVal tryFormAnalyze(Expr* expr, Pool_t pool, FormRoot **ptr, Error *error) {
   AnalyzeOptions options;
   analyzeOptionsInitContents(&options);
-  return tryFormAnalyzeOptions(options, expr, ptr, error);
+  return tryFormAnalyzeOptions(options, expr, pool, ptr, error);
 }
 
 

@@ -243,6 +243,8 @@ RetVal tryParse(wchar_t *input, Expr **ptr, Error *error) {
     return ret;
 }
 
+#define ONE_MB (1024 * 1000)
+
 START_TEST(exprPrn)
   {
 
@@ -262,80 +264,72 @@ END_TEST
 START_TEST(analyzer) {
 
     Error e;
+    Pool_t pool;
     Expr *expr;
     FormRoot *root;
 
     errorInitContents(&e);
+    ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
 
     // constant
     ck_assert_int_eq(tryParse(L"\"str\"", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(expr, &root, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(root->form->type, F_CONST);
-    rootFree(root);
 
     // if
     ck_assert_int_eq(tryParse(L"(if true 10 20)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(expr, &root, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(root->form->type, F_IF);
-    rootFree(root);
 
     // let
     ck_assert_int_eq(tryParse(L"(let (a nil) true)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(expr, &root, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(root->form->type, F_LET);
-    rootFree(root);
 
     // env-ref
     ck_assert_int_eq(tryParse(L"(let (a nil) a)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(expr, &root, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(root->form->type, F_LET);
     ck_assert_int_eq(root->form->let.forms.forms[0].type, F_ENV_REF);
     ck_assert_int_eq(root->form->let.forms.forms[0].envRef.bindingIndex, 0);
-    rootFree(root);
 
     // def
     ck_assert_int_eq(tryParse(L"(def money 100)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(expr, &root, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(root->form->type, F_DEF);
-    rootFree(root);
 
     // var-ref
     ck_assert_int_eq(tryParse(L"money", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(expr, &root, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(root->form->type, F_VAR_REF);
-    rootFree(root);
 
     // fn with args
     ck_assert_int_eq(tryParse(L"(fn (a b c) a)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(expr, &root, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(root->form->type, F_FN);
     ck_assert_int_eq(root->form->fn.forms.forms[0].type, F_ENV_REF);
     ck_assert_int_eq(root->form->fn.forms.forms[0].envRef.bindingIndex, 0);
-    rootFree(root);
 
     // fn-call
     ck_assert_int_eq(tryParse(L"(def barf (fn () 100))", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(expr, &root, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(root->form->type, F_DEF);
-    rootFree(root);
 
     ck_assert_int_eq(tryParse(L"(barf)", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryFormAnalyze(expr, &root, &e), R_SUCCESS);
+    ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
     exprFree(expr);
     ck_assert_int_eq(root->form->type, F_FN_CALL);
     ck_assert_int_eq(root->form->fnCall.fnCallable->type , F_VAR_REF);
-    rootFree(root);
 
-// TODO:
-//        F_BUILTIN,
+    poolFree(pool);
 
   }
 END_TEST
@@ -344,15 +338,17 @@ RetVal tryTestCompile(wchar_t *input, CodeUnit *codeUnit, Error *error) {
 
   RetVal ret;
 
+  Pool_t pool;
   Expr *expr;
   FormRoot *root;
 
+  throws(tryPoolCreate(&pool, ONE_MB, error));
   throws(tryParse(input, &expr, error));
-  throws(tryFormAnalyze(expr, &root, error));
+  throws(tryFormAnalyze(expr, pool, &root, error));
   throws(tryCompileTopLevel(root, codeUnit, error));
 
   exprFree(expr);
-  rootFree(root);
+  poolFree(pool);
 
   return R_SUCCESS;
 
