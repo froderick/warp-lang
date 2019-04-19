@@ -127,12 +127,14 @@
     (_take nil n coll)))
 
 
-;; todo: not, cond, print-bytecode for vars and for arbitrary expressions, deref vars / @
+;; todo: cond, print-bytecode for vars and for arbitrary expressions, deref vars / @, macroexpand
 
 (defmacro do (& forms)
   `(let '() ~@forms))
 
+;;
 ;; used for testing
+;;
 
 (defn fib (n)
   (let (_fib (fn _fib (prev1 prev2 n)
