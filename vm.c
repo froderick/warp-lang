@@ -2027,6 +2027,10 @@ RetVal tryLoadVarEval(VM *vm, ExecFrame_t frame, Error *error) {
     // fail: not all vars exist
     throwRuntimeError(error, "no such var found: '%ls'", stringValue(str));
   }
+  // TODO: don't let users take the value of a macro, per clojure? could do this by making a special macro invoke instruction/builtin
+//  else if (var->isMacro) {
+//    throwRuntimeError(error, "cannot take the value of a macro: '%ls/%ls'", var->namespace, var->name);
+//  }
   else {
     throws(pushOperand(frame, var->value, error));
   }

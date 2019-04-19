@@ -824,6 +824,9 @@ START_TEST(repl) {
     assertEval(L"(str \"test-\" 100)", L"\"test-100\"");
 
     assertEval(L"(= (get-type 'x) (get-type (symbol \"x\")))", L"true");
+
+    // TODO: this test is brittle, write better test
+    // assertEval(L"(list (gensym) (gensym))", L"(gensym-1 gensym-0)")
   }
 END_TEST
 
