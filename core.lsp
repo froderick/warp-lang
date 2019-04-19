@@ -56,6 +56,7 @@
                 (symbol (str "gensym-" n)))))
 
 ; TODO: add auto-gensym support with macro-syntax for generating bindings with it to avoid lexical capture
+; https://www.braveclojure.com/writing-macros/
 (def defmacro (fn defmacro (name fnargs & forms)
                 `(let '()
                    (def ~name (fn ~name ~fnargs ~@forms))
