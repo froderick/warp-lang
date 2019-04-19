@@ -432,7 +432,6 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   FnConstant fnConst;
   constantFnInitContents(&fnConst);
 
-  fnConst.fnId = form->fn.id;
   fnConst.hasName = form->fn.hasName;
   textInitContents(&fnConst.name);
   if (fnConst.hasName) {

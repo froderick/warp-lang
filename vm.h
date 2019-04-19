@@ -109,7 +109,6 @@ typedef struct StringConstant {
 } StringConstant;
 
 typedef struct FnConstant {
-  uint64_t fnId;
   bool hasName;
   Text name;
   uint16_t bindingSlotIndex;

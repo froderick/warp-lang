@@ -730,7 +730,6 @@ void formFnInitContents(FormFn *fn) {
   bindingTableInitContents(&fn->table);
   fn->hasName = false;
   textInitContents(&fn->name);
-  fn->id = 0;
   fn->args = NULL;
   fn->numArgs = 0;
   formsInitContents(&fn->forms);
@@ -927,7 +926,6 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
   formFnInitContents(fn);
   throws(tryFnParse(fnExpr, fn, &formElements, error));
 
-  fn->id = ctx->fnCount;
   ctx->fnCount = ctx->fnCount + 1;
 
   // create new binding stack, initialized with the fn args as the first bindings

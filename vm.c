@@ -77,7 +77,6 @@ void constantMetaFreeContents(ConstantMeta *c) {
 }
 
 void constantFnInitContents(FnConstant *fnConst) {
-  fnConst->fnId = 0;
   fnConst->hasName = 0;
   textInitContents(&fnConst->name);
   fnConst->bindingSlotIndex = 0;
