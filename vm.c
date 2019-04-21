@@ -2821,7 +2821,6 @@ RetVal tryExceptionPrintf(VMException *e, Error *error) {
   wchar_t *msg;
   throws(tryExceptionPrint(pool, e, &msg, error));
   printf("%ls\n", msg);
-  free(msg);
 
   ret = R_SUCCESS;
   goto done;
