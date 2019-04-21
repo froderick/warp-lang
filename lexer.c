@@ -16,7 +16,6 @@
  */
 
 typedef struct LexerState {
-  Pool_t pool;
   unsigned long position;
   unsigned long lineNumber;
   unsigned long colNumber;
@@ -84,10 +83,10 @@ RetVal tryTokenInit(Pool_t pool, TokenType type, wchar_t *text, uint64_t positio
     return ret;
 }
 
-RetVal tryTokenInitFromLexer(LexerState *s, TokenType type, Token **ptr, Error *error) {
+RetVal tryTokenInitFromLexer(Pool_t pool, LexerState *s, TokenType type, Token **ptr, Error *error) {
   uint64_t length = stringBufferLength(s->b);
   wchar_t *text = stringBufferText(s->b);
-  return tryTokenInit(s->pool, type, text, s->position, length, s->lineNumber, s->colNumber, ptr, error);
+  return tryTokenInit(pool, type, text, s->position, length, s->lineNumber, s->colNumber, ptr, error);
 }
 
 RetVal tryLexerStateMake(Pool_t pool, LexerState **ptr, Error *error) {
@@ -99,7 +98,6 @@ RetVal tryLexerStateMake(Pool_t pool, LexerState **ptr, Error *error) {
   throws(tryStringBufferMake(pool, &b, error));
   tryPalloc(pool, s, sizeof(LexerState), "LexerState");
 
-  s->pool = pool;
   s->position = 0;
   s->lineNumber = 1;
   s->colNumber = 1;
@@ -122,7 +120,7 @@ bool isNewline(wchar_t ch) {
   return ch == L'\n';
 }
 
-RetVal tryReadString(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
+RetVal tryReadString(Pool_t pool, InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
   RetVal ret;
 
   throws(tryStringBufferAppendChar(s->b, first, error));
@@ -154,7 +152,7 @@ RetVal tryReadString(InputStream_t source, LexerState *s, wchar_t first, Token *
   }
   while (!foundEnd);
 
-  throws(tryTokenInitFromLexer(s, T_STRING, token, error));
+  throws(tryTokenInitFromLexer(pool, s, T_STRING, token, error));
 
   return R_SUCCESS;
 
@@ -162,7 +160,7 @@ RetVal tryReadString(InputStream_t source, LexerState *s, wchar_t first, Token *
     return ret;
 }
 
-RetVal tryReadUnquote(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
+RetVal tryReadUnquote(Pool_t pool, InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
   RetVal ret;
 
   throws(tryStringBufferAppendChar(s->b, first, error));
@@ -174,11 +172,11 @@ RetVal tryReadUnquote(InputStream_t source, LexerState *s, wchar_t first, Token 
 
   if (ch != L'@') {
     throws(tryInputStreamUnreadChar(source, ch, error));
-    throws(tryTokenInitFromLexer(s, T_UNQUOTE, token, error));
+    throws(tryTokenInitFromLexer(pool, s, T_UNQUOTE, token, error));
   }
   else {
     throws(tryStringBufferAppendChar(s->b, ch, error));
-    throws(tryTokenInitFromLexer(s, T_SPLICING_UNQUOTE, token, error));
+    throws(tryTokenInitFromLexer(pool, s, T_SPLICING_UNQUOTE, token, error));
   }
 
   return R_SUCCESS;
@@ -187,7 +185,7 @@ RetVal tryReadUnquote(InputStream_t source, LexerState *s, wchar_t first, Token 
     return ret;
 }
 
-RetVal tryReadNumber(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
+RetVal tryReadNumber(Pool_t pool, InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
   RetVal ret;
 
   throws(tryStringBufferAppendChar(s->b, first, error));
@@ -217,7 +215,7 @@ RetVal tryReadNumber(InputStream_t source, LexerState *s, wchar_t first, Token *
 
   } while (matched);
 
-  throws(tryTokenInitFromLexer(s, T_NUMBER, token, error));
+  throws(tryTokenInitFromLexer(pool, s, T_NUMBER, token, error));
 
   return R_SUCCESS;
 
@@ -262,7 +260,7 @@ bool isSymbolContinue(wchar_t ch) {
          || ch == L'*';
 }
 
-RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
+RetVal tryReadSymbol(Pool_t pool, InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
   RetVal ret;
 
   throws(tryStringBufferAppendChar(s->b, first, error));
@@ -309,7 +307,7 @@ RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token *
     type = T_SYMBOL;
   }
 
-  throws(tryTokenInitFromLexer(s, type, token, error));
+  throws(tryTokenInitFromLexer(pool, s, type, token, error));
 
   return R_SUCCESS;
 
@@ -317,7 +315,7 @@ RetVal tryReadSymbol(InputStream_t source, LexerState *s, wchar_t first, Token *
     return ret;
 }
 
-RetVal tryReadKeyword(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
+RetVal tryReadKeyword(Pool_t pool, InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
   RetVal ret;
 
   throws(tryStringBufferAppendChar(s->b, first, error));
@@ -351,7 +349,7 @@ RetVal tryReadKeyword(InputStream_t source, LexerState *s, wchar_t first, Token 
     throwTokenizationError(error, s->position, "keyword token type cannot be empty");
   }
 
-  throws(tryTokenInitFromLexer(s, T_KEYWORD, token, error));
+  throws(tryTokenInitFromLexer(pool, s, T_KEYWORD, token, error));
 
   return R_SUCCESS;
 
@@ -359,7 +357,7 @@ RetVal tryReadKeyword(InputStream_t source, LexerState *s, wchar_t first, Token 
     return ret;
 }
 
-RetVal tryReadComment(InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
+RetVal tryReadComment(Pool_t pool, InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
   RetVal ret;
 
   throws(tryStringBufferAppendChar(s->b, first, error));
@@ -389,7 +387,7 @@ RetVal tryReadComment(InputStream_t source, LexerState *s, wchar_t first, Token 
 
   } while (matched);
 
-  throws(tryTokenInitFromLexer(s, T_COMMENT, token, error));
+  throws(tryTokenInitFromLexer(pool, s, T_COMMENT, token, error));
 
   return R_SUCCESS;
 
@@ -453,24 +451,24 @@ RetVal tryTokenRead(Pool_t pool, InputStream_t source, LexerState *s, Token **to
 
   // multi-character tokens
   else if (ch == L'~') {
-    throws(tryReadUnquote(source, s, ch, token, error));
+    throws(tryReadUnquote(pool, source, s, ch, token, error));
   }
   else if (iswdigit(ch)) {
-    throws(tryReadNumber(source, s, ch, token, error));
+    throws(tryReadNumber(pool, source, s, ch, token, error));
   }
   else if (isSymbolStart(ch)) {
-    throws(tryReadSymbol(source, s, ch, token, error));
+    throws(tryReadSymbol(pool, source, s, ch, token, error));
   }
   else if (ch == L':') {
-    throws(tryReadKeyword(source, s, ch, token, error));
+    throws(tryReadKeyword(pool, source, s, ch, token, error));
   }
   else if (ch == L'"') {
-    throws(tryReadString(source, s, ch, token, error));
+    throws(tryReadString(pool, source, s, ch, token, error));
   }
 
   // comments
   else if (ch == L';') {
-    throws(tryReadComment(source, s, ch, token, error));
+    throws(tryReadComment(pool, source, s, ch, token, error));
   }
 
     // invalid token
@@ -547,7 +545,7 @@ RetVal tryStreamMakeFile(Pool_t pool, char *filename, TokenStream **ptr, Error *
     return ret;
 }
 
-RetVal tryStreamNext(TokenStream *s, Token **token, Error *error) {
+RetVal tryStreamNext(Pool_t pool, TokenStream *s, Token **token, Error *error) {
 
   // clear this so folks can free it after this call without risk of a double-free
   *token = NULL;
@@ -558,17 +556,17 @@ RetVal tryStreamNext(TokenStream *s, Token **token, Error *error) {
     return R_SUCCESS;
   }
 
-  return tryTokenRead(s->lexer->pool, s->source, s->lexer, token, error);
+  return tryTokenRead(pool, s->source, s->lexer, token, error);
 }
 
-RetVal tryStreamPeek(TokenStream *s, Token **token, Error *error) {
+RetVal tryStreamPeek(Pool_t pool, TokenStream *s, Token **token, Error *error) {
 
   if (s->next != NULL) { // return the cached next token if we have one
     *token = s->next;
     return R_SUCCESS;
   }
 
-  int read = tryTokenRead(s->lexer->pool, s->source, s->lexer, token, error);
+  int read = tryTokenRead(pool, s->source, s->lexer, token, error);
 
   if (read != R_ERROR) {
     s->next = *token;

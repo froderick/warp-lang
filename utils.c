@@ -313,10 +313,10 @@ RetVal tryStringBufferAppendStr(StringBuffer *b, wchar_t *str, Error *error) {
     unsigned long oldSizeInBytes = stringBufferAllocatedBytes(b);
     unsigned long newSizeInBytes = (oldSizeInBytes + (sizeof(wchar_t) * len)) * 2;
 
-    b->data = realloc(b->data, newSizeInBytes);
-    if (b->data == NULL) {
-      throwMemoryError(error, "realloc StringBuffer array");
-    }
+    wchar_t *resized = NULL;
+    tryPalloc(b->pool, resized, newSizeInBytes, "StringBuffer array");
+    memcpy(resized, b->data, oldSizeInBytes);
+    b->data = resized;
 
     b->allocatedChars = b->allocatedChars * 2;
   }

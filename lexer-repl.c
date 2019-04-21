@@ -25,7 +25,7 @@ int main(void) {
 
   Token *t;
   while (1) {
-    int read = tryStreamNext(stream, &t, &e);
+    int read = tryStreamNext(pool, stream, &t, &e);
     if (read == R_EOF) {
       continue;
     }

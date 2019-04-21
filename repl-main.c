@@ -13,21 +13,23 @@ int main(void) {
   VM_t vm;
   InputStream_t source;
   TokenStream_t stream;
-  Pool_t pool = NULL;
+  Pool_t sessionPool = NULL;
 
   errorInitContents(&error);
 
-  throws(tryPoolCreate(&pool, ONE_MB, &error));
+  throws(tryPoolCreate(&sessionPool, ONE_MB, &error));
 
   throws(tryVMMake(&vm, &error));
   throws(tryLoad(vm, STD_LIB, &error));
 
-  throws(tryFileInputStreamMake(pool, stdin, &source, &error));
-  throws(tryStreamMake(pool, source, &stream, &error));
-
+  throws(tryFileInputStreamMake(sessionPool, stdin, &source, &error));
+  throws(tryStreamMake(sessionPool, source, &stream, &error));
 
   FileInfo fileInfo;
   fileInfoInitContents(&fileInfo);
+
+  Pool_t evalPool = NULL;
+  throws(tryPoolCreate(&evalPool, ONE_MB, &error));
 
   while (1) {
 
@@ -36,7 +38,7 @@ int main(void) {
     errorInitContents(&error);
     codeUnitInitContents(&unit);
 
-    ret = tryReplCompile(stream, fileInfo, vm, &unit, &error);
+    ret = tryReplCompile(evalPool, stream, fileInfo, vm, &unit, &error);
     if (ret == R_EOF) {
       break;
     }
@@ -49,7 +51,7 @@ int main(void) {
     printCodeUnit(&unit);
 
     VMEvalResult result;
-    ret = tryVMEval(vm, &unit, pool, &result, &error);
+    ret = tryVMEval(vm, &unit, evalPool, &result, &error);
 
     if (ret != R_SUCCESS) {
       printf("> encountered eval error\n\n");
@@ -58,7 +60,7 @@ int main(void) {
 
     if (result.type == RT_RESULT) {
       printf("> ");
-      throws(tryExprPrn(pool, &result.result, &error));
+      throws(tryExprPrn(sessionPool, &result.result, &error));
       printf("\n");
     }
     else if (result.type == RT_EXCEPTION) {
@@ -69,8 +71,10 @@ int main(void) {
       printf("> encountered unhandled eval result type\n\n");
     }
 
-    poolClear(pool);
+    poolClear(evalPool);
   }
+
+  poolClear(sessionPool);
 
   return R_SUCCESS;
 

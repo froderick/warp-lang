@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <inttypes.h>
+#include <string.h>
 
 #include "analyzer.h"
 #include "utils.h"
@@ -70,11 +71,9 @@ RetVal tryAddBinding(Pool_t pool, BindingTable *table, Binding binding, Error *e
   else if (table->usedSpace == table->allocatedSpace) {
     uint64_t newAllocatedLength = table->allocatedSpace * 2;
 
-    Binding *resized = realloc(table->bindings, newAllocatedLength * sizeof(Binding));
-    if (resized == NULL) {
-      ret = memoryError(error, "realloc Binding array");
-      goto failure;
-    }
+    Binding *resized = NULL;
+    tryPalloc(pool, resized, newAllocatedLength * sizeof(Binding), "Binding array");
+    memcpy(resized, table->bindings, table->usedSpace * sizeof(Binding));
 
     table->allocatedSpace = newAllocatedLength;
     table->bindings = resized;
@@ -101,14 +100,12 @@ RetVal tryPushBindingTable(Pool_t pool, BindingTables *tables, BindingTable *tab
   else if (tables->usedSpace == tables->allocatedSpace) {
     uint64_t newAllocatedLength = tables->allocatedSpace * 2;
 
-    BindingTable** resizedTables = realloc(tables->tables, newAllocatedLength * sizeof(BindingTable*));
-    if (resizedTables == NULL) {
-      ret = memoryError(error, "realloc BindingTable pointer array");
-      goto failure;
-    }
+    BindingTable **resized = NULL;
+    tryPalloc(pool, resized, newAllocatedLength * sizeof(BindingTable*), "BindingTable pointer array");
+    memcpy(resized, tables->tables, tables->usedSpace * sizeof(BindingTable*));
 
     tables->allocatedSpace = newAllocatedLength;
-    tables->tables = resizedTables;
+    tables->tables = resized;
   }
 
   uint64_t index = tables->usedSpace;
@@ -176,11 +173,9 @@ RetVal tryPushResolverBinding(Pool_t pool, ResolverStack *stack, ResolverBinding
   else if (stack->usedSpace == stack->allocatedSpace) {
     uint64_t newAllocatedLength = stack->allocatedSpace * 2;
 
-    ResolverBinding* resized = realloc(stack->bindings, newAllocatedLength * sizeof(ResolverBinding));
-    if (resized == NULL) {
-      ret = memoryError(error, "realloc ResolverBinding array");
-      goto failure;
-    }
+    ResolverBinding *resized = NULL;
+    tryPalloc(pool, resized, newAllocatedLength * sizeof(ResolverBinding), "BindingTable pointer array");
+    memcpy(resized, stack->bindings, stack->usedSpace * sizeof(ResolverBinding));
 
     stack->allocatedSpace = newAllocatedLength;
     stack->bindings = resized;

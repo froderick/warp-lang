@@ -11,7 +11,7 @@ typedef struct {
 void fileInfoInitContents(FileInfo *f);
 void fileInfoFreeContents(FileInfo *f);
 
-RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit *codeUnit, Error *error);
+RetVal tryReplCompile(Pool_t outputPool, TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit *codeUnit, Error *error);
 
 RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputText, bool useStdLib, Error *error);
 RetVal tryReplEval(Pool_t outputPool, wchar_t *inputText, wchar_t **outputText, Error *error);

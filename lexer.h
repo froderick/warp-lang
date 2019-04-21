@@ -40,8 +40,8 @@ typedef struct TokenStream *TokenStream_t;
 RetVal tryStreamMake(Pool_t pool, InputStream_t source, TokenStream_t *s, Error *error);
 
 // stream operations
-RetVal tryStreamNext(TokenStream_t s, Token **token, Error *error);
-RetVal tryStreamPeek(TokenStream_t s, Token **token, Error *error);
+RetVal tryStreamNext(Pool_t pool, TokenStream_t s, Token **token, Error *error);
+RetVal tryStreamPeek(Pool_t pool, TokenStream_t s, Token **token, Error *error);
 void streamDropPeeked(TokenStream_t s);
 
 #endif //WARP_LANG_LEXER_H

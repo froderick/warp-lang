@@ -44,7 +44,7 @@ RetVal tryStringRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error
   RetVal ret;
   Token *token;
 
-  throws(tryStreamNext(stream, &token, error));
+  throws(tryStreamNext(pool, stream, &token, error));
 
   if (token->type != T_STRING) {
     throwSyntaxError(error, token->source.position, "Token is not a type of T_STRING: %u", token->type);
@@ -92,7 +92,7 @@ RetVal tryNumberRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error
   RetVal ret;
   Token *token;
 
-  throws(tryStreamNext(stream, &token, error));
+  throws(tryStreamNext(pool, stream, &token, error));
 
   if (token->type != T_NUMBER) {
     throwSyntaxError(error, token->source.position, "Token is not a type of T_NUMBER: %u", token->type);
@@ -150,7 +150,7 @@ RetVal trySymbolRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error
   RetVal ret;
   Token *token;
 
-  throws(tryStreamNext(stream, &token, error));
+  throws(tryStreamNext(pool, stream, &token, error));
 
   if (token->type != T_SYMBOL) {
     throwSyntaxError(error, token->source.position, "Token is not a type of T_SYMBOL: %u", token->type);
@@ -195,7 +195,7 @@ RetVal tryKeywordRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *erro
   RetVal ret;
   Token *token;
 
-  throws(tryStreamNext(stream, &token, error));
+  throws(tryStreamNext(pool, stream, &token, error));
 
   if (token->type != T_KEYWORD) {
     throwSyntaxError(error, token->source.position, "Token is not a type of T_KEYWORD: %u", token->type);
@@ -238,7 +238,7 @@ RetVal tryBooleanRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *erro
   RetVal ret;
   Token *token;
 
-  throws(tryStreamNext(stream, &token, error));
+  throws(tryStreamNext(pool, stream, &token, error));
 
   if (token->type != T_TRUE && token->type != T_FALSE) {
     throwSyntaxError(error, token->source.position, "Token is not a type of T_TRUE or T_FALSE");
@@ -279,7 +279,7 @@ RetVal tryNilRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
   RetVal ret;
   Token *token;
 
-  throws(tryStreamNext(stream, &token, error));
+  throws(tryStreamNext(pool, stream, &token, error));
 
   if (token->type != T_NIL) {
     throwSyntaxError(error, token->source.position, "Token is not a type of T_NIL: %u", token->type);
@@ -345,7 +345,7 @@ RetVal tryListRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) 
 
   throws(tryListMake(pool, &expr, error));
 
-  throws(tryStreamNext(stream, &oParen, error));
+  throws(tryStreamNext(pool, stream, &oParen, error));
 
   if (oParen->type != T_OPAREN) {
     throwSyntaxError(error, oParen->source.position, "List must begin with ')': %u", oParen->type);
@@ -353,7 +353,7 @@ RetVal tryListRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) 
 
   while (true) {
 
-    ret = tryStreamPeek(stream, &cParen, error);
+    ret = tryStreamPeek(pool, stream, &cParen, error);
     if (ret != R_SUCCESS) {
       if (ret == R_EOF) { // eof too soon
         throwSyntaxError(error, oParen->source.position, "Encountered EOF, was expecting ')'");
@@ -424,7 +424,7 @@ RetVal tryQuoteRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error)
   Expr *subexpr;
   Expr *expr;
 
-  throws(tryStreamNext(stream, &token, error));
+  throws(tryStreamNext(pool, stream, &token, error));
 
   if (token->type != T_QUOTE) {
     throwSyntaxError(error, token->source.position, "Quote must begin with ': %u", token->type);
@@ -459,7 +459,7 @@ RetVal tryWrapperRead(Pool_t pool, TokenStream_t stream, wchar_t *symbolName, Ex
   Expr *subexpr;
   Expr *expr;
 
-  throws(tryStreamNext(stream, &token, error));
+  throws(tryStreamNext(pool, stream, &token, error));
 
 //  if (token->type != tokenType) {
 //    throwSyntaxError(error, token->source.position, "%ls must begin with %lc: %u", symbolName, startsWith, token->type);
@@ -496,17 +496,17 @@ RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) 
 
   Token *peek;
 
-  throws(tryStreamPeek(stream, &peek, error));
+  throws(tryStreamPeek(pool, stream, &peek, error));
 
   // discard comments from the token stream for now
   // maybe someday we'll use them for autodoc purposes
   while (peek->type == T_COMMENT) {
 
     Token *discard;
-    throws(tryStreamNext(stream, &discard, error)); // discard the thing we peeked
+    throws(tryStreamNext(pool, stream, &discard, error)); // discard the thing we peeked
     peek = NULL;
 
-    throws(tryStreamPeek(stream, &peek, error));
+    throws(tryStreamPeek(pool, stream, &peek, error));
   }
 
   switch (peek->type) {

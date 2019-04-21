@@ -10,18 +10,15 @@ void fileInfoInitContents(FileInfo *f) {
 
 #define ONE_MB (1024 * 1000)
 
-RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit *codeUnit, Error *error) {
+RetVal tryReplCompile(Pool_t outputPool, TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit *codeUnit, Error *error) {
 
   RetVal ret;
 
-  Pool_t pool = NULL;
   Expr *expr = NULL;
   FormRoot *form = NULL;
   Expander_t expander = NULL;
 
-  throws(tryPoolCreate(&pool, ONE_MB, error));
-
-  throws(tryMakeExpander(pool, &expander, vm, error));
+  throws(tryMakeExpander(outputPool, &expander, vm, error));
 
   AnalyzeOptions options;
   analyzeOptionsInitContents(&options);
@@ -32,9 +29,9 @@ RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit
     options.fileName = fileInfo.fileName;
   }
 
-  throws(tryExprRead(pool, stream, &expr, error));
-  throws(tryFormAnalyzeOptions(options, expr, pool, &form, error));
-  throws(tryCompileTopLevel(pool, form, codeUnit, error));
+  throws(tryExprRead(outputPool, stream, &expr, error));
+  throws(tryFormAnalyzeOptions(options, expr, outputPool, &form, error));
+  throws(tryCompileTopLevel(outputPool, form, codeUnit, error));
 
   ret = R_SUCCESS;
   goto finally;
@@ -43,7 +40,6 @@ RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit
     goto finally;
 
   finally:
-    poolFree(pool);
     return ret;
 }
 
@@ -74,7 +70,7 @@ RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputTe
   FileInfo fileInfo;
   fileInfoInitContents(&fileInfo);
 
-  throws(tryReplCompile(stream, fileInfo, vm, &unit, error));
+  throws(tryReplCompile(pool, stream, fileInfo, vm, &unit, error));
   printCodeUnit(&unit);
 
   throws(tryVMEval(vm, &unit, pool, &result, error));
@@ -145,7 +141,7 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
 
     codeUnitInitContents(&unit);
 
-    ret = tryReplCompile(stream, fileInfo, vm, &unit, error);
+    ret = tryReplCompile(pool, stream, fileInfo, vm, &unit, error);
     if (ret == R_EOF) {
       break;
     }
