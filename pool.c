@@ -4,6 +4,15 @@
 #include "pool.h"
 #include "errors.h"
 
+/*
+ * This is a really basic implementation of memory pooling. Mainly, I did this
+ * to cut 10% of the code from this project, mainly just free() code. I don't know
+ * if this is more efficient than malloc, probably not. But it is a lot less typing
+ * to accumulate memory this way, especially in the compilation phase of things.
+ *
+ * TODO: actually go look at a legit memory pooling implementation to see if this is any good
+ */
+
 typedef struct Segment Segment;
 
 typedef struct Segment {
