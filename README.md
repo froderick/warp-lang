@@ -112,3 +112,7 @@ out of the code.
         apt-get install cmake clang check pkg-config gdbserver
         docker run -it --mount src="$(pwd)/../",target=/warp,type=bind ubuntu
         https://github.com/shuhaoliu/docker-clion-dev
+
+
+
+https://matt.sh/howto-c
