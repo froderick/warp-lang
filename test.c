@@ -11,6 +11,8 @@
 #include "vm.h"
 #include "repl.h"
 
+#define ONE_MB (1024 * 1000)
+
 void assertToken(Token *t,
                  TokenType type, wchar_t *text, unsigned long position, unsigned long length) {
 
@@ -27,58 +29,51 @@ START_TEST(basic) {
   Error e;
   errorInitContents(&e);
 
+  Pool_t pool = NULL;
+  ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
+
   InputStream_t source;
   ck_assert_int_eq(tryStringInputStreamMake(text, wcslen(text), &source, &e), R_SUCCESS);
 
   TokenStream_t stream;
-  ck_assert_int_eq(tryStreamMake(source, &stream, &e), R_SUCCESS);
+  ck_assert_int_eq(tryStreamMake(pool, source, &stream, &e), R_SUCCESS);
 
   Token *t;
 
   ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_SUCCESS);
   assertToken(t, T_OPAREN,  L"(",      0, 1);
-  free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_SUCCESS);
   assertToken(t, T_SYMBOL,  L"one",    1, 3);
-  free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_SUCCESS);
   assertToken(t, T_KEYWORD, L":two",    5, 4);
-  free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_SUCCESS);
   assertToken(t, T_NUMBER,  L"345",   10, 3);
-  free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_SUCCESS);
   assertToken(t, T_QUOTE,   L"'",     14, 1);
-  free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_SUCCESS);
   assertToken(t, T_STRING,  L"\"six\"",   15, 5);
-  free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_SUCCESS);
   assertToken(t, T_CPAREN,  L")",     20, 1);
-  free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_SUCCESS);
   assertToken(t, T_TRUE,    L"true",  22, 4);
-  free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_SUCCESS);
   assertToken(t, T_FALSE,   L"false", 27, 5);
-  free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_SUCCESS);
   assertToken(t, T_NIL,     L"nil",   33, 3);
-  free(t);
 
   ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_EOF);
   ck_assert_msg(t == NULL, "when no token is allocated, this pointer should be set to null");
 
-  ck_assert_int_eq(tryStreamFree(stream, &e), R_SUCCESS);
+  ck_assert_int_eq(tryInputStreamFree(source, &e), R_SUCCESS);
 }
 END_TEST
 
@@ -89,22 +84,26 @@ START_TEST(eof_mid_number_token) {
     Error e;
     errorInitContents(&e);
 
+    Pool_t pool = NULL;
+    ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
+
     InputStream_t source;
     ck_assert_int_eq(tryStringInputStreamMake(text, wcslen(text), &source, &e), R_SUCCESS);
 
     TokenStream_t stream;
-    ck_assert_int_eq(tryStreamMake(source, &stream, &e), R_SUCCESS);
+    ck_assert_int_eq(tryStreamMake(pool, source, &stream, &e), R_SUCCESS);
 
     Token *t;
     ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_SUCCESS);
     assertToken(t, T_NUMBER, L"12345", 0, 5);
-    tokenFree(t);
 
     ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_EOF);
     ck_assert_msg(t == NULL, "no tokens remain on the stream");
     free(t);
 
-    ck_assert_int_eq(tryStreamFree(stream, &e), R_SUCCESS);
+    ck_assert_int_eq(tryInputStreamFree(source, &e), R_SUCCESS);
+
+    poolFree(pool);
   }
 END_TEST
 
@@ -115,11 +114,14 @@ START_TEST(errors) {
     Error e;
     errorInitContents(&e);
 
+    Pool_t pool = NULL;
+    ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
+
     InputStream_t source;
     ck_assert_int_eq(tryStringInputStreamMake(text, wcslen(text), &source, &e), R_SUCCESS);
 
     TokenStream_t stream;
-    ck_assert_int_eq(tryStreamMake(source, &stream, &e), R_SUCCESS);
+    ck_assert_int_eq(tryStreamMake(pool, source, &stream, &e), R_SUCCESS);
 
     Token *t;
 
@@ -131,11 +133,11 @@ START_TEST(errors) {
     wchar_t *msg = L"failed to tokenize stream -> keyword token type cannot be empty\n";
     ck_assert_msg(wcscmp(e.message, msg) == 0, "text must match");
 
-    ck_assert_int_eq(tryStreamFree(stream, &e), R_SUCCESS);
+    ck_assert_int_eq(tryInputStreamFree(source, &e), R_SUCCESS);
+
+    poolFree(pool);
   }
 END_TEST
-
-#define ONE_MB (1024 * 1000)
 
 START_TEST(parser) {
 
@@ -151,7 +153,7 @@ START_TEST(parser) {
     ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
 
     ck_assert_int_eq(tryStringInputStreamMake(input, wcslen(input), &source, &e), R_SUCCESS);
-    ck_assert_int_eq(tryStreamMake(source, &stream, &e), R_SUCCESS);
+    ck_assert_int_eq(tryStreamMake(pool, source, &stream, &e), R_SUCCESS);
 
     // string
     ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
@@ -229,11 +231,11 @@ RetVal tryParse(Pool_t pool, wchar_t *input, Expr **ptr, Error *error) {
   Expr *expr;
 
   throws(tryStringInputStreamMake(input, wcslen(input), &source, error));
-  throws(tryStreamMake(source, &stream, error));
+  throws(tryStreamMake(pool, source, &stream, error));
 
   throws(tryExprRead(pool, stream, &expr, error));
 
-  throws(tryStreamFree(stream, error));
+  throws(tryInputStreamFree(source, error));
 
   *ptr = expr;
   return R_SUCCESS;
@@ -247,9 +249,9 @@ START_TEST(exprPrn)
 
     Error e;
     Expr *expr;
-    Pool_t pool = NULL;
-
     errorInitContents(&e);
+
+    Pool_t pool = NULL;
     ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
 
     // constant

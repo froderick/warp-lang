@@ -23,7 +23,7 @@ int main(void) {
   throws(tryLoad(vm, STD_LIB, &error));
 
   throws(tryFileInputStreamMake(stdin, &source, &error));
-  throws(tryStreamMake(source, &stream, &error));
+  throws(tryStreamMake(pool, source, &stream, &error));
 
 
   FileInfo fileInfo;

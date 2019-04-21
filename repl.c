@@ -67,10 +67,10 @@ RetVal tryReplEvalConf(wchar_t *inputText, wchar_t **outputText, bool useStdLib,
 
   codeUnitInitContents(&unit);
 
-  throws(tryStringInputStreamMake(inputText, wcslen(inputText), &source, error));
-  throws(tryStreamMake(source, &stream, error));
-  throws(tryVMMake(&vm, error));
   throws(tryPoolCreate(&pool, ONE_MB, error));
+  throws(tryStringInputStreamMake(inputText, wcslen(inputText), &source, error));
+  throws(tryStreamMake(pool, source, &stream, error));
+  throws(tryVMMake(&vm, error));
 
   if (useStdLib) {
     throws(tryLoad(vm, STD_LIB, error));
@@ -98,7 +98,7 @@ RetVal tryReplEvalConf(wchar_t *inputText, wchar_t **outputText, bool useStdLib,
   goto done;
 
   done:
-    tryStreamFree(stream, error); // frees input stream also
+    tryInputStreamFree(source, error);
     vmFreeContents(vm);
     codeUnitFreeContents(&unit);
     poolFree(pool);
@@ -128,12 +128,15 @@ RetVal tryTextMakeFromChar(char *filename, Text *to, Error *error) {
 RetVal tryLoad(VM_t vm, char *filename, Error *error) {
   RetVal ret;
 
+  Pool_t pool = NULL;
+  throws(tryPoolCreate(&pool, ONE_MB, error));
+
   InputStream_t source;
   TokenStream_t stream;
   FileInfo fileInfo;
 
   throws(tryFileInputStreamMakeFilename(filename, &source, error));
-  throws(tryStreamMake(source, &stream, error));
+  throws(tryStreamMake(pool, source, &stream, error));
 
   fileInfoInitContents(&fileInfo);
   char* baseFileName = basename(filename);
@@ -142,8 +145,6 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
 
   CodeUnit unit;
 
-  Pool_t pool = NULL;
-  throws(tryPoolCreate(&pool, ONE_MB, error));
 
   VMEvalResult result;
   while (true) {

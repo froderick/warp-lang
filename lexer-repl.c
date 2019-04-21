@@ -2,9 +2,14 @@
 #include <inttypes.h>
 #include "lexer.h"
 
+#define ONE_MB (1024 * 1000)
+
 int main(void) {
 
   Error e;
+
+  Pool_t pool = NULL;
+  tryPoolCreate(&pool, ONE_MB, &e);
 
   InputStream_t source;
   int error = tryFileInputStreamMake(stdin, &source, &e);
@@ -13,7 +18,7 @@ int main(void) {
   }
 
   TokenStream_t stream;
-  error = tryStreamMake(source, &stream, &e);
+  error = tryStreamMake(pool, source, &stream, &e);
   if (error) {
     printf("whoops 2");
   }

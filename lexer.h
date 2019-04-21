@@ -8,6 +8,7 @@
 #include "errors.h"
 #include "utils.h"
 #include "source.h"
+#include "pool.h"
 
 typedef enum TokenType {
   T_NONE,
@@ -34,12 +35,9 @@ typedef struct Token {
   wchar_t text[];
 } Token;
 
-void tokenFree(Token *t);
-
 typedef struct TokenStream *TokenStream_t;
 
-RetVal tryStreamMake(InputStream_t source, TokenStream_t *s, Error *error);
-RetVal tryStreamFree(TokenStream_t s, Error *error);
+RetVal tryStreamMake(Pool_t pool, InputStream_t source, TokenStream_t *s, Error *error);
 
 // stream operations
 RetVal tryStreamNext(TokenStream_t s, Token **token, Error *error);

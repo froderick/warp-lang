@@ -9,12 +9,14 @@
 
 #include "utils.h"
 #include "lexer.h"
+#include "pool.h"
 
 /*
  * Token Model and Lexer
  */
 
 typedef struct LexerState {
+  Pool_t pool;
   unsigned long position;
   unsigned long lineNumber;
   unsigned long colNumber;
@@ -56,13 +58,13 @@ const char* tokenName(TokenType type) {
   }
 }
 
-RetVal tryTokenInit(TokenType type, wchar_t *text, uint64_t position, uint64_t length,
+RetVal tryTokenInit(Pool_t pool, TokenType type, wchar_t *text, uint64_t position, uint64_t length,
                     uint64_t lineNumber, uint64_t colNumber, Token **ptr, Error *error) {
   RetVal ret;
 
   Token *t;
 
-  tryMalloc(t, sizeof(Token) + (sizeof(wchar_t) * (length + 1)), "Token");
+  tryPalloc(pool, t, sizeof(Token) + (sizeof(wchar_t) * (length + 1)), "Token");
 
   t->type = type;
   t->typeName = tokenName(type);
@@ -85,22 +87,19 @@ RetVal tryTokenInit(TokenType type, wchar_t *text, uint64_t position, uint64_t l
 RetVal tryTokenInitFromLexer(LexerState *s, TokenType type, Token **ptr, Error *error) {
   uint64_t length = stringBufferLength(s->b);
   wchar_t *text = stringBufferText(s->b);
-  return tryTokenInit(type, text, s->position, length, s->lineNumber, s->colNumber, ptr, error);
+  return tryTokenInit(s->pool, type, text, s->position, length, s->lineNumber, s->colNumber, ptr, error);
 }
 
-void tokenFree(Token *t) {
-  free(t);
-}
-
-RetVal tryLexerStateMake(LexerState **ptr, Error *error) {
+RetVal tryLexerStateMake(Pool_t pool, LexerState **ptr, Error *error) {
   RetVal ret;
 
   StringBuffer_t b = NULL;
   LexerState *s = NULL;
 
   throws(tryStringBufferMake(&b, error));
-  tryMalloc(s, sizeof(LexerState), "LexerState");
+  tryPalloc(pool, s, sizeof(LexerState), "LexerState");
 
+  s->pool = pool;
   s->position = 0;
   s->lineNumber = 1;
   s->colNumber = 1;
@@ -110,17 +109,7 @@ RetVal tryLexerStateMake(LexerState **ptr, Error *error) {
   return R_SUCCESS;
 
   failure:
-    if (b != NULL) {
-      stringBufferFree(b);
-    }
     return ret;
-}
-
-void lexerStateFree(LexerState *s) {
-  if (s != NULL) {
-    stringBufferFree(s->b);
-  }
-  free(s);
 }
 
 bool isWhitespace(wchar_t ch) {
@@ -408,7 +397,7 @@ RetVal tryReadComment(InputStream_t source, LexerState *s, wchar_t first, Token 
     return ret;
 }
 
-RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *error) {
+RetVal tryTokenRead(Pool_t pool, InputStream_t source, LexerState *s, Token **token, Error *error) {
   RetVal ret;
 
   stringBufferClear(s->b);
@@ -434,10 +423,10 @@ RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *e
 
   // single-character tokens, do not require buffering
   if (ch == L'(') {
-    throws(tryTokenInit(T_OPAREN, L"(", s->position, 1, s->lineNumber, s->colNumber, token, error));
+    throws(tryTokenInit(pool, T_OPAREN, L"(", s->position, 1, s->lineNumber, s->colNumber, token, error));
   }
   else if (ch == L')') {
-    throws(tryTokenInit(T_CPAREN, L")", s->position, 1, s->lineNumber, s->colNumber, token, error));
+    throws(tryTokenInit(pool, T_CPAREN, L")", s->position, 1, s->lineNumber, s->colNumber, token, error));
   }
 //  else if (ch == L'[') {
 //    ret = tryTokenInit(T_OVEC, L"[", s->position, 1, token, error);
@@ -452,14 +441,14 @@ RetVal tryTokenRead(InputStream_t source, LexerState *s, Token **token, Error *e
 //    ret = tryTokenInit(T_CBRACKET, L"}", s->position, 1, token, error);
 //  }
   else if (ch == L'\'') {
-    throws(tryTokenInit(T_QUOTE, L"'", s->position, 1, s->lineNumber, s->colNumber, token, error));
+    throws(tryTokenInit(pool, T_QUOTE, L"'", s->position, 1, s->lineNumber, s->colNumber, token, error));
   }
   else if (ch == L'`') {
-    throws(tryTokenInit(T_SYNTAX_QUOTE, L"`", s->position, 1, s->lineNumber, s->colNumber, token, error));
+    throws(tryTokenInit(pool, T_SYNTAX_QUOTE, L"`", s->position, 1, s->lineNumber, s->colNumber, token, error));
   }
 
   else if (ch == L'&') {
-    throws(tryTokenInit(T_SYMBOL, L"&", s->position, 1, s->lineNumber, s->colNumber, token, error));
+    throws(tryTokenInit(pool, T_SYMBOL, L"&", s->position, 1, s->lineNumber, s->colNumber, token, error));
   }
 
   // multi-character tokens
@@ -513,14 +502,14 @@ typedef struct TokenStream {
   Token* next;
 } TokenStream;
 
-RetVal tryStreamMake(InputStream_t source, TokenStream **ptr, Error *error) {
+RetVal tryStreamMake(Pool_t pool, InputStream_t source, TokenStream **ptr, Error *error) {
   RetVal ret;
 
   LexerState *l = NULL;
   TokenStream *s = NULL;
 
-  throws(tryLexerStateMake(&l, error));
-  tryMalloc(s, sizeof(TokenStream), "TokenStream");
+  throws(tryLexerStateMake(pool, &l, error));
+  tryPalloc(pool, s, sizeof(TokenStream), "TokenStream");
 
   s->source = source;
   s->lexer = l;
@@ -530,13 +519,10 @@ RetVal tryStreamMake(InputStream_t source, TokenStream **ptr, Error *error) {
   return R_SUCCESS;
 
   failure:
-    if (l != NULL) {
-      lexerStateFree(l);
-    }
     return ret;
 }
 
-RetVal tryStreamMakeFile(char *filename, TokenStream **ptr, Error *error) {
+RetVal tryStreamMakeFile(Pool_t pool, char *filename, TokenStream **ptr, Error *error) {
   RetVal ret;
 
   FILE *file = NULL;
@@ -547,7 +533,7 @@ RetVal tryStreamMakeFile(char *filename, TokenStream **ptr, Error *error) {
     throwIOError(error, "making stream from file");
   }
 
-  throws(tryStreamMake((void*)file, &s, error));
+  throws(tryStreamMake(pool, (void*)file, &s, error));
 
   *ptr = s;
   return R_SUCCESS;
@@ -572,7 +558,7 @@ RetVal tryStreamNext(TokenStream *s, Token **token, Error *error) {
     return R_SUCCESS;
   }
 
-  return tryTokenRead(s->source, s->lexer, token, error);
+  return tryTokenRead(s->lexer->pool, s->source, s->lexer, token, error);
 }
 
 RetVal tryStreamPeek(TokenStream *s, Token **token, Error *error) {
@@ -582,7 +568,7 @@ RetVal tryStreamPeek(TokenStream *s, Token **token, Error *error) {
     return R_SUCCESS;
   }
 
-  int read = tryTokenRead(s->source, s->lexer, token, error);
+  int read = tryTokenRead(s->lexer->pool, s->source, s->lexer, token, error);
 
   if (read != R_ERROR) {
     s->next = *token;
@@ -595,18 +581,3 @@ void streamDropPeeked(TokenStream *s) {
   s->next = NULL;
 }
 
-// this frees the source as well
-RetVal tryStreamFree(TokenStream *s, Error *error) {
-
-  if (s == NULL) {
-    return R_SUCCESS;
-  }
-
-  int closeError = tryInputStreamFree(s->source, error);
-
-  lexerStateFree(s->lexer);
-  tokenFree(s->next);
-  free(s);
-
-  return closeError;
-}
