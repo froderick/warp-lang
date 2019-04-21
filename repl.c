@@ -1,4 +1,4 @@
-  #include <string.h>
+#include <string.h>
 #include <libgen.h>
 #include "repl.h"
 #include "compiler.h"
@@ -6,11 +6,6 @@
 void fileInfoInitContents(FileInfo *f) {
   f->hasFileName = false;
   textInitContents(&f->fileName);
-}
-
-void fileInfoFreeContents(FileInfo *f) {
-  f->hasFileName = false;
-  textFreeContents(&f->fileName);
 }
 
 #define ONE_MB (1024 * 1000)
@@ -39,7 +34,7 @@ RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit
 
   throws(tryExprRead(pool, stream, &expr, error));
   throws(tryFormAnalyzeOptions(options, expr, pool, &form, error));
-  throws(tryCompileTopLevel(form, codeUnit, error));
+  throws(tryCompileTopLevel(pool, form, codeUnit, error));
 
   ret = R_SUCCESS;
   goto finally;
@@ -52,7 +47,7 @@ RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit
     return ret;
 }
 
-RetVal tryReplEvalConf(wchar_t *inputText, wchar_t **outputText, bool useStdLib, Error *error) {
+RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputText, bool useStdLib, Error *error) {
 
   RetVal ret;
 
@@ -68,7 +63,7 @@ RetVal tryReplEvalConf(wchar_t *inputText, wchar_t **outputText, bool useStdLib,
   codeUnitInitContents(&unit);
 
   throws(tryPoolCreate(&pool, ONE_MB, error));
-  throws(tryStringInputStreamMake(inputText, wcslen(inputText), &source, error));
+  throws(tryStringInputStreamMake(pool, inputText, wcslen(inputText), &source, error));
   throws(tryStreamMake(pool, source, &stream, error));
   throws(tryVMMake(&vm, error));
 
@@ -85,7 +80,7 @@ RetVal tryReplEvalConf(wchar_t *inputText, wchar_t **outputText, bool useStdLib,
   throws(tryVMEval(vm, &unit, pool, &result, error));
 
   if (result.type == RT_RESULT) {
-    throws(tryExprPrnStr(&result.result, outputText, error));
+    throws(tryExprPrnStr(outputPool, &result.result, outputText, error));
   }
   else {
     throws(tryExceptionPrintf(&result.exception, error));
@@ -100,13 +95,12 @@ RetVal tryReplEvalConf(wchar_t *inputText, wchar_t **outputText, bool useStdLib,
   done:
     tryInputStreamFree(source, error);
     vmFreeContents(vm);
-    codeUnitFreeContents(&unit);
     poolFree(pool);
     return ret;
 }
 
-RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error) {
-  return tryReplEvalConf(inputText, outputText, true, error);
+RetVal tryReplEval(Pool_t outputPool, wchar_t *inputText, wchar_t **outputText, Error *error) {
+  return tryReplEvalConf(outputPool, inputText, outputText, true, error);
 }
 
 RetVal tryTextMakeFromChar(char *filename, Text *to, Error *error) {
@@ -135,7 +129,7 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
   TokenStream_t stream;
   FileInfo fileInfo;
 
-  throws(tryFileInputStreamMakeFilename(filename, &source, error));
+  throws(tryFileInputStreamMakeFilename(pool, filename, &source, error));
   throws(tryStreamMake(pool, source, &stream, error));
 
   fileInfoInitContents(&fileInfo);
@@ -163,8 +157,6 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
     //printCodeUnit(&unit);
 
     throws(tryVMEval(vm, &unit, pool, &result, error));
-
-    codeUnitFreeContents(&unit);
   }
 
   ret = R_SUCCESS;
@@ -174,9 +166,7 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
     goto done;
 
   done:
-    codeUnitFreeContents(&unit);
     poolFree(pool);
-    fileInfoFreeContents(&fileInfo);
     return ret;
 }
 

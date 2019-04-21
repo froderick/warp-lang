@@ -96,7 +96,7 @@ RetVal tryLexerStateMake(Pool_t pool, LexerState **ptr, Error *error) {
   StringBuffer_t b = NULL;
   LexerState *s = NULL;
 
-  throws(tryStringBufferMake(&b, error));
+  throws(tryStringBufferMake(pool, &b, error));
   tryPalloc(pool, s, sizeof(LexerState), "LexerState");
 
   s->pool = pool;

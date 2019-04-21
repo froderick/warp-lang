@@ -79,8 +79,8 @@ RetVal tryExprDeepCopy(Pool_t pool, Expr *from, Expr **ptr, Error *error);
 
 RetVal tryExprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable, Error *error);
 RetVal tryExprPrnBuf(Expr *expr, StringBuffer_t b, Error *error);
-RetVal tryExprPrnStr(Expr *expr, wchar_t **ptr, Error *error);
-RetVal tryExprPrn(Expr* expr, Error *error);
+RetVal tryExprPrnStr(Pool_t pool, Expr *expr, wchar_t **ptr, Error *error);
+RetVal tryExprPrn(Pool_t pool, Expr* expr, Error *error);
 
 void listInitContents(ExprList *list);
 RetVal tryListAppend(Pool_t pool, ExprList *list, Expr *expr, Error *error);

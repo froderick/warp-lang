@@ -25,7 +25,7 @@ RetVal tryStringMake(Pool_t pool, wchar_t *input, uint64_t length, Expr **ptr, E
   Expr *expr;
   tryPalloc(pool, expr, sizeof(Expr), "Expr");
 
-  throws(tryCopyText(input, &text, length, error));
+  throws(tryCopyText(pool, input, &text, length, error));
 
   expr->type = N_STRING;
   expr->string.length = length;
@@ -131,7 +131,7 @@ RetVal trySymbolMake(Pool_t pool, wchar_t *name, uint64_t len, Expr **ptr, Error
   Expr *expr;
   tryPalloc(pool, expr, sizeof(Expr), "Expr");
 
-  throws(tryCopyText(name, &value, len, error));
+  throws(tryCopyText(pool, name, &value, len, error));
 
   expr->type = N_SYMBOL;
   expr->symbol.value = value;
@@ -173,7 +173,7 @@ RetVal tryKeywordMake(Pool_t pool, wchar_t *name, uint64_t len, Expr **ptr, Erro
   RetVal ret;
   wchar_t *text;
 
-  throws(tryCopyText(name, &text, len, error));
+  throws(tryCopyText(pool, name, &text, len, error));
 
   Expr *expr;
   tryPalloc(pool, expr, sizeof(Expr), "Expr");
@@ -187,9 +187,6 @@ RetVal tryKeywordMake(Pool_t pool, wchar_t *name, uint64_t len, Expr **ptr, Erro
   return R_SUCCESS;
 
   failure:
-    if (text != NULL) {
-      free(text);
-    }
     return ret;
 }
 
@@ -699,17 +696,17 @@ RetVal tryExprPrnBuf(Expr *expr, StringBuffer_t b, Error *error) {
   return tryExprPrnBufConf(expr, b, true, error);
 }
 
-RetVal tryExprPrnStr(Expr *expr, wchar_t **ptr, Error *error) {
+RetVal tryExprPrnStr(Pool_t pool, Expr *expr, wchar_t **ptr, Error *error) {
   RetVal ret;
 
   // clean up on exit always
   StringBuffer_t b = NULL;
 
-  throws(tryStringBufferMake(&b, error));
+  throws(tryStringBufferMake(pool, &b, error));
   throws(tryExprPrnBuf(expr, b, error));
 
   wchar_t *output;
-  throws(tryCopyText(stringBufferText(b), &output, stringBufferLength(b), error));
+  throws(tryCopyText(pool, stringBufferText(b), &output, stringBufferLength(b), error));
 
   *ptr = output;
   return R_SUCCESS;
@@ -718,13 +715,12 @@ RetVal tryExprPrnStr(Expr *expr, wchar_t **ptr, Error *error) {
   return ret;
 }
 
-RetVal tryExprPrn(Expr *expr, Error *error) {
+RetVal tryExprPrn(Pool_t pool, Expr *expr, Error *error) {
   RetVal ret;
 
   wchar_t *str = NULL;
-  throws(tryExprPrnStr(expr, &str, error));
+  throws(tryExprPrnStr(pool, expr, &str, error));
   printf("%ls", str);
-  free(str);
 
   return R_SUCCESS;
 

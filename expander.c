@@ -66,7 +66,7 @@ RetVal tryIsMacro(Expander *expander, Text sym, bool *isMacro, Error *error) {
   CodeUnit codeUnit;
   VMEvalResult output;
 
-  throws(tryCompileTopLevel(&root, &codeUnit, error));
+  throws(tryCompileTopLevel(expander->pool, &root, &codeUnit, error));
   throws(tryVMEval(expander->vm, &codeUnit, expander->pool, &output, error));
 
   if (output.type == RT_RESULT) {
@@ -127,7 +127,7 @@ RetVal tryExpand(Expander *expander, Text sym, Expr *input, VMEvalResult *output
 
   CodeUnit codeUnit;
 
-  throws(tryCompileTopLevel(&root, &codeUnit, error));
+  throws(tryCompileTopLevel(expander->pool, &root, &codeUnit, error));
   throws(tryVMEval(expander->vm, &codeUnit, expander->pool, output, error));
 
   return R_SUCCESS;

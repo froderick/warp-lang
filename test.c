@@ -11,6 +11,7 @@
 #include "vm.h"
 #include "repl.h"
 
+#define ONE_KB (1024)
 #define ONE_MB (1024 * 1000)
 
 void assertToken(Token *t,
@@ -33,7 +34,7 @@ START_TEST(basic) {
   ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
 
   InputStream_t source;
-  ck_assert_int_eq(tryStringInputStreamMake(text, wcslen(text), &source, &e), R_SUCCESS);
+  ck_assert_int_eq(tryStringInputStreamMake(pool, text, wcslen(text), &source, &e), R_SUCCESS);
 
   TokenStream_t stream;
   ck_assert_int_eq(tryStreamMake(pool, source, &stream, &e), R_SUCCESS);
@@ -88,7 +89,7 @@ START_TEST(eof_mid_number_token) {
     ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
 
     InputStream_t source;
-    ck_assert_int_eq(tryStringInputStreamMake(text, wcslen(text), &source, &e), R_SUCCESS);
+    ck_assert_int_eq(tryStringInputStreamMake(pool, text, wcslen(text), &source, &e), R_SUCCESS);
 
     TokenStream_t stream;
     ck_assert_int_eq(tryStreamMake(pool, source, &stream, &e), R_SUCCESS);
@@ -99,7 +100,6 @@ START_TEST(eof_mid_number_token) {
 
     ck_assert_int_eq(tryStreamNext(stream, &t, &e), R_EOF);
     ck_assert_msg(t == NULL, "no tokens remain on the stream");
-    free(t);
 
     ck_assert_int_eq(tryInputStreamFree(source, &e), R_SUCCESS);
 
@@ -118,7 +118,7 @@ START_TEST(errors) {
     ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
 
     InputStream_t source;
-    ck_assert_int_eq(tryStringInputStreamMake(text, wcslen(text), &source, &e), R_SUCCESS);
+    ck_assert_int_eq(tryStringInputStreamMake(pool, text, wcslen(text), &source, &e), R_SUCCESS);
 
     TokenStream_t stream;
     ck_assert_int_eq(tryStreamMake(pool, source, &stream, &e), R_SUCCESS);
@@ -152,7 +152,7 @@ START_TEST(parser) {
 
     ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
 
-    ck_assert_int_eq(tryStringInputStreamMake(input, wcslen(input), &source, &e), R_SUCCESS);
+    ck_assert_int_eq(tryStringInputStreamMake(pool, input, wcslen(input), &source, &e), R_SUCCESS);
     ck_assert_int_eq(tryStreamMake(pool, source, &stream, &e), R_SUCCESS);
 
     // string
@@ -230,7 +230,7 @@ RetVal tryParse(Pool_t pool, wchar_t *input, Expr **ptr, Error *error) {
   TokenStream_t stream;
   Expr *expr;
 
-  throws(tryStringInputStreamMake(input, wcslen(input), &source, error));
+  throws(tryStringInputStreamMake(pool, input, wcslen(input), &source, error));
   throws(tryStreamMake(pool, source, &stream, error));
 
   throws(tryExprRead(pool, stream, &expr, error));
@@ -256,7 +256,7 @@ START_TEST(exprPrn)
 
     // constant
     ck_assert_int_eq(tryParse(pool, L"(himom () '(one :two 102 nil true false) \"str\")", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryExprPrn(expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryExprPrn(pool, expr, &e), R_SUCCESS);
     printf("\n");
 
     poolFree(pool);
@@ -338,7 +338,7 @@ RetVal tryTestCompile(wchar_t *input, CodeUnit *codeUnit, Error *error) {
   throws(tryPoolCreate(&pool, ONE_MB, error));
   throws(tryParse(pool, input, &expr, error));
   throws(tryFormAnalyze(expr, pool, &root, error));
-  throws(tryCompileTopLevel(root, codeUnit, error));
+  throws(tryCompileTopLevel(pool, root, codeUnit, error));
 
   poolFree(pool);
 
@@ -380,8 +380,6 @@ START_TEST(compilerBasic) {
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
       ck_assert(memcmp(expectedCode, codeUnit.code.code, codeUnit.code.codeLength) == 0);
-
-      codeUnitFreeContents(&codeUnit);
     }
 
     // fn and fn-call
@@ -434,9 +432,6 @@ START_TEST(compilerBasic) {
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(fnCallCode));
       ck_assert(memcmp(fnCallCode, codeUnit.code.code, codeUnit.code.codeLength) == 0);
-
-
-      codeUnitFreeContents(&codeUnit);
     }
 
     // let
@@ -464,8 +459,6 @@ START_TEST(compilerBasic) {
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
       ck_assert(memcmp(expectedCode, codeUnit.code.code, codeUnit.code.codeLength) == 0);
-
-      codeUnitFreeContents(&codeUnit);
     }
 
     // let (nested)
@@ -501,8 +494,6 @@ START_TEST(compilerBasic) {
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
       ck_assert(memcmp(expectedCode, codeUnit.code.code, codeUnit.code.codeLength) == 0);
-
-      codeUnitFreeContents(&codeUnit);
     }
 
     // let fn and call
@@ -539,8 +530,6 @@ START_TEST(compilerBasic) {
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
       ck_assert(memcmp(expectedCode, codeUnit.code.code, codeUnit.code.codeLength) == 0);
-
-      codeUnitFreeContents(&codeUnit);
     }
 
     // define, var-ref
@@ -577,8 +566,6 @@ START_TEST(compilerBasic) {
 
       ck_assert_int_eq(codeUnit.code.codeLength, sizeof(expectedCode));
       ck_assert(memcmp(expectedCode, codeUnit.code.code, codeUnit.code.codeLength) == 0);
-
-      codeUnitFreeContents(&codeUnit);
     }
 
     // TODO: nested let + rebind in sub-let
@@ -654,10 +641,12 @@ END_TEST
 
 #define assertEval(inputText, expectedOutputText) { \
   Error error; \
+  Pool_t pool = NULL; \
+  ck_assert_int_eq(tryPoolCreate(&pool, ONE_KB, &error), R_SUCCESS); \
   wchar_t *result; \
   errorInitContents(&error); \
   result = NULL; \
-  ck_assert_int_eq(tryReplEval(inputText, &result, &error), R_SUCCESS); \
+  ck_assert_int_eq(tryReplEval(pool, inputText, &result, &error), R_SUCCESS); \
   if (result != NULL) { \
     if (wcscmp(expectedOutputText, result) != 0) { \
       ck_abort_msg("got '%ls', expected '%ls'", result, expectedOutputText); \
@@ -666,6 +655,7 @@ END_TEST
   else { \
     ck_abort_msg("exception thrown"); \
   } \
+  poolFree(pool); \
 }
 
 START_TEST(repl) {
@@ -832,10 +822,12 @@ END_TEST
 
 #define assertEvalNoStd(inputText, expectedOutputText) { \
   Error error; \
+  Pool_t pool = NULL; \
+  ck_assert_int_eq(tryPoolCreate(&pool, ONE_KB, &error), R_SUCCESS); \
   wchar_t *result; \
   errorInitContents(&error); \
   result = NULL; \
-  ck_assert_int_eq(tryReplEvalConf(inputText, &result, false, &error), R_SUCCESS); \
+  ck_assert_int_eq(tryReplEvalConf(pool, inputText, &result, false, &error), R_SUCCESS); \
   if (result != NULL) { \
     if (wcscmp(expectedOutputText, result) != 0) { \
       ck_abort_msg("got '%ls', expected '%ls'", result, expectedOutputText); \
@@ -844,6 +836,7 @@ END_TEST
   else { \
     ck_abort_msg("exception thrown"); \
   } \
+  poolFree(pool); \
 }
 
 START_TEST(gc) {

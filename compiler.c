@@ -1,4 +1,5 @@
 #include "compiler.h"
+#include "string.h"
 
 typedef struct Constants {
   uint16_t numAllocated;
@@ -6,45 +7,53 @@ typedef struct Constants {
   Constant *constants;
 } Constants;
 
+typedef struct Codes {
+  uint16_t numAllocated;
+  uint16_t numUsed;
+  uint8_t *codes;
+} Codes;
+
+typedef struct LineNumbers {
+  uint16_t numAllocated;
+  uint16_t numUsed;
+  LineNumber *numbers;
+} LineNumbers;
+
+typedef struct Output {
+  Pool_t pool;
+  Constants *constants;
+  Codes *codes;
+  uint16_t *slotsTable; // maps binding table indexes to slot indexes for storing locals
+  LineNumbers *lineNumbers;
+  bool hasFileName;
+  Text fileName;
+} Output;
+
 void constantsInitContents(Constants *constants) {
   constants->numAllocated = 0;
   constants->numUsed = 0;
   constants->constants = NULL;
 }
 
-void constantsFreeContents(Constants *constants) {
-  if (constants != NULL) {
-    constants->numAllocated = 0;
-    constants->numUsed = 0;
-    if (constants->constants != NULL) {
-      for (int i=0; i<constants->numUsed; i++) {
-        _constantFreeContents(&constants->constants[i]);
-      }
-      free(constants->constants);
-      constants->constants = NULL;
-    }
-  }
-}
-
-RetVal tryAppendConstant(Constants *constants, Constant c, Error *error) {
+RetVal tryAppendConstant(Output output, Constant c, Error *error) {
   RetVal ret;
+
+  Constants *constants = output.constants;
 
   if (constants->constants == NULL) {
     uint16_t len = 16;
-    tryMalloc(constants->constants, len * sizeof(Constant), "Constant array");
+    tryPalloc(output.pool, constants->constants, len * sizeof(Constant), "Constant array");
     constants->numAllocated = len;
   }
   else if (constants->numUsed == constants->numAllocated) {
     uint16_t newAllocatedLength = constants->numAllocated * 2;
 
-    Constant *resizedConstants = realloc(constants->constants, sizeof(Constant) * newAllocatedLength);
-    if (resizedConstants == NULL) {
-      ret = memoryError(error, "realloc Constant array");
-      goto failure;
-    }
+    Constant *resized = NULL;
+    tryPalloc(output.pool, resized, newAllocatedLength * sizeof(Constant), "Constant array");
+    memcpy(resized, constants->constants, constants->numUsed * sizeof(Constant));
 
     constants->numAllocated = newAllocatedLength;
-    constants->constants = resizedConstants;
+    constants->constants = resized;
   }
 
   uint16_t index = constants->numUsed;
@@ -57,48 +66,31 @@ RetVal tryAppendConstant(Constants *constants, Constant c, Error *error) {
   return ret;
 }
 
-typedef struct Codes {
-  uint16_t numAllocated;
-  uint16_t numUsed;
-  uint8_t *codes;
-} Codes;
-
 void codesInitContents(Codes *codes) {
   codes->numAllocated = 0;
   codes->numUsed = 0;
   codes->codes = NULL;
 }
 
-void codesFreeContents(Codes *codes) {
-  if (codes != NULL) {
-    codes->numAllocated = 0;
-    codes->numUsed = 0;
-    if (codes->codes!= NULL) {
-      free(codes->codes);
-      codes->codes = NULL;
-    }
-  }
-}
-
-RetVal tryCodeAppend(Codes *codes, uint16_t numAdded, uint8_t *added, Error *error) {
+RetVal tryCodeAppend(Output output, uint16_t numAdded, uint8_t *added, Error *error) {
   RetVal ret;
+
+  Codes *codes = output.codes;
 
   if (codes->codes == NULL) {
     uint16_t len = 16;
-    tryMalloc(codes->codes, len * sizeof(uint8_t), "byte array");
+    tryPalloc(output.pool, codes->codes, len * sizeof(uint8_t), "byte array");
     codes->numAllocated = len;
   }
   else if (codes->numUsed + numAdded < codes->numAllocated) {
     uint16_t newAllocatedLength = (codes->numAllocated + numAdded) * 2;
 
-    uint8_t *resized = realloc(codes->codes, newAllocatedLength * sizeof(uint8_t));
-    if (resized == NULL) {
-      ret = memoryError(error, "realloc Constant array");
-      goto failure;
-    }
+    uint8_t *replacement = NULL;
+    tryPalloc(output.pool, replacement, newAllocatedLength * sizeof(uint8_t), "byte array");
+    memcpy(replacement, codes->codes, codes->numUsed * sizeof(uint8_t));
 
     codes->numAllocated = newAllocatedLength;
-    codes->codes = resized;
+    codes->codes = replacement;
   }
 
   uint16_t baseIndex = codes->numUsed;
@@ -113,59 +105,26 @@ RetVal tryCodeAppend(Codes *codes, uint16_t numAdded, uint8_t *added, Error *err
     return ret;
 }
 
-RetVal tryCodeAppendContents(Codes *from, Codes *to, Error *error) {
-  RetVal ret;
-
-  throws(tryCodeAppend(to, from->numUsed, from->codes, error));
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
-void codesClear(Codes *codes) {
-  codes->numUsed = 0;
-}
-
-typedef struct LineNumbers {
-  uint16_t numAllocated;
-  uint16_t numUsed;
-  LineNumber *numbers;
-} LineNumbers;
-
 void lineNumbersInitContents(LineNumbers *numbers) {
   numbers->numAllocated = 0;
   numbers->numUsed = 0;
   numbers->numbers = NULL;
 }
 
-void lineNumbersFreeContents(LineNumbers *numbers) {
-  if (numbers != NULL) {
-    numbers->numAllocated = 0;
-    numbers->numUsed = 0;
-    if (numbers->numbers != NULL) {
-      free(numbers->numbers);
-      numbers->numbers = NULL;
-    }
-  }
-}
-
-RetVal tryLineNumbersAppend(LineNumbers *numbers, LineNumber number, Error *error) {
+RetVal tryLineNumbersAppend(Pool_t pool, LineNumbers *numbers, LineNumber number, Error *error) {
   RetVal ret;
 
   if (numbers->numbers == NULL) {
     uint16_t len = 16;
-    tryMalloc(numbers->numbers, len * sizeof(LineNumber), "LineNumber array");
+    tryPalloc(pool, numbers->numbers, len * sizeof(LineNumber), "LineNumber array");
     numbers->numAllocated = len;
   }
   else if (numbers->numUsed == numbers->numAllocated) {
     uint16_t newAllocatedLength = numbers->numAllocated * 2;
 
-    LineNumber *resized = realloc(numbers->numbers, sizeof(LineNumber) * newAllocatedLength);
-    if (resized == NULL) {
-      ret = memoryError(error, "realloc LineNumber array");
-      goto failure;
-    }
+    LineNumber *resized = NULL;
+    tryPalloc(pool, resized, newAllocatedLength * sizeof(LineNumber), "LineNumber array");
+    memcpy(resized, numbers->numbers, numbers->numUsed * sizeof(LineNumber));
 
     numbers->numAllocated = newAllocatedLength;
     numbers->numbers = resized;
@@ -182,15 +141,6 @@ RetVal tryLineNumbersAppend(LineNumbers *numbers, LineNumber number, Error *erro
 }
 
 // compiler behavior that emits constants and code
-
-typedef struct Output {
-  Constants *constants;
-  Codes *codes;
-  uint16_t *slotsTable; // maps binding table indexes to slot indexes for storing locals
-  LineNumbers *lineNumbers;
-  bool hasFileName;
-  Text fileName;
-} Output;
 
 /*
  * If present, appends the source line number from the form to the
@@ -210,7 +160,7 @@ RetVal tryAppendSource(Form *form, Output output, Error *error) {
     lineNumber.lineNumber = form->source.lineNumber;
     lineNumber.startInstructionIndex = output.codes->numUsed;
 
-    throws(tryLineNumbersAppend(output.lineNumbers, lineNumber, error));
+    throws(tryLineNumbersAppend(output.pool, output.lineNumbers, lineNumber, error));
   }
 
   return R_SUCCESS;
@@ -253,7 +203,7 @@ RetVal tryCompileIf(Form *form, Output output, Error *error) {
   uint16_t testFailedJumpAddrOffset;
   {
     uint8_t testFailedJumpCode[] = { I_JMP_IF_NOT, 0, 0 };
-    throws(tryCodeAppend(output.codes, sizeof(testFailedJumpCode), testFailedJumpCode, error));
+    throws(tryCodeAppend(output, sizeof(testFailedJumpCode), testFailedJumpCode, error));
     testFailedJumpAddrOffset = output.codes->numUsed - 2;
   }
 
@@ -264,7 +214,7 @@ RetVal tryCompileIf(Form *form, Output output, Error *error) {
   uint16_t jumpToEndAddrOffset;
   {
     uint8_t jumpToEndCode[] = {I_JMP, 0, 0};
-    throws(tryCodeAppend(output.codes, sizeof(jumpToEndCode), jumpToEndCode, error));
+    throws(tryCodeAppend(output, sizeof(jumpToEndCode), jumpToEndCode, error));
     jumpToEndAddrOffset = output.codes->numUsed - 2;
   }
 
@@ -282,7 +232,7 @@ RetVal tryCompileIf(Form *form, Output output, Error *error) {
     uint16_t index;
     throws(nilConstantGetIndex(output, &index, error));
     uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+    throws(tryCodeAppend(output, sizeof(code), code, error));
   }
 
   // the jumpToEndAddr should point to the first address after the elseBranch
@@ -310,12 +260,12 @@ RetVal tryCompileIf(Form *form, Output output, Error *error) {
  * // since the virtual machine does not have the binding table at its disposal to inspect
  */
 
-RetVal trySlotsTableBuild(BindingTable *bindingTable, uint16_t **ptr, Error *error) {
+RetVal trySlotsTableBuild(Pool_t pool, BindingTable *bindingTable, uint16_t **ptr, Error *error) {
   RetVal ret;
 
   uint16_t *slotsTable = NULL;
 
-  tryMalloc(slotsTable, sizeof(uint16_t) * bindingTable->usedSpace, "uint16_t array");
+  tryPalloc(pool, slotsTable, sizeof(uint16_t) * bindingTable->usedSpace, "uint16_t array");
 
   uint16_t slotsCounter = 0;
 
@@ -389,9 +339,6 @@ RetVal trySlotsTableBuild(BindingTable *bindingTable, uint16_t **ptr, Error *err
   return R_SUCCESS;
 
   failure:
-    if (slotsTable != NULL) {
-      free(slotsTable);
-    }
     return ret;
 }
 
@@ -410,10 +357,11 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   codesInitContents(&fnCodes);
   lineNumbersInitContents(&lineNumbers);
 
-  throws(trySlotsTableBuild(&form->fn.table, &slotsTable, error));
+  throws(trySlotsTableBuild(output.pool, &form->fn.table, &slotsTable, error));
 
   {
     Output fnOutput;
+    fnOutput.pool = output.pool;
     fnOutput.constants = &fnConstants;
     fnOutput.codes = &fnCodes;
     fnOutput.slotsTable = slotsTable;
@@ -424,10 +372,10 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
     for (uint16_t i = 0; i < form->fn.forms.numForms; i++) {
       throws(tryCompile(&form->fn.forms.forms[i], fnOutput, error));
     }
-  }
 
-  uint8_t retCode[] = { I_RET };
-  throws(tryCodeAppend(&fnCodes, sizeof(retCode), retCode, error));
+    uint8_t retCode[] = { I_RET };
+    throws(tryCodeAppend(fnOutput, sizeof(retCode), retCode, error));
+  }
 
   FnConstant fnConst;
   constantFnInitContents(&fnConst);
@@ -435,7 +383,7 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   fnConst.hasName = form->fn.hasName;
   textInitContents(&fnConst.name);
   if (fnConst.hasName) {
-    throws(tryTextCopy(&form->fn.name, &fnConst.name, error));
+    throws(tryTextCopy(output.pool, &form->fn.name, &fnConst.name, error));
     uint16_t slotIndex = slotsTable[form->fn.bindingIndex];
     fnConst.bindingSlotIndex = slotIndex;
   }
@@ -454,30 +402,18 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
 
     SourceTable *table = &fnConst.code.sourceTable;
     sourceTableInitContents(table);
-    throws(tryTextCopy(&output.fileName, &table->fileName, error));
+    throws(tryTextCopy(output.pool, &output.fileName, &table->fileName, error));
     table->numLineNumbers = lineNumbers.numUsed;
     table->lineNumbers = lineNumbers.numbers;
-  }
-  else {
-    lineNumbersFreeContents(&lineNumbers);
   }
 
   Constant c;
   c.type = CT_FN;
   c.function = fnConst;
-  throws(tryAppendConstant(output.constants, c, error));
-
-  free(slotsTable);
+  throws(tryAppendConstant(output, c, error));
 
   return R_SUCCESS;
-
   failure:
-    constantsFreeContents(&fnConstants);
-    codesFreeContents(&fnCodes);
-    lineNumbersFreeContents(&lineNumbers);
-    if (slotsTable != NULL) {
-      free(slotsTable);
-    }
     return ret;
 }
 
@@ -496,7 +432,7 @@ RetVal tryCompileFn(Form *form, Output output, Error *error) {
       if (b->source == BS_CAPTURED) {
         uint16_t slotIndex = output.slotsTable[b->captured.bindingIndex];
         uint8_t code[] = { I_LOAD_LOCAL, slotIndex >> 8, slotIndex & 0xFF };
-        throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+        throws(tryCodeAppend(output, sizeof(code), code, error));
       }
     }
 
@@ -507,7 +443,7 @@ RetVal tryCompileFn(Form *form, Output output, Error *error) {
   }
 
   uint8_t code[] = { loadInst, fnConstIndex >> 8, fnConstIndex & 0xFF };
-  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+  throws(tryCodeAppend(output, sizeof(code), code, error));
 
   return R_SUCCESS;
 
@@ -530,7 +466,7 @@ RetVal nilConstantGetIndex(Output output, uint16_t *index, Error *error) {
   // create nil constant
   Constant c;
   c.type = CT_NIL;
-  throws(tryAppendConstant(output.constants, c, error));
+  throws(tryAppendConstant(output, c, error));
   *index = output.constants->numUsed - 1;
 
   return R_SUCCESS;
@@ -555,8 +491,8 @@ RetVal varRefConstantGetIndex(Text name, Output output, uint16_t *index, Error *
   Constant c;
   c.type = CT_VAR_REF;
   c.varRef.nameLength = name.length;
-  throws(tryCopyText(name.value, &c.varRef.name, c.varRef.nameLength, error));
-  throws(tryAppendConstant(output.constants, c, error));
+  throws(tryCopyText(output.pool, name.value, &c.varRef.name, c.varRef.nameLength, error));
+  throws(tryAppendConstant(output, c, error));
   *index = output.constants->numUsed - 1;
 
   return R_SUCCESS;
@@ -587,25 +523,25 @@ RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *erro
     case N_STRING: {
       c->type = CT_STR;
       c->string.length = constant->string.length;
-      throws(tryCopyText(constant->string.value, &c->string.value, c->string.length, error));
+      throws(tryCopyText(output.pool, constant->string.value, &c->string.value, c->string.length, error));
       break;
     }
     case N_SYMBOL: {
       c->type = CT_SYMBOL;
       c->symbol.length = constant->symbol.length;
-      throws(tryCopyText(constant->symbol.value, &c->symbol.value, c->symbol.length, error));
+      throws(tryCopyText(output.pool, constant->symbol.value, &c->symbol.value, c->symbol.length, error));
       break;
     }
     case N_KEYWORD: {
       c->type = CT_KEYWORD;
       c->keyword.length = constant->keyword.length;
-      throws(tryCopyText(constant->keyword.value, &c->keyword.value, c->keyword.length, error));
+      throws(tryCopyText(output.pool, constant->keyword.value, &c->keyword.value, c->keyword.length, error));
       break;
     }
     case N_LIST: {
       c->type = CT_LIST;
       c->list.length = constant->list.length;
-      tryMalloc(c->list.constants, sizeof(uint16_t) * c->list.length, "typeIndex array");
+      tryPalloc(output.pool, c->list.constants, sizeof(uint16_t) * c->list.length, "typeIndex array");
 
       constantMetaInit(&c->list.meta);
       if (constant->source.isSet) {
@@ -615,7 +551,7 @@ RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *erro
         }
 
         c->list.meta.numProperties = 1;
-        tryMalloc(c->list.meta.properties, sizeof(ConstantMetaProperty) * c->list.meta.numProperties, "ConstantMetaProperty array");
+        tryPalloc(output.pool, c->list.meta.properties, sizeof(ConstantMetaProperty) * c->list.meta.numProperties, "ConstantMetaProperty array");
         ConstantMetaProperty *lineNo = &c->list.meta.properties[0];
 
         {
@@ -623,8 +559,8 @@ RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *erro
           Constant key;
           key.type = CT_KEYWORD;
           key.keyword.length = wcslen(keyName);
-          throws(tryCopyText(keyName, &key.keyword.value, key.keyword.length, error));
-          throws(tryAppendConstant(output.constants, key, error));
+          throws(tryCopyText(output.pool, keyName, &key.keyword.value, key.keyword.length, error));
+          throws(tryAppendConstant(output, key, error));
           uint16_t index = output.constants->numUsed - 1;
           lineNo->keyIndex = index;
         }
@@ -633,7 +569,7 @@ RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *erro
           Constant value;
           value.type = CT_INT;
           value.integer = constant->source.lineNumber;
-          throws(tryAppendConstant(output.constants, value, error));
+          throws(tryAppendConstant(output, value, error));
           uint16_t index = output.constants->numUsed - 1;
           lineNo->valueIndex = index;
         }
@@ -645,7 +581,7 @@ RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *erro
 
         Constant child;
         throws(constInitContents(elem->expr, &child, output, error));
-        throws(tryAppendConstant(output.constants, child, error));
+        throws(tryAppendConstant(output, child, error));
 
         uint16_t childIndex = output.constants->numUsed - 1;
         c->list.constants[elemIndex] = childIndex;
@@ -672,16 +608,15 @@ RetVal tryCompileConst(Form *form, Output output, Error *error) {
   Constant c;
 
   throws(constInitContents(form->constant, &c, output, error));
-  throws(tryAppendConstant(output.constants, c, error));
+  throws(tryAppendConstant(output, c, error));
 
   uint16_t index = output.constants->numUsed - 1;
   uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+  throws(tryCodeAppend(output, sizeof(code), code, error));
 
   return R_SUCCESS;
 
   failure:
-    _constantFreeContents(&c);
     return ret;
 }
 
@@ -692,7 +627,7 @@ RetVal tryCompileDef(Form *form, Output output, Error *error) {
     uint16_t index;
     throws(nilConstantGetIndex(output, &index, error));
     uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+    throws(tryCodeAppend(output, sizeof(code), code, error));
   }
   else {
     throws(tryCompile(form->def.value, output, error));
@@ -702,7 +637,7 @@ RetVal tryCompileDef(Form *form, Output output, Error *error) {
   throws(varRefConstantGetIndex(form->def.name, output, &index, error));
 
   uint8_t code[] = { I_DEF_VAR, index >> 8, index & 0xFF };
-  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+  throws(tryCodeAppend(output, sizeof(code), code, error));
 
   return R_SUCCESS;
 
@@ -717,7 +652,7 @@ RetVal tryCompileVarRef(Form *form, Output output, Error *error) {
   throws(varRefConstantGetIndex(form->varRef.name, output, &index, error));
 
   uint8_t code[] = { I_LOAD_VAR, index >> 8, index & 0xFF };
-  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+  throws(tryCodeAppend(output, sizeof(code), code, error));
 
   return R_SUCCESS;
 
@@ -737,7 +672,7 @@ RetVal tryCompileLet(Form *form, Output output, Error *error) {
 
     uint16_t index = output.slotsTable[binding->bindingIndex];
     uint8_t code[] = { I_STORE_LOCAL, index >> 8, index & 0xFF };
-    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+    throws(tryCodeAppend(output, sizeof(code), code, error));
   }
 
   if (form->let.forms.numForms > 0) {
@@ -749,11 +684,11 @@ RetVal tryCompileLet(Form *form, Output output, Error *error) {
   else {
     Constant c;
     c.type = CT_NIL;
-    throws(tryAppendConstant(output.constants, c, error));
+    throws(tryAppendConstant(output, c, error));
 
     uint16_t index = output.constants->numUsed - 1;
     uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+    throws(tryCodeAppend(output, sizeof(code), code, error));
   }
 
   return R_SUCCESS;
@@ -767,7 +702,7 @@ RetVal tryCompileEnvRef(Form *form, Output output, Error *error) {
 
   uint16_t index = output.slotsTable[form->envRef.bindingIndex];
   uint8_t code[] = { I_LOAD_LOCAL, index >> 8, index & 0xFF };
-  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+  throws(tryCodeAppend(output, sizeof(code), code, error));
 
   return R_SUCCESS;
 
@@ -787,7 +722,7 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     }
 
     uint8_t addCode[] = { I_ADD};
-    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
   }
   else if (wcscmp(builtin->name.value, L"subtract") == 0) {
 
@@ -796,7 +731,7 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     }
 
     uint8_t addCode[] = { I_SUB };
-    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
   }
   else if (wcscmp(builtin->name.value, L"compare") == 0) {
 
@@ -805,7 +740,7 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     }
 
     uint8_t addCode[] = { I_CMP };
-    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
   }
   else if (wcscmp(builtin->name.value, L"first") == 0) {
 
@@ -816,7 +751,7 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     throws(tryCompile(&form->builtin.args.forms[0], output, error));
 
     uint8_t addCode[] = { I_FIRST };
-    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
   }
   else if (wcscmp(builtin->name.value, L"rest") == 0) {
 
@@ -827,7 +762,7 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     throws(tryCompile(&form->builtin.args.forms[0], output, error));
 
     uint8_t addCode[] = { I_REST };
-    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
   }
   else if (wcscmp(builtin->name.value, L"cons") == 0) {
 
@@ -840,7 +775,7 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     }
 
     uint8_t addCode[] = { I_CONS };
-    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
   }
   else if (wcscmp(builtin->name.value, L"setmacro") == 0) {
 
@@ -853,7 +788,7 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     }
 
     uint8_t addCode[] = { I_SET_MACRO };
-    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
   }
   else if (wcscmp(builtin->name.value, L"getmacro") == 0) {
 
@@ -866,7 +801,7 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     }
 
     uint8_t addCode[] = { I_GET_MACRO };
-    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
   }
   else if (wcscmp(builtin->name.value, L"list") == 0) {
 
@@ -874,10 +809,10 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
       {
         Constant c;
         c.type = CT_NIL;
-        throws(tryAppendConstant(output.constants, c, error));
+        throws(tryAppendConstant(output, c, error));
         uint16_t index = output.constants->numUsed - 1;
         uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
-        throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+        throws(tryCodeAppend(output, sizeof(code), code, error));
       }
     }
     else {
@@ -891,18 +826,18 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
 
           Constant c;
           c.type = CT_NIL;
-          throws(tryAppendConstant(output.constants, c, error));
+          throws(tryAppendConstant(output, c, error));
           uint16_t index = output.constants->numUsed - 1;
           uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
-          throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+          throws(tryCodeAppend(output, sizeof(code), code, error));
 
           uint8_t addCode[] = {I_CONS};
-          throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+          throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
         }
         else {
           throws(tryCompile(form, output, error));
           uint8_t addCode[] = {I_SWAP, I_CONS};
-          throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+          throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
         }
       }
     }
@@ -915,7 +850,7 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     }
 
     uint8_t addCode[] = { I_GC };
-    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
   }
   else if (wcscmp(builtin->name.value, L"type") == 0) {
 
@@ -928,7 +863,7 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     }
 
     uint8_t addCode[] = { I_GET_TYPE };
-    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
   }
   else if (wcscmp(builtin->name.value, L"prn") == 0) {
 
@@ -941,7 +876,7 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     }
 
     uint8_t addCode[] = { I_PRN };
-    throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
   }
   else {
     throwCompilerError(error, "unsupported builtin '%ls'", builtin->name.value);
@@ -966,10 +901,10 @@ RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
     Constant c;
     c.type = CT_INT;
     c.integer = form->fnCall.args.numForms;
-    throws(tryAppendConstant(output.constants, c, error));
+    throws(tryAppendConstant(output, c, error));
     uint16_t index = output.constants->numUsed - 1;
     uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
-    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+    throws(tryCodeAppend(output, sizeof(code), code, error));
   }
 
   // push the callable
@@ -985,7 +920,7 @@ RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
     inst = I_INVOKE_DYN;
   }
   uint8_t code[] = { inst };
-  throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+  throws(tryCodeAppend(output, sizeof(code), code, error));
 
   return R_SUCCESS;
 
@@ -1002,10 +937,10 @@ RetVal tryCompileList(Form *form, Output output, Error *error) {
     {
       Constant c;
       c.type = CT_NIL;
-      throws(tryAppendConstant(output.constants, c, error));
+      throws(tryAppendConstant(output, c, error));
       uint16_t index = output.constants->numUsed - 1;
       uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
-      throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+      throws(tryCodeAppend(output, sizeof(code), code, error));
     }
   }
   else {
@@ -1019,18 +954,18 @@ RetVal tryCompileList(Form *form, Output output, Error *error) {
 
         Constant c;
         c.type = CT_NIL;
-        throws(tryAppendConstant(output.constants, c, error));
+        throws(tryAppendConstant(output, c, error));
         uint16_t index = output.constants->numUsed - 1;
         uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
-        throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+        throws(tryCodeAppend(output, sizeof(code), code, error));
 
         uint8_t addCode[] = {I_CONS};
-        throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+        throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
       }
       else {
         throws(tryCompile(f, output, error));
         uint8_t addCode[] = {I_SWAP, I_CONS};
-        throws(tryCodeAppend(output.codes, sizeof(addCode), addCode, error));
+        throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
       }
     }
   }
@@ -1099,7 +1034,7 @@ RetVal tryCompile(Form *form, Output output, Error *error) {
     return ret;
 }
 
-RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
+RetVal tryCompileTopLevel(Pool_t pool, FormRoot *root, CodeUnit *codeUnit, Error *error) {
   RetVal ret;
 
   // these get cleaned up on failure
@@ -1114,10 +1049,11 @@ RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
   slotsTable = NULL;
   lineNumbersInitContents(&lineNumbers);
 
-  throws(trySlotsTableBuild(&root->table, &slotsTable, error));
+  throws(trySlotsTableBuild(pool, &root->table, &slotsTable, error));
 
   {
     Output output;
+    output.pool = pool;
     output.constants = &constants;
     output.codes = &codes;
     output.slotsTable = slotsTable;
@@ -1128,7 +1064,7 @@ RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
     throws(tryCompile(root->form, output, error));
 
     uint8_t code[] = { I_RET };
-    throws(tryCodeAppend(output.codes, sizeof(code), code, error));
+    throws(tryCodeAppend(output, sizeof(code), code, error));
   }
 
   codeUnit->code.numLocals = root->table.usedSpace;
@@ -1150,28 +1086,16 @@ RetVal tryCompileTopLevel(FormRoot *root, CodeUnit *codeUnit, Error *error) {
     SourceTable *table = &codeUnit->code.sourceTable;
     sourceTableInitContents(table);
 
-    throws(tryTextCopy(&root->fileName, &table->fileName, error));
+    throws(tryTextCopy(pool, &root->fileName, &table->fileName, error));
     table->numLineNumbers = lineNumbers.numUsed;
     table->lineNumbers = lineNumbers.numbers;
-  }
-  else {
-    lineNumbersFreeContents(&lineNumbers);
   }
 
   // TODO: we don't populate these yet
   codeUnit->code.maxOperandStackSize = 10;
 
-  free(slotsTable);
-
   return R_SUCCESS;
-
   failure:
-    constantsFreeContents(&constants);
-    codesFreeContents(&codes);
-    if (slotsTable != NULL) {
-      free(slotsTable);
-    }
-    lineNumbersFreeContents(&lineNumbers);
     return ret;
 }
 

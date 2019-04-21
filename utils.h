@@ -3,12 +3,13 @@
 
 #include <wctype.h>
 #include "errors.h"
+#include "pool.h"
 
 /*
  * Basic string utilities
  */
 
-RetVal tryCopyText(wchar_t* from, wchar_t **ptr, uint64_t len, Error *error);
+RetVal tryCopyText(Pool_t pool, wchar_t* from, wchar_t **ptr, uint64_t len, Error *error);
 
 /*
  * Input/Output Stream Abstraction
@@ -20,6 +21,7 @@ RetVal tryCopyText(wchar_t* from, wchar_t **ptr, uint64_t len, Error *error);
 typedef struct InputStream *InputStream_t;
 
 RetVal tryInputStreamMake(
+    Pool_t pool,
     void *state,
     RetVal (*readChar)(void *state, wchar_t *ch, Error *error),
     RetVal (*unreadChar)(void *state, wchar_t ch, Error *error),
@@ -34,32 +36,9 @@ RetVal tryInputStreamReadChar(InputStream_t input, wchar_t *ch, Error *error);
 RetVal tryInputStreamUnreadChar(InputStream_t input, wchar_t ch, Error *error);
 
 // source factories
-RetVal tryFileInputStreamMake(FILE *file, InputStream_t *s, Error *error);
-RetVal tryFileInputStreamMakeFilename(char *filename, InputStream_t *s, Error *error);
-RetVal tryStringInputStreamMake(wchar_t *text, uint64_t length, InputStream_t *s, Error *error);
-
-typedef struct OutputStream *OutputStream_t;
-
-// TODO: implement this so *prn can use it for printing exprs and forms
-RetVal tryOutputStreamMake(
-    void *state,
-    RetVal (*writeWString)(void *state, wchar_t *ch, Error *error),
-    RetVal (*flush)(void *state, Error *error),
-    RetVal (*close)(void *state, Error *error),
-    RetVal (*freeState)(void *state, Error *error),
-    InputStream_t *ptr,
-    Error *error
-);
-RetVal tryOutputStreamFree(InputStream_t input, Error *error);
-
-// supported operations
-RetVal tryOutputStreamWriteWString(OutputStream_t output, wchar_t* ch, Error *error);
-RetVal tryOutputStreamFlush(OutputStream_t output, Error *error);
-RetVal tryOutputStreamClose(OutputStream_t output, Error *error);
-
-// source factories
-RetVal tryFileOutputStreamMake(FILE *file, OutputStream_t output, Error *error);
-RetVal tryStringOutputStreamMake(wchar_t *text, uint64_t length, OutputStream_t output, Error *error);
+RetVal tryFileInputStreamMake(Pool_t pool, FILE *file, InputStream_t *s, Error *error);
+RetVal tryFileInputStreamMakeFilename(Pool_t pool, char *filename, InputStream_t *s, Error *error);
+RetVal tryStringInputStreamMake(Pool_t pool, wchar_t *text, uint64_t length, InputStream_t *s, Error *error);
 
 /*
  * Auto-expanding string buffer implementation.
@@ -68,11 +47,7 @@ RetVal tryStringOutputStreamMake(wchar_t *text, uint64_t length, OutputStream_t 
 
 typedef struct StringBuffer *StringBuffer_t;
 
-//void stringBufferInitContents(StringBuffer_t b);
-//void stringBufferFreeContents(StringBuffer_t b);
-
-RetVal tryStringBufferMake(StringBuffer_t *ptr, Error *error);
-void stringBufferFree(StringBuffer_t b);
+RetVal tryStringBufferMake(Pool_t pool, StringBuffer_t *ptr, Error *error);
 
 RetVal tryStringBufferAppendChar(StringBuffer_t b, wchar_t ch, Error *error);
 RetVal tryStringBufferAppendStr(StringBuffer_t b, wchar_t *str, Error *error);
@@ -89,9 +64,8 @@ typedef struct Text {
 } Text;
 
 void textInitContents(Text *text);
-RetVal tryTextMake(wchar_t* from, Text *text, uint64_t len, Error *error);
-RetVal tryTextCopy(Text *from, Text *to, Error *error);
-void textFreeContents(Text *text);
+RetVal tryTextMake(Pool_t pool, wchar_t* from, Text *text, uint64_t len, Error *error);
+RetVal tryTextCopy(Pool_t pool, Text *from, Text *to, Error *error);
 
 #endif //WARP_LANG_UTILS_H
 

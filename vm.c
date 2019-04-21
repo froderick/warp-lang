@@ -1,4 +1,4 @@
-  #include <stdlib.h>
+    #include <stdlib.h>
 #include <string.h>
 #include <libgen.h>
 #include <time.h>
@@ -21,15 +21,6 @@ void sourceTableInitContents(SourceTable *t) {
   textInitContents(&t->fileName);
 }
 
-void sourceTableFreeContents(SourceTable *t) {
-  textFreeContents(&t->fileName);
-  t->numLineNumbers = 0;
-  if (t->lineNumbers != NULL) {
-    free(t->lineNumbers);
-    t->lineNumbers = NULL;
-  }
-}
-
 void codeInitContents(Code *code) {
   code->maxOperandStackSize = 0;
   code->numLocals = 0;
@@ -37,25 +28,6 @@ void codeInitContents(Code *code) {
   code->code = NULL;
   code->codeLength = 0;
   sourceTableInitContents(&code->sourceTable);
-}
-
-void codeFreeContents(Code *code) {
-  if (code != NULL) {
-
-    code->numLocals = 0;
-    code->maxOperandStackSize = 0;
-    code->codeLength = 0;
-
-    if (code->code != NULL) {
-      free(code->code);
-      code->code = NULL;
-    }
-
-    if (code->hasSourceTable) {
-      code->hasSourceTable = false;
-      sourceTableFreeContents(&code->sourceTable);
-    }
-  }
 }
 
 void constantMetaPropertyInit(ConstantMetaProperty *p) {
@@ -66,14 +38,6 @@ void constantMetaPropertyInit(ConstantMetaProperty *p) {
 void constantMetaInit(ConstantMeta *c) {
   c->numProperties = 0;
   c->properties = NULL;
-}
-
-void constantMetaFreeContents(ConstantMeta *c) {
-  if (c != NULL) {
-    free(c->properties);
-    c->properties = NULL;
-    c->numProperties = 0;
-  }
 }
 
 void constantFnInitContents(FnConstant *fnConst) {
@@ -88,93 +52,10 @@ void constantFnInitContents(FnConstant *fnConst) {
   codeInitContents(&fnConst->code);
 }
 
-void constantFnFreeContents(FnConstant *fnConst) {
-  if (fnConst != NULL) {
-    fnConst->numArgs = 0;
-    if (fnConst->constants != NULL) {
-      for (int i = 0; i < fnConst->numConstants; i++) {
-        _constantFreeContents(&fnConst->constants[i]);
-      }
-      fnConst->numConstants = 0;
-      free(fnConst->constants);
-      fnConst->constants = NULL;
-    }
-    codeFreeContents(&fnConst->code);
-  }
-}
-
-void _constantFreeContents(Constant *c) {
-  if (c != NULL) {
-    switch (c->type) {
-      case CT_NONE:
-      case CT_NIL:
-        break;
-      case CT_BOOL:
-        c->boolean = false;
-        break;
-      case CT_INT:
-        c->integer = 0;
-        break;
-      case CT_VAR_REF:
-        c->varRef.nameLength = 0;
-        if (c->varRef.name != NULL) {
-          free(c->varRef.name);
-          c->varRef.name = NULL;
-        }
-        break;
-      case CT_STR:
-        c->string.length = 0;
-        if (c->string.value != NULL) {
-          free(c->string.value);
-          c->string.value = NULL;
-        }
-        break;
-      case CT_FN:
-        constantFnFreeContents(&c->function);
-        break;
-      case CT_SYMBOL:
-        c->symbol.length = 0;
-        if (c->symbol.value != NULL) {
-          free(c->symbol.value);
-          c->symbol.value = NULL;
-        }
-        break;
-      case CT_KEYWORD:
-        c->keyword.length = 0;
-        if (c->keyword.value != NULL) {
-          free(c->keyword.value);
-          c->keyword.value = NULL;
-        }
-        break;
-      case CT_LIST:
-        c->list.length = 0;
-        if (c->list.constants != NULL) {
-          free(c->list.constants);
-          c->list.constants = NULL;
-        }
-        break;
-    }
-  }
-}
-
 void codeUnitInitContents(CodeUnit *codeUnit) {
   codeUnit->constants = NULL;
   codeUnit->numConstants = 0;
   codeInitContents(&codeUnit->code);
-}
-
-void codeUnitFreeContents(CodeUnit *u) {
-  if (u != NULL) {
-    if (u->constants != NULL) {
-      for (int i = 0; i < u->numConstants; i++) {
-        _constantFreeContents(&u->constants[i]);
-      }
-      u->numConstants = 0;
-      free(u->constants);
-      u->constants = NULL;
-    }
-    codeFreeContents(&u->code);
-  }
 }
 
 void exFrameInitContents(VMExceptionFrame *f) {
@@ -184,31 +65,9 @@ void exFrameInitContents(VMExceptionFrame *f) {
   textInitContents(&f->fileName);
 }
 
-void exFrameFreeContents(VMExceptionFrame *f) {
-  if (f != NULL) {
-    textFreeContents(&f->functionName);
-    f->lineNumber = 0;
-    textFreeContents(&f->fileName);
-  }
-}
-
 void framesInitContents(VMExceptionFrames *f) {
   f->length = 0;
   f->elements = NULL;
-}
-
-void framesFreeContents(VMExceptionFrames *f) {
-  if (f != NULL) {
-    if (f->elements != NULL) {
-      for (uint64_t i = 0; i < f->length; i++) {
-        VMExceptionFrame *fr = &f->elements[i];
-        exFrameFreeContents(fr);
-      }
-      free(f->elements);
-      f->length = 0;
-      f->elements = NULL;
-    }
-  }
 }
 
 void _frameInitContents(VMExceptionFrame *f) {
@@ -221,13 +80,6 @@ void _frameInitContents(VMExceptionFrame *f) {
 void exceptionInitContents(VMException *e) {
   textInitContents(&e->message);
   framesInitContents(&e->frames);
-}
-
-void exceptionFreeContents(VMException *e) {
-  if (e != NULL) {
-    textFreeContents(&e->message);
-    framesFreeContents(&e->frames);
-  }
 }
 
 void evalResultInitContents(VMEvalResult *r) {
@@ -1246,40 +1098,30 @@ void varInitContents(Var *var) {
   var->isMacro = false;
 }
 
+#define ONE_KB 1024
+
 RetVal tryVarInit(wchar_t *namespace, wchar_t *name, uint64_t symbolNameLength, Value value, Var *var, Error *error) {
   RetVal ret;
 
+  // TODO: vars should be heap values, fix this leak!
+
+  Pool_t pool = NULL;
+  throws(tryPoolCreate(&pool, ONE_KB, error));
+
   varInitContents(var);
 
-  throws(tryCopyText(namespace, &var->namespace, wcslen(namespace), error));
-  throws(tryCopyText(name, &var->name, symbolNameLength, error));
+  throws(tryCopyText(pool, namespace, &var->namespace, wcslen(namespace), error));
+  throws(tryCopyText(pool, name, &var->name, symbolNameLength, error));
   var->value = value;
 
-  return R_SUCCESS;
+  ret = R_SUCCESS;
+  goto done;
 
   failure:
-  varFree(var);
-  return ret;
-}
-
-void varFreeContents(Var *var) {
-  if (var != NULL) {
-    if (var->namespace != NULL) {
-      free(var->namespace);
-      var->namespace = NULL;
-    }
-    if (var->name != NULL) {
-      free(var->name);
-      var->name = NULL;
-    }
-  }
-}
-
-void varFree(Var *var) {
-  if (var != NULL) {
-    varFreeContents(var);
-    free(var);
-  }
+  done:
+    // TODO: vars should be heap values, fix this leak!
+    // poolFree(pool);
+    return ret;
 }
 
 bool resolveVar(Namespaces *analyzer, wchar_t *symbolName, uint64_t symbolNameLength, Var **var) {
@@ -1329,20 +1171,6 @@ void varListInit(VarList *list) {
   list->length = 0;
   list->allocatedLength = 0;
   list->vars = NULL;
-}
-
-void varListFreeContents(VarList *list) {
-  if (list != NULL) {
-    if (list->vars != NULL) {
-      for (int i=0; i<list->length; i++) {
-        varFreeContents(&list->vars[i]);
-      }
-      free(list->vars);
-      list->vars = NULL;
-      list->length = 0;
-      list->allocatedLength = 0;
-    }
-  }
 }
 
 RetVal tryAppendVar(VarList *list, Var var, Error* error) {
@@ -1396,7 +1224,6 @@ RetVal tryDefVar(Namespaces *namespaces, wchar_t *symbolName, uint64_t symbolNam
   return R_SUCCESS;
 
   failure:
-  varFreeContents(&createdVar);
   return ret;
 }
 
@@ -1404,8 +1231,13 @@ RetVal tryNamespaceMake(wchar_t *name, uint64_t length, Namespace **ptr , Error 
 
   RetVal ret;
 
+  Pool_t pool = NULL;
+  throws(tryPoolCreate(&pool, ONE_KB, error));
+
   Namespace *ns;
-  tryMalloc(ns, sizeof(Namespace), "Namespace");
+  tryPalloc(pool, ns, sizeof(Namespace), "Namespace");
+
+  // TODO: namespaces should be heap values! fix this leak!
 
   ns->name = NULL;
   ns->importedVars = NULL;
@@ -1413,24 +1245,13 @@ RetVal tryNamespaceMake(wchar_t *name, uint64_t length, Namespace **ptr , Error 
 
   varListInit(&ns->localVars);
 
-  throws(tryCopyText(name, &ns->name, length, error));
+  throws(tryCopyText(pool, name, &ns->name, length, error));
 
   *ptr = ns;
   return R_SUCCESS;
 
   failure:
-  if (ns != NULL) {
-    free(ns);
-  }
   return ret;
-}
-
-void namespaceFreeContents(Namespace *ns) {
-  if (ns != NULL) {
-    free(ns->name);
-    free(ns->importedVars);
-    varListFreeContents(&ns->localVars);
-  }
 }
 
 RetVal tryNamespacesInitContents(Namespaces *namespaces, Error *error) {
@@ -1448,18 +1269,6 @@ RetVal tryNamespacesInitContents(Namespaces *namespaces, Error *error) {
 
   failure:
   return ret;
-}
-
-void namespacesFreeContents(Namespaces *namespaces) {
-  if (namespaces != NULL) {
-    namespaces->currentNamespace = NULL;
-    if (namespaces->namespaces != NULL) {
-      for (int i=0; i<namespaces->numNamespaces; i++) {
-        namespaceFreeContents(&namespaces->namespaces[i]);
-      }
-      free(namespaces->namespaces);
-    }
-  }
 }
 
 RetVal tryAllocateCons(VM *vm, ExecFrame_t frame, Value value, Value next, Value *ptr, Error *error) {
@@ -2388,7 +2197,7 @@ RetVal tryPrnEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   Expr expr;
   throws(tryVMPrn(vm, value, pool, &expr, error));
-  throws(tryExprPrn(&expr, error));
+  throws(tryExprPrn(pool, &expr, error));
   printf("\n");
 
   throws(pushOperand(frame, nil(), error));
@@ -2596,21 +2405,21 @@ RetVal tryPrnFn(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   expr->type = N_STRING;
   wchar_t function[] = L"<function>";
   expr->string.length = wcslen(function);
-  return tryCopyText(function, &expr->string.value, expr->string.length, error);
+  return tryCopyText(pool, function, &expr->string.value, expr->string.length, error);
 }
 
 RetVal tryPrnCFn(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   expr->type = N_STRING;
   wchar_t function[] = L"<c-function>";
   expr->string.length = wcslen(function);
-  return tryCopyText(function, &expr->string.value, expr->string.length, error);
+  return tryCopyText(pool, function, &expr->string.value, expr->string.length, error);
 }
 
 RetVal tryPrnClosure(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   expr->type = N_STRING;
   wchar_t function[] = L"<closure>";
   expr->string.length = wcslen(function);
-  return tryCopyText(function, &expr->string.value, expr->string.length, error);
+  return tryCopyText(pool, function, &expr->string.value, expr->string.length, error);
 }
 
 RetVal equalsString(VM *vm, Value value, wchar_t *cmpStr, bool *equals, Error *error) {
@@ -2640,7 +2449,7 @@ RetVal tryPrnStr(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
 
   expr->type = N_STRING;
   expr->string.length = str->length;
-  throws(tryCopyText(stringValue(str), &expr->string.value, expr->string.length, error));
+  throws(tryCopyText(pool, stringValue(str), &expr->string.value, expr->string.length, error));
 
   return R_SUCCESS;
   failure:
@@ -2656,7 +2465,7 @@ RetVal tryPrnSymbol(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error
 
   expr->type = N_SYMBOL;
   expr->symbol.length = sym->length;
-  throws(tryCopyText(symbolValue(sym), &expr->symbol.value, expr->string.length, error));
+  throws(tryCopyText(pool, symbolValue(sym), &expr->symbol.value, expr->string.length, error));
 
   return R_SUCCESS;
   failure:
@@ -2671,7 +2480,7 @@ RetVal tryPrnKeyword(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *erro
 
   expr->type = N_KEYWORD;
   expr->keyword.length = kw->length;
-  throws(tryCopyText(keywordValue(kw), &expr->keyword.value, expr->string.length, error));
+  throws(tryCopyText(pool, keywordValue(kw), &expr->keyword.value, expr->string.length, error));
 
   return R_SUCCESS;
   failure:
@@ -2885,7 +2694,7 @@ void printEvalError(ExecFrame_t frame, Error *error) {
   }
 }
 
-RetVal tryExceptionMake(ExecFrame_t frame, VMException *exception, Error *error) {
+RetVal tryExceptionMake(ExecFrame_t frame, Pool_t pool, VMException *exception, Error *error) {
   RetVal ret;
 
   Error reference = *error;
@@ -2894,7 +2703,7 @@ RetVal tryExceptionMake(ExecFrame_t frame, VMException *exception, Error *error)
   exceptionInitContents(exception);
 
   swprintf(msg, ERROR_MSG_LENGTH, L"unhandled error: %ls", reference.message);
-  throws(tryTextMake(msg, &exception->message, wcslen(msg), error));
+  throws(tryTextMake(pool, msg, &exception->message, wcslen(msg), error));
 
   uint64_t numFrames = 0;
   {
@@ -2914,7 +2723,7 @@ RetVal tryExceptionMake(ExecFrame_t frame, VMException *exception, Error *error)
   numFrames++;
 
   exception->frames.length = numFrames;
-  tryMalloc(exception->frames.elements, sizeof(VMExceptionFrame) * numFrames, "VMExceptionFrame array");
+  tryPalloc(pool, exception->frames.elements, sizeof(VMExceptionFrame) * numFrames, "VMExceptionFrame array");
 
   { // native frame
 
@@ -2922,14 +2731,14 @@ RetVal tryExceptionMake(ExecFrame_t frame, VMException *exception, Error *error)
     exFrameInitContents(f);
 
     f->functionName.length = strlen(reference.functionName) + 1;
-    tryMalloc(f->functionName.value, f->functionName.length * sizeof(wchar_t), "wide string");
+    tryPalloc(pool, f->functionName.value, f->functionName.length * sizeof(wchar_t), "wide string");
     swprintf(f->functionName.value, f->functionName.length, L"%s", reference.functionName);
 
     f->unknownSource = false;
 
     char* fileName = basename((char *) reference.fileName);
     f->fileName.length = strlen(fileName) + 1;
-    tryMalloc(f->fileName.value, f->fileName.length * sizeof(wchar_t), "wide string");
+    tryPalloc(pool, f->fileName.value, f->fileName.length * sizeof(wchar_t), "wide string");
     swprintf(f->fileName.value, f->fileName.length, L"%s", fileName);
 
     f->lineNumber = reference.lineNumber;
@@ -2944,11 +2753,11 @@ RetVal tryExceptionMake(ExecFrame_t frame, VMException *exception, Error *error)
     if (hasFnName(current)) {
       Text text;
       throws(getFnName(current, &text, error));
-      throws(tryTextCopy(&text, &f->functionName, error));
+      throws(tryTextCopy(pool, &text, &f->functionName, error));
     }
     else {
       wchar_t *name = L"<root>\0";
-      throws(tryTextMake(name, &f->functionName, wcslen(name), error));
+      throws(tryTextMake(pool, name, &f->functionName, wcslen(name), error));
     }
 
     if (hasSourceTable(current)) {
@@ -2965,17 +2774,16 @@ RetVal tryExceptionMake(ExecFrame_t frame, VMException *exception, Error *error)
   return R_SUCCESS;
 
   failure:
-    exceptionFreeContents(exception);
     return ret;
 }
 
-RetVal tryExceptionPrint(VMException *e, wchar_t **ptr, Error *error) {
+RetVal tryExceptionPrint(Pool_t pool, VMException *e, wchar_t **ptr, Error *error) {
   RetVal ret;
 
   // clean up on exit always
   StringBuffer_t b = NULL;
 
-  throws(tryStringBufferMake(&b, error));
+  throws(tryStringBufferMake(pool, &b, error));
 
   throws(tryStringBufferAppendStr(b, error->message, error));
 
@@ -2995,32 +2803,36 @@ RetVal tryExceptionPrint(VMException *e, wchar_t **ptr, Error *error) {
   }
 
   wchar_t *output;
-  throws(tryCopyText(stringBufferText(b), &output, stringBufferLength(b), error));
-  stringBufferFree(b);
+  throws(tryCopyText(pool, stringBufferText(b), &output, stringBufferLength(b), error));
 
   *ptr = output;
   return R_SUCCESS;
 
   failure:
-  stringBufferFree(b);
-  return ret;
+    return ret;
 }
 
 RetVal tryExceptionPrintf(VMException *e, Error *error) {
   RetVal ret;
 
+  Pool_t pool = NULL;
+  throws(tryPoolCreate(&pool, ONE_KB, error));
+
   wchar_t *msg;
-  throws(tryExceptionPrint(e, &msg, error));
+  throws(tryExceptionPrint(pool, e, &msg, error));
   printf("%ls\n", msg);
   free(msg);
 
-  return R_SUCCESS;
+  ret = R_SUCCESS;
+  goto done;
 
   failure:
-  return ret;
+  done:
+    poolFree(pool);
+    return ret;
 }
 
-RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Error *error) {
+RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Pool_t outputPool, Error *error) {
   RetVal ret;
 
   uint8_t inst;
@@ -3055,7 +2867,8 @@ RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Error *error) {
 
     if (ret != R_SUCCESS) {
       VMException ex;
-      throws(tryExceptionMake(frame, &ex, error));
+      // TODO: exceptions should go on the heap
+      throws(tryExceptionMake(frame, outputPool, &ex, error));
       setException(frame, ex);
       break;
     }
@@ -3616,7 +3429,7 @@ void popFrame(ExecFrame *frame) {
  *
  */
 
-RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, VMException *exception, bool *exceptionThrown,  Error *error) {
+RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, Value *result, VMException *exception, bool *exceptionThrown,  Error *error) {
 
   RetVal ret;
 
@@ -3635,7 +3448,7 @@ RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, VMException *except
   throws(pushFrame(vm, &frame, fnRef, error));
   pushed = true;
 
-  throws(tryFrameEval(vm, frame, error));
+  throws(tryFrameEval(vm, frame, outputPool, error));
 
   if (frame->exceptionSet) {
     *exceptionThrown = true;
@@ -3656,7 +3469,7 @@ RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Value *result, VMException *except
     return ret;
 }
 
-RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t pool, VMEvalResult *result, Error *error) {
+RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, VMEvalResult *result, Error *error) {
 
   RetVal ret;
 
@@ -3664,7 +3477,7 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t pool, VMEvalResult *result, 
   VMException exception;
   bool exceptionThrown = false;
 
-  throws(_tryVMEval(vm, codeUnit, &value, &exception, &exceptionThrown, error));
+  throws(_tryVMEval(vm, codeUnit, outputPool, &value, &exception, &exceptionThrown, error));
 
   if (exceptionThrown) {
     result->type = RT_EXCEPTION;
@@ -3672,7 +3485,7 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t pool, VMEvalResult *result, 
   }
   else {
     result->type = RT_RESULT;
-    throws(tryVMPrn(vm, value, pool, &result->result, error));
+    throws(tryVMPrn(vm, value, outputPool, &result->result, error));
   }
 
   return R_SUCCESS;
@@ -3817,7 +3630,7 @@ RetVal tryPrStrBuiltinConf(VM *vm, ExecFrame_t frame, bool readable, Error *erro
   throws(tryPoolCreate(&pool, ONE_KB, error));
 
   throws(tryVMPrn(vm, value, pool, &expr, error));
-  throws(tryStringBufferMake(&b, error));
+  throws(tryStringBufferMake(pool, &b, error));
   throws(tryExprPrnBufConf(&expr, b, readable, error));
 
   Value resultRef = nil();
@@ -3837,7 +3650,6 @@ RetVal tryPrStrBuiltinConf(VM *vm, ExecFrame_t frame, bool readable, Error *erro
 
   done:
     // clean up off-heap memory
-    stringBufferFree(b);
     poolFree(pool);
     return ret;
 }
@@ -4016,7 +3828,6 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
 void vmFreeContents(VM *vm) {
   if (vm != NULL) {
     GCFreeContents(&vm->gc);
-    namespacesFreeContents(&vm->namespaces);
   }
 }
 

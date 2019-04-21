@@ -13,8 +13,8 @@ void fileInfoFreeContents(FileInfo *f);
 
 RetVal tryReplCompile(TokenStream_t stream, FileInfo fileInfo, VM_t vm, CodeUnit *codeUnit, Error *error);
 
-RetVal tryReplEvalConf(wchar_t *inputText, wchar_t **outputText, bool useStdLib, Error *error);
-RetVal tryReplEval(wchar_t *inputText, wchar_t **outputText, Error *error);
+RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputText, bool useStdLib, Error *error);
+RetVal tryReplEval(Pool_t outputPool, wchar_t *inputText, wchar_t **outputText, Error *error);
 
 RetVal tryLoad(VM_t vm, char *filename, Error *error);
 

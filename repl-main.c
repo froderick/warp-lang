@@ -22,7 +22,7 @@ int main(void) {
   throws(tryVMMake(&vm, &error));
   throws(tryLoad(vm, STD_LIB, &error));
 
-  throws(tryFileInputStreamMake(stdin, &source, &error));
+  throws(tryFileInputStreamMake(pool, stdin, &source, &error));
   throws(tryStreamMake(pool, source, &stream, &error));
 
 
@@ -58,7 +58,7 @@ int main(void) {
 
     if (result.type == RT_RESULT) {
       printf("> ");
-      throws(tryExprPrn(&result.result, &error));
+      throws(tryExprPrn(pool, &result.result, &error));
       printf("\n");
     }
     else if (result.type == RT_EXCEPTION) {
@@ -69,7 +69,6 @@ int main(void) {
       printf("> encountered unhandled eval result type\n\n");
     }
 
-    codeUnitFreeContents(&unit);
     poolClear(pool);
   }
 

@@ -222,7 +222,7 @@ typedef struct VMEvalResult {
 void exceptionInitContents(VMException *e);
 void evalResultInitContents(VMEvalResult *r);
 
-RetVal tryExceptionPrint(VMException *e, wchar_t **ptr, Error *error);
+RetVal tryExceptionPrint(Pool_t pool, VMException *e, wchar_t **ptr, Error *error);
 RetVal tryExceptionPrintf(VMException *e, Error *error);
 
 RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, Pool_t pool, VMEvalResult *result, Error *error);

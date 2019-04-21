@@ -12,7 +12,7 @@ int main(void) {
   tryPoolCreate(&pool, ONE_MB, &e);
 
   InputStream_t source;
-  int error = tryFileInputStreamMake(stdin, &source, &e);
+  int error = tryFileInputStreamMake(pool, stdin, &source, &e);
   if (error) {
     printf("whoops 1");
   }
