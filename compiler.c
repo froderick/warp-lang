@@ -178,9 +178,6 @@ RetVal tryCompile(Form *form, Output output, Error *error);
 
 RetVal nilConstantGetIndex(Output output, uint16_t *index, Error *error);
 
-// TODO: stop using temporary compilation spaces, they don't work when ifs are nested
-// *instead*, compile everything inline, but keep pointers to the forward-jump addresses that need to be updated once
-// the sizes of the compiled then/else blocks are known
 RetVal tryCompileIf(Form *form, Output output, Error *error) {
   RetVal ret;
 

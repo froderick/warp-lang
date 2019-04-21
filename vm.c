@@ -2976,7 +2976,7 @@ typedef struct ExecFrame {
   ExecFrame *parent;
 
   Value fnRef;
-  Fn *fn; // TODO: the collector will have to treat relocating functions specially to make this reference work
+  Fn *fn;
 
   Value *locals;
   OpStack *opStack;

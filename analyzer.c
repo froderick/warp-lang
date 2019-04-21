@@ -966,12 +966,12 @@ uint16_t numSyntaxQuotedListArgs(Expr *quoted) {
 //     - analyze the element as quoted and add it to the list argument
 
 /*
- * TODO: if I made concat a macro, supporting var-args, this would probably work in the repl, but not the tests:
+ * if I made concat a macro, supporting var-args, this would probably work in the repl, but not the tests:
  * `(1 2 ~(builtin :add 3 1))
  *
  * figure out how we're going to support this concat functionality, and finish testing this feature
  *
- * TODO: perhaps supporting var-args is easier than dealing with meta macros
+ * perhaps supporting var-args is easier than dealing with meta macros
  * X lexer emits & as its own symbol
  * X analyzer check for ampersand in arg list for fn definition
  *   - must come immediately before last argument, or error
