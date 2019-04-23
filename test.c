@@ -541,7 +541,7 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.numConstants, 3);
       ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
       ck_assert_int_eq(codeUnit.constants[0].integer, 100);
-      ck_assert_int_eq(codeUnit.constants[1].type, CT_VAR_REF);
+      ck_assert_int_eq(codeUnit.constants[1].type, CT_STR);
       ck_assert_int_eq(codeUnit.constants[1].varRef.nameLength, 1);
       ck_assert_int_eq(wcscmp(codeUnit.constants[1].varRef.name, L"x"), 0);
       ck_assert_int_eq(codeUnit.constants[2].type, CT_INT);

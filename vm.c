@@ -1,4 +1,4 @@
-    #include <stdlib.h>
+#include <stdlib.h>
 #include <string.h>
 #include <libgen.h>
 #include <time.h>
@@ -1019,9 +1019,6 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
       break;
     case CT_FN:
       throws(tryFnHydrate(vm, &c.function, &v, error));
-      break;
-    case CT_VAR_REF:
-      throws(tryVarRefHydrate(vm, c.varRef, &v, error));
       break;
     case CT_STR:
       throws(tryStringHydrate(vm, c.string, &v, error));

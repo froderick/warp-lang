@@ -478,7 +478,7 @@ RetVal varRefConstantGetIndex(Text name, Output output, uint16_t *index, Error *
   // look for already-defined var ref constant
   for (uint16_t i=0; i<output.constants->numUsed; i++) {
     Constant *c = &output.constants->constants[i];
-    if (c->type == CT_VAR_REF && wcscmp(c->varRef.name, name.value) == 0) {
+    if (c->type == CT_STR && wcscmp(c->varRef.name, name.value) == 0) {
       *index = i;
       return R_SUCCESS;
     }
@@ -486,7 +486,7 @@ RetVal varRefConstantGetIndex(Text name, Output output, uint16_t *index, Error *
 
   // create or reuse var ref constant
   Constant c;
-  c.type = CT_VAR_REF;
+  c.type = CT_STR;
   c.varRef.nameLength = name.length;
   throws(tryCopyText(output.pool, name.value, &c.varRef.name, c.varRef.nameLength, error));
   throws(tryAppendConstant(output, c, error));

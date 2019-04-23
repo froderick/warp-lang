@@ -85,7 +85,6 @@ typedef enum ConstantType {
   CT_NIL,
   CT_STR,
   CT_FN,
-  CT_VAR_REF,
   CT_SYMBOL,
   CT_KEYWORD,
   CT_LIST
@@ -141,10 +140,6 @@ typedef struct ListConstant {
   ConstantMeta meta;
 } ListConstant;
 
-typedef struct FnRefConstant {
-  uint64_t fnId;
-} FnRefConstant;
-
 typedef struct Constant {
   ConstantType type;
   union {
@@ -165,20 +160,12 @@ typedef struct CodeUnit {
   Code code;
 } CodeUnit;
 
-
 void lineNumberInitContents(LineNumber *n);
 void sourceTableInitContents(SourceTable *t);
-
 void codeInitContents(Code *code);
-void codeFreeContents(Code *code);
 void printCodeUnit(CodeUnit *unit);
-
 void constantFnInitContents(FnConstant *fnConst);
-void _constantFreeContents(Constant *c);
-
 void codeUnitInitContents(CodeUnit *codeUnit);
-void codeUnitFreeContents(CodeUnit *codeUnit);
-
 void constantMetaInit(ConstantMeta *c);
 
 typedef struct VM *VM_t;
