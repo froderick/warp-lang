@@ -195,6 +195,7 @@ typedef struct String {
 
   uint64_t length;
   size_t valueOffset;
+  uint32_t hash;
 } String;
 
 wchar_t* stringValue(String *x) { return (void*)x + x->valueOffset; }
@@ -204,6 +205,7 @@ typedef struct Symbol {
 
   uint64_t length;
   size_t valueOffset;
+  uint32_t hash;
 } Symbol;
 
 wchar_t* symbolValue(Symbol *x) { return (void*)x + x->valueOffset; }
@@ -213,6 +215,7 @@ typedef struct Keyword {
 
   uint64_t length;
   size_t valueOffset;
+  uint32_t hash;
 } Keyword;
 
 wchar_t* keywordValue(Keyword *x) { return (void*)x + x->valueOffset; }
@@ -297,6 +300,7 @@ typedef struct Invocable {
 
 typedef RetVal (*TryRelocateChildren)(VM_t vm, void *oldHeap, void *obj, Error *error);
 typedef RetVal (*TryPrn)(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error);
+typedef RetVal (*TryHashCode)(VM_t vm, Value value, uint32_t *hash, Error *error);
 
 typedef struct ValueTypeInfo {
   const char *name;
@@ -304,6 +308,7 @@ typedef struct ValueTypeInfo {
   bool (*isTruthy)(Value value);
   TryRelocateChildren tryRelocateChildren;
   TryPrn tryPrn;
+  TryHashCode tryHashCode;
 } ValueTypeInfo;
 
 typedef struct ValueTypeTable {
@@ -796,6 +801,7 @@ void stringInitContents(String *s) {
   objectHeaderInitContents(&s->header);
   s->length = 0;
   s->valueOffset = 0;
+  s->hash = 0;
 }
 
 RetVal _tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value, Error *error) {
@@ -854,6 +860,7 @@ void symbolInitContents(Symbol *s) {
   objectHeaderInitContents(&s->header);
   s->length = 0;
   s->valueOffset = 0;
+  s->hash = 0;
 }
 
 RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *error) {
@@ -891,6 +898,7 @@ void keywordInitContents(Keyword *k) {
   objectHeaderInitContents(&k->header);
   k->length = 0;
   k->valueOffset = 0;
+  k->hash = 0;
 }
 
 RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *error) {
@@ -1627,6 +1635,91 @@ RetVal tryRetEval(VM *vm, ExecFrame_t frame, Error *error) {
   return ret;
 }
 
+// TODO: understand why this algorithm works
+// http://hg.openjdk.java.net/jdk7u/jdk7u6/jdk/file/8c2c5d63a17e/src/share/classes/java/lang/String.java
+uint32_t stringHash(String *s) {
+  uint32_t h = s->hash;
+  if (h == 0 && s->length > 0) {
+    wchar_t *val = stringValue(s);
+    for (uint64_t i=0; i<s->length; i++) {
+      h = 31 * h + val[i];
+    }
+    s->hash = h;
+  }
+  return h;
+}
+
+RetVal tryStringHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
+  RetVal ret;
+  String *s = NULL;
+  throws(deref(&vm->gc, (void *) &s, value.value, error));
+  *hash = stringHash(s);
+  return R_SUCCESS;
+  failure:
+    return ret;
+}
+
+uint32_t symbolHash(Symbol *s) {
+  uint32_t h = s->hash;
+  if (h == 0 && s->length > 0) {
+    wchar_t *val = symbolValue(s);
+    for (uint64_t i=0; i<s->length; i++) {
+      h = 31 * h + val[i];
+    }
+    s->hash = h;
+  }
+  return h;
+}
+
+RetVal trySymbolHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
+  RetVal ret;
+  Symbol *s = NULL;
+  throws(deref(&vm->gc, (void *) &s, value.value, error));
+  *hash = symbolHash(s);
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+uint32_t keywordHash(Keyword *s) {
+  uint32_t h = s->hash;
+  if (h == 0 && s->length > 0) {
+    wchar_t *val = keywordValue(s);
+    for (uint64_t i=0; i<s->length; i++) {
+      h = 31 * h + val[i];
+    }
+    s->hash = h;
+  }
+  return h;
+}
+
+RetVal tryKeywordHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
+  RetVal ret;
+  Keyword *s = NULL;
+  throws(deref(&vm->gc, (void *) &s, value.value, error));
+  *hash = keywordHash(s);
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryHashCode(VM *vm, Value value, uint32_t *hash, Error *error) {
+  RetVal ret;
+
+  TryHashCode hashCode = vm->valueTypeTable.valueTypes[value.type].tryHashCode;
+  if (hashCode == NULL) {
+    throwRuntimeError(error, "hash not supported for type: %s", getValueTypeName(vm, value.type));
+  }
+  else {
+    throws(hashCode(vm, value, hash, error));
+  }
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 // (8)              | (a, b -> 0 | 1)
 RetVal tryCmpEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
@@ -1639,9 +1732,36 @@ RetVal tryCmpEval(VM *vm, ExecFrame_t frame, Error *error) {
   c.type = VT_BOOL;
   c.value = false;
 
-  if (a.type == b.type && a.value == b.value) {
-    // NOTE: doesn't do equivalence on heap objects, reference identity compared only
-    c.value = true;
+  if (a.type == b.type) {
+    switch (a.type) {
+
+      // these are equivalent based on type + value
+      case VT_NIL:
+      case VT_UINT:
+      case VT_BOOL:
+      case VT_FN:
+      case VT_CLOSURE:
+      case VT_CFN:
+      case VT_LIST:
+        c.value = a.value == b.value;
+        break;
+
+      // these implement hashcode
+      case VT_STR:
+      case VT_SYMBOL:
+      case VT_KEYWORD: {
+        if (a.value == b.value) {
+          c.value = true;
+        }
+        else {
+          uint32_t hashA = 0, hashB = 0;
+          throws(tryHashCode(vm, a, &hashA, error));
+          throws(tryHashCode(vm, b, &hashB, error));
+          c.value = hashA == hashB;
+        }
+        break;
+      }
+    }
   }
 
   throws(pushOperand(frame, c, error));
@@ -2603,52 +2723,62 @@ ValueTypeTable valueTypeTableCreate() {
                         .isHeapObject = false,
                         .isTruthy = &isTruthyNo,
                         .tryRelocateChildren = NULL,
-                        .tryPrn = &tryPrnNil},
+                        .tryPrn = &tryPrnNil,
+                        .tryHashCode = NULL},
       [VT_UINT]      = {.name = "uint",
                         .isHeapObject = false,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = NULL,
-                        .tryPrn = &tryPrnInt},
+                        .tryPrn = &tryPrnInt,
+                        .tryHashCode = NULL },
       [VT_BOOL]      = {.name = "bool",
                         .isHeapObject = false,
                         .isTruthy = &isTruthyBool,
                         .tryRelocateChildren = NULL,
-                        .tryPrn = &tryPrnBool},
+                        .tryPrn = &tryPrnBool,
+                        .tryHashCode = NULL },
       [VT_FN]        = {.name = "fn",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = &tryRelocateChildrenFn,
-                        .tryPrn = &tryPrnFn},
+                        .tryPrn = &tryPrnFn,
+                        .tryHashCode = NULL },
       [VT_STR]       = {.name = "str",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = NULL,
-                        .tryPrn = &tryPrnStr},
+                        .tryPrn = &tryPrnStr,
+                        .tryHashCode = &tryStringHashCode},
       [VT_SYMBOL]    = {.name = "symbol",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = NULL,
-                        .tryPrn = &tryPrnSymbol},
+                        .tryPrn = &tryPrnSymbol,
+                        .tryHashCode = &trySymbolHashCode},
       [VT_KEYWORD]   = {.name = "keyword",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = NULL,
-                        .tryPrn = &tryPrnKeyword},
+                        .tryPrn = &tryPrnKeyword,
+                        .tryHashCode = &tryKeywordHashCode},
       [VT_LIST]      = {.name = "list",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = &tryRelocateChildrenList,
-                        .tryPrn = &tryPrnList},
+                        .tryPrn = &tryPrnList,
+                        .tryHashCode = NULL},
       [VT_CLOSURE]   = {.name = "closure",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = &tryRelocateChildrenClosure,
-                        .tryPrn = &tryPrnClosure},
+                        .tryPrn = &tryPrnClosure,
+                        .tryHashCode = NULL},
       [VT_CFN]       = {.name = "cfn",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = NULL,
-                        .tryPrn = &tryPrnCFn},
+                        .tryPrn = &tryPrnCFn,
+                        .tryHashCode = NULL},
   };
   memcpy(table.valueTypes, valueTypes, sizeof(valueTypes));
   table.numValueTypes = sizeof(valueTypes) / sizeof(valueTypes[0]);
@@ -3723,6 +3853,71 @@ RetVal trySymbolBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   return ret;
 }
 
+RetVal tryKeywordMakeBlank(VM *vm, ExecFrame_t frame, uint64_t length, Value *result, Error *error) {
+  RetVal ret;
+
+  Keyword *kw = NULL;
+
+  size_t textSize = (length + 1) * sizeof(wchar_t);
+  size_t size = sizeof(Keyword) + textSize;
+
+  uint64_t offset = 0;
+  throws(alloc(vm, frame, size, (void*)&kw, &offset, error));
+
+  result->type = VT_KEYWORD;
+  result->value = offset;
+
+  keywordInitContents(kw);
+  kw->header.type = VT_KEYWORD;
+  kw->header.size = size;
+  kw->length = length;
+
+  kw->valueOffset = sizeof(Symbol);
+  keywordValue(kw)[kw->length] = L'\0';
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryKeywordBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
+  RetVal ret;
+
+  Value value;
+  throws(popOperand(frame, &value, error));
+
+  ASSERT_STR(value);
+
+  uint64_t length = 0;
+  {
+    String *string = NULL;
+    throws(deref(&vm->gc, (void *) &string, value.value, error));
+    length = string->length;
+  }
+
+  // keep the string safely on the op stack while we allocate
+  throws(pushOperand(frame, value, error));
+
+  Value result;
+  throws(tryKeywordMakeBlank(vm, frame, length, &result, error));
+
+  // pop string back off now we're done allocating
+  throws(popOperand(frame, &value, error));
+
+  // actually copy string into symbol
+  String *string = NULL;
+  throws(deref(&vm->gc, (void *) &string, value.value, error));
+  Keyword *kw = NULL;
+  throws(deref(&vm->gc, (void *) &kw, result.value, error));
+  memcpy(keywordValue(kw), stringValue(string), kw->length * sizeof(wchar_t));
+
+  throws(pushOperand(frame, result, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
 void cFnInitContents(CFn *fn) {
   objectHeaderInitContents(&fn->header);
   fn->nameLength = 0;
@@ -3799,6 +3994,7 @@ RetVal tryInitCFns(VM *vm, Error *error) {
   throws(tryDefineCFn(vm, L"pr-str",    1, false, tryPrStrBuiltin,     error));
   throws(tryDefineCFn(vm, L"print-str", 1, false, tryPrintStrBuiltin,  error));
   throws(tryDefineCFn(vm, L"symbol",    1, false, trySymbolBuiltin,    error));
+  throws(tryDefineCFn(vm, L"keyword",   1, false, tryKeywordBuiltin,   error));
 
   return R_SUCCESS;
   failure:
