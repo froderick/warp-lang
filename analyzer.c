@@ -1220,11 +1220,11 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *err
 
   if (output.type == RT_RESULT) {
 
-    printf("macroexpand occurred {\n    ");
-    throws(tryExprPrn(ctx->pool, expr, error));
-    printf("\n    =>\n    ");
-    throws(tryExprPrn(ctx->pool, &output.result, error));
-    printf("\n}\n");
+//    printf("macroexpand occurred {\n    ");
+//    throws(tryExprPrn(ctx->pool, expr, error));
+//    printf("\n    =>\n    ");
+//    throws(tryExprPrn(ctx->pool, &output.result, error));
+//    printf("\n}\n");
 
     throws(tryFormAnalyzeContents(ctx, &output.result, form, error));
     return R_SUCCESS;
