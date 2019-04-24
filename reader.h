@@ -47,6 +47,18 @@ typedef struct ExprList {
   ListElement *tail;
 } ExprList;
 
+typedef struct MapElement {
+  struct Expr *key;
+  struct Expr *value;
+  struct MapElement *next;
+} MapElement;
+
+typedef struct ExprMap {
+  uint64_t length;
+  MapElement *head;
+  MapElement *tail;
+} ExprMap;
+
 typedef enum ExprType {
   N_NONE,
   N_STRING,
@@ -55,7 +67,8 @@ typedef enum ExprType {
   N_KEYWORD,
   N_BOOLEAN,
   N_NIL,
-  N_LIST
+  N_LIST,
+  N_MAP
 } ExprType;
 
 typedef struct Expr {
@@ -67,6 +80,7 @@ typedef struct Expr {
     ExprKeyword keyword;
     ExprBoolean boolean;
     ExprList list;
+    ExprMap map;
   };
   SourceLocation source;
 } Expr;

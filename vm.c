@@ -1003,6 +1003,38 @@ RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant list
   return ret;
 }
 
+RetVal tryMapHydrate(VM *vm, Value *alreadyHydratedConstants, MapConstant listConst, Value *value, Error *error) {
+  RetVal ret;
+
+  explode("not implemented");
+
+  // build up meta property list with conses
+  Value meta = nil();
+
+  for (uint64_t i=0; i<listConst.meta.numProperties; i++) {
+    ConstantMetaProperty *p = &listConst.meta.properties[i];
+    throws(_tryAllocateCons(vm, alreadyHydratedConstants[p->valueIndex], meta, nil(), &meta, error));
+    throws(_tryAllocateCons(vm, alreadyHydratedConstants[p->keyIndex], meta, nil(), &meta, error));
+  }
+
+  // build up list with conses, each cons gets the same meta
+  Value seq = nil();
+
+  for (uint16_t i = 0; i < listConst.length; i++) {
+
+    uint16_t listConstEnd = listConst.length - 1;
+    uint16_t valueIndex = listConst.constants[listConstEnd - i];
+
+    throws(_tryAllocateCons(vm, alreadyHydratedConstants[valueIndex], seq, meta, &seq, error));
+  }
+
+  *value = seq;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 // TODO: I had a thought, can we get rid of CodeUnit entirely and just replace it with FnConstant?
 // TODO: I had another thought, can we get rid of the nested graph of constants and flatten it entirely?
 
@@ -1039,6 +1071,9 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
       break;
     case CT_LIST:
       throws(tryListHydrate(vm, alreadyHydratedConstants, c.list, &v, error));
+      break;
+    case CT_MAP:
+      throws(tryMapHydrate(vm, alreadyHydratedConstants, c.map, &v, error));
       break;
     case CT_NONE:
     default:

@@ -1241,6 +1241,20 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *err
   return ret;
 }
 
+RetVal tryMapAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error) {
+  RetVal ret;
+
+  if (expr->type != N_MAP) {
+    throwInternalError(error, "the contents of a macro argument must be a list: %u", expr->type);
+  }
+
+
+
+
+  failure:
+  return ret;
+}
+
 RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Error *error) {
 
   // copy expression source metadata
@@ -1255,7 +1269,8 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
     case N_NUMBER:
     case N_KEYWORD:
     case N_BOOLEAN:
-    case N_NIL: {
+    case N_NIL:
+    case N_MAP: {
       form->type = F_CONST;
       throws(tryConstantAnalyze(ctx->pool, expr, &form->constant, error));
       break;

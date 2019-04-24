@@ -498,6 +498,47 @@ RetVal varRefConstantGetIndex(Text name, Output output, uint16_t *index, Error *
     return ret;
 }
 
+RetVal appendMeta(Output output, Expr *constant, ConstantMeta *meta, Error *error) {
+  RetVal ret;
+
+  constantMetaInit(meta);
+  if (constant->source.isSet) {
+
+    if (constant->source.lineNumber == 0) {
+      throwRuntimeError(error, "line number is required if source has been set");
+    }
+
+    meta->numProperties = 1;
+    tryPalloc(output.pool, meta->properties, sizeof(ConstantMetaProperty) * meta->numProperties,
+        "ConstantMetaProperty array");
+    ConstantMetaProperty *lineNo = &meta->properties[0];
+
+    {
+      wchar_t *keyName = L"line-number";
+      Constant key;
+      key.type = CT_KEYWORD;
+      key.keyword.length = wcslen(keyName);
+      throws(tryCopyText(output.pool, keyName, &key.keyword.value, key.keyword.length, error));
+      throws(tryAppendConstant(output, key, error));
+      uint16_t index = output.constants->numUsed - 1;
+      lineNo->keyIndex = index;
+    }
+
+    {
+      Constant value;
+      value.type = CT_INT;
+      value.integer = constant->source.lineNumber;
+      throws(tryAppendConstant(output, value, error));
+      uint16_t index = output.constants->numUsed - 1;
+      lineNo->valueIndex = index;
+    }
+  }
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
 RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *error) {
   RetVal ret;
 
@@ -538,39 +579,9 @@ RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *erro
     case N_LIST: {
       c->type = CT_LIST;
       c->list.length = constant->list.length;
-      tryPalloc(output.pool, c->list.constants, sizeof(uint16_t) * c->list.length, "typeIndex array");
+      tryPalloc(output.pool, c->list.constants, sizeof(uint16_t) * c->list.length, "constant list array");
 
-      constantMetaInit(&c->list.meta);
-      if (constant->source.isSet) {
-
-        if (constant->source.lineNumber == 0) {
-          throwRuntimeError(error, "line number is required if source has been set");
-        }
-
-        c->list.meta.numProperties = 1;
-        tryPalloc(output.pool, c->list.meta.properties, sizeof(ConstantMetaProperty) * c->list.meta.numProperties, "ConstantMetaProperty array");
-        ConstantMetaProperty *lineNo = &c->list.meta.properties[0];
-
-        {
-          wchar_t *keyName = L"line-number";
-          Constant key;
-          key.type = CT_KEYWORD;
-          key.keyword.length = wcslen(keyName);
-          throws(tryCopyText(output.pool, keyName, &key.keyword.value, key.keyword.length, error));
-          throws(tryAppendConstant(output, key, error));
-          uint16_t index = output.constants->numUsed - 1;
-          lineNo->keyIndex = index;
-        }
-
-        {
-          Constant value;
-          value.type = CT_INT;
-          value.integer = constant->source.lineNumber;
-          throws(tryAppendConstant(output, value, error));
-          uint16_t index = output.constants->numUsed - 1;
-          lineNo->valueIndex = index;
-        }
-      }
+      throws(appendMeta(output, constant, &c->list.meta, error));
 
       ListElement *elem = constant->list.head;
       uint16_t elemIndex = 0;
@@ -585,6 +596,36 @@ RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *erro
 
         elem = elem->next;
         elemIndex = elemIndex + 1;
+      }
+
+      break;
+    }
+    case N_MAP: {
+
+      c->type = CT_MAP;
+      c->map.length = constant->map.length;
+      tryPalloc(output.pool, c->map.constants, sizeof(uint16_t) * c->map.length * 2, "constant map array");
+
+      throws(appendMeta(output, constant, &c->map.meta, error));
+
+      MapElement *elem = constant->map.head;
+      uint16_t elemIndex = 0;
+      while (elem != NULL) {
+
+        Constant key, value;
+
+        throws(constInitContents(elem->key, &key, output, error));
+        throws(tryAppendConstant(output, key, error));
+        uint16_t keyIndex = output.constants->numUsed - 1;
+        c->map.constants[elemIndex] = keyIndex;
+
+        throws(constInitContents(elem->value, &value, output, error));
+        throws(tryAppendConstant(output, value, error));
+        uint16_t valueIndex = output.constants->numUsed - 1;
+        c->map.constants[elemIndex + 1] = valueIndex;
+
+        elem = elem->next;
+        elemIndex = elemIndex + 2;
       }
 
       break;

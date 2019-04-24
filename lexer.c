@@ -52,6 +52,10 @@ const char* tokenName(TokenType type) {
       return "KEYWORD";
     case T_COMMENT:
       return "COMMENT";
+    case T_OBRACKET:
+      return "OBRACKET";
+    case T_CBRACKET:
+      return "CBRACKET";
     default:
       return "<UNKNOWN>";
   }
@@ -432,12 +436,12 @@ RetVal tryTokenRead(Pool_t pool, InputStream_t source, LexerState *s, Token **to
 //  else if (ch == L']') {
 //    ret = tryTokenInit(T_CVEC, L"]", s->position, 1, token, error);
 //  }
-//  else if (ch == L'{') {
-//    ret = tryTokenInit(T_OBRACKET, L"{", s->position, 1, token, error);
-//  }
-//  else if (ch == L'}') {
-//    ret = tryTokenInit(T_CBRACKET, L"}", s->position, 1, token, error);
-//  }
+  else if (ch == L'{') {
+    throws(tryTokenInit(pool, T_OBRACKET, L"{", s->position, 1, s->lineNumber, s->colNumber, token, error));
+  }
+  else if (ch == L'}') {
+    throws(tryTokenInit(pool, T_CBRACKET, L"}", s->position, 1, s->lineNumber, s->colNumber, token, error));
+  }
   else if (ch == L'\'') {
     throws(tryTokenInit(pool, T_QUOTE, L"'", s->position, 1, s->lineNumber, s->colNumber, token, error));
   }

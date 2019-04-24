@@ -1,4 +1,4 @@
-#ifndef WARP_LANG_ERRORS_H
+    #ifndef WARP_LANG_ERRORS_H
 #define WARP_LANG_ERRORS_H
 
 #include <stdint.h>
@@ -169,6 +169,19 @@ RetVal compilerError(Error *error, char *desc);
     ret = memoryError(error, desc);\
     goto failure; \
   }\
+}
+
+#define explode(str, ...) {\
+  Error error; \
+  errorInitContents(&error); \
+  error.fileName = __FILE__; \
+  error.lineNumber = __LINE__; \
+  error.functionName = __func__; \
+  int len = 64; \
+  char msg[len]; \
+  snprintf(msg, len, str, ##__VA_ARGS__); \
+  internalError(&error, msg); \
+  exit(-1); \
 }
 
 #endif //WARP_LANG_ERRORS_H

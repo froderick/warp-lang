@@ -7,6 +7,7 @@
 #include <wctype.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <assert.h>
 
 #include "utils.h"
 #include "lexer.h"
@@ -415,6 +416,219 @@ RetVal tryListAppend(Pool_t pool, ExprList *list, Expr *expr, Error *error) {
     return ret;
 }
 
+// maps
+
+void mapInitContents(ExprMap *map) {
+  map->length = 0;
+  map->head = NULL;
+  map->tail = NULL;
+}
+
+RetVal tryMapMake(Pool_t pool, Expr **ptr, Error *error) {
+  RetVal ret;
+
+  Expr *expr;
+  tryPalloc(pool, expr, sizeof(Expr), "Expr");
+
+  expr->type = N_MAP;
+  expr->source.isSet = false;
+
+  // valid for zero length map
+  mapInitContents(&expr->map);
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+bool exprEquals(Expr *a, Expr *b) {
+
+  if (a->type != b->type) {
+    return false;
+  }
+  else {
+    switch (a->type) {
+
+      case N_NIL:
+        return true;
+
+      case N_NUMBER:
+        return a->number.value == b->number.value;
+
+      case N_BOOLEAN:
+        return a->boolean.value == b->boolean.value;
+
+      case N_STRING:
+        return wcscmp(a->string.value, b->string.value) == 0;
+
+      case N_SYMBOL:
+        return wcscmp(a->symbol.value, b->symbol.value) == 0;
+
+      case N_KEYWORD:
+        return wcscmp(a->keyword.value, b->keyword.value) == 0;
+
+      case N_LIST:
+        if (a->list.length != b->list.length) {
+          return false;
+        }
+        else {
+          ListElement *aseq = a->list.head;
+          ListElement *bseq = b->list.head;
+
+          while (aseq != NULL) {
+            if (!exprEquals(aseq->expr, bseq->expr)) {
+              return false;
+            }
+            aseq = aseq->next;
+            bseq = bseq->next;
+          }
+          return true;
+        }
+
+      case N_MAP:
+        // make sure there are the same numbers of distinct key entries in a and b
+        if (a->map.length != b->map.length) {
+          return false;
+        }
+        else {
+
+          // iterate over the keys in a
+          MapElement *amap = a->map.head;
+          while (amap != NULL) {
+
+            // make sure all the keys and values from a are in b
+            MapElement *found = NULL;
+            {
+              MapElement *bmap = b->map.head;
+              while (bmap != NULL) {
+                if (exprEquals(amap->key, bmap->key)) {
+                  found = bmap;
+                }
+                bmap = bmap->next;
+              }
+            }
+
+            if (found == NULL) {
+              return false;
+            }
+
+            if (!exprEquals(amap->value, found->value)) {
+              return false;
+            }
+
+            amap = amap->next;
+          }
+
+          return true;
+        }
+
+      default:
+        explode("unhandled expression type: %u", a->type);
+    }
+  }
+}
+
+
+RetVal tryMapPut(Pool_t pool, ExprMap *map, Expr *key, Expr *value, Error *error) {
+  RetVal ret;
+
+  // make sure all the keys and values from a are in b
+  MapElement *found = NULL;
+  {
+    MapElement *elem = map->head;
+    while (elem != NULL) {
+      if (exprEquals(key, elem->key)) {
+        found = elem;
+      }
+      elem = elem->next;
+    }
+  }
+
+  if (found != NULL) {
+    found->value = value;
+  }
+  else {
+    MapElement *elem;
+    tryPalloc(pool, elem, sizeof(MapElement), "MapElement");
+
+    elem->key = key;
+    elem->value = value;
+
+    if (map->head == NULL) { // no elements
+      map->head = elem;
+      map->tail = elem;
+    }
+    else if (map->head == map->tail) { // one element
+      map->head->next = elem;
+      map->tail = elem;
+    }
+    else { // more than one element
+      map->tail->next = elem;
+      map->tail = elem;
+    }
+
+    map->length = map->length + 1;
+  }
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryMapRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+  RetVal ret;
+
+  // these get cleaned up on failure
+  Token *oParen = NULL, *cParen = NULL;
+  Expr *expr = NULL;
+
+  // convenience
+
+  throws(tryMapMake(pool, &expr, error));
+
+  throws(tryStreamNext(pool, stream, &oParen, error));
+
+  if (oParen->type != T_OBRACKET) {
+    throwSyntaxError(error, oParen->source.position, "Map must begin with '{': %u", oParen->type);
+  }
+
+  while (true) {
+
+    ret = tryStreamPeek(pool, stream, &cParen, error);
+    if (ret != R_SUCCESS) {
+      if (ret == R_EOF) { // eof too soon
+        throwSyntaxError(error, oParen->source.position, "Encountered EOF, was expecting '}'");
+      }
+      goto failure;
+    }
+
+    if (cParen->type == T_CBRACKET) { // found our closed paren
+
+      streamDropPeeked(stream); // consume cParen now that nothing else can fail
+
+      expr->source = oParen->source;
+      expr->source.length = cParen->source.position - oParen->source.position;
+
+      *ptr = expr;
+      break;
+    }
+    else { // read a new entry and add it to the map
+      Expr *key = NULL, *value = NULL;
+      throws(tryExprRead(pool, stream, &key, error));
+      throws(tryExprRead(pool, stream, &value, error));
+      throws(tryMapPut(pool, &expr->map, key, value, error));
+    }
+  }
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 RetVal tryQuoteRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
 
   RetVal ret;
@@ -537,6 +751,11 @@ RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) 
       throws(tryListRead(pool, stream, ptr, error));
       break;
 
+    // maps
+    case T_OBRACKET:
+      throws(tryMapRead(pool, stream, ptr, error));
+      break;
+
     // reader macros
     case T_QUOTE:
       throws(tryQuoteRead(pool, stream, ptr, error));
@@ -572,7 +791,6 @@ RetVal tryExprDeepCopy(Pool_t pool, Expr *from, Expr **ptr, Error *error) {
 
   // these get cleaned up on failure
   Expr *to;
-  Expr *listItem;
 
   switch (from->type) {
 
@@ -601,9 +819,24 @@ RetVal tryExprDeepCopy(Pool_t pool, Expr *from, Expr **ptr, Error *error) {
       ListElement *elem = from->list.head;
       while (elem != NULL) {
 
+        Expr *listItem = NULL;
         throws(tryExprDeepCopy(pool, elem->expr, &listItem, error));
         throws(tryListAppend(pool, &to->list, listItem, error));
-        listItem = NULL; // item is now part of list
+
+        elem = elem->next;
+      }
+      break;
+    }
+    case N_MAP: {
+      throws(tryMapMake(pool, &to, error));
+
+      MapElement *elem = from->map.head;
+      while (elem != NULL) {
+
+        Expr *k = NULL, *v = NULL;
+        throws(tryExprDeepCopy(pool, elem->key, &k, error));
+        throws(tryExprDeepCopy(pool, elem->value, &v, error));
+        throws(tryMapPut(pool, &to->map, k, v, error));
 
         elem = elem->next;
       }
@@ -680,6 +913,26 @@ RetVal tryExprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable, Error *err
       }
 
       throws(tryStringBufferAppendChar(b, L')', error));
+      break;
+    }
+    case N_MAP: {
+      throws(tryStringBufferAppendChar(b, L'{', error));
+
+      MapElement *elem = expr->map.head;
+      for (int i=0; i<expr->map.length; i++) {
+
+        throws(tryExprPrnBufConf(elem->key, b, readable, error));
+        throws(tryStringBufferAppendChar(b, L' ', error));
+        throws(tryExprPrnBufConf(elem->value, b, readable, error));
+
+        if (i + 1 < expr->map.length) {
+          throws(tryStringBufferAppendChar(b, L' ', error));
+        }
+
+        elem = elem->next;
+      }
+
+      throws(tryStringBufferAppendChar(b, L'}', error));
       break;
     }
     default:

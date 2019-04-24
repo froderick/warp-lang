@@ -26,6 +26,8 @@ typedef enum TokenType {
   T_FALSE,
   T_NIL,
   T_COMMENT,
+  T_OBRACKET,
+  T_CBRACKET,
 } TokenType;
 
 typedef struct Token {
