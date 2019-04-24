@@ -368,7 +368,7 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.constants[1].integer, 2);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 0);
-      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 100);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t expectedCode[] = {
@@ -418,7 +418,7 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.constants[2].integer, 2);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 0);
-      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 100);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t fnCallCode[] = {
@@ -443,7 +443,7 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.constants[0].integer, 12);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 1);
-      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 100);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t expectedCode[] = {
@@ -474,7 +474,7 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.constants[1].integer, 100);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 3);
-      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 100);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t expectedCode[] = {
@@ -511,7 +511,7 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.constants[2].integer, 1);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 1);
-      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 100);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t expectedCode[] = {
@@ -548,7 +548,7 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.constants[2].integer, 50);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 0);
-      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 10);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 100);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t expectedCode[] = {
@@ -599,7 +599,7 @@ START_TEST(vmBasic) {
     fn.numArgs = 1;
     fn.numCaptures = 0;
     fn.code.numLocals = 1;
-    fn.code.maxOperandStackSize = 10;
+    fn.code.maxOperandStackSize = 100;
     fn.code.codeLength = sizeof(fnCode);
     fn.code.code = fnCode;
     fn.code.hasSourceTable = false;
@@ -623,7 +623,7 @@ START_TEST(vmBasic) {
     unit.constants[2].type = CT_INT;
     unit.constants[2].integer = 1;
     unit.code.numLocals = 0;
-    unit.code.maxOperandStackSize = 10;
+    unit.code.maxOperandStackSize = 100;
     unit.code.codeLength = sizeof(code);
     unit.code.code = code;
     unit.code.hasSourceTable = false;
@@ -658,11 +658,12 @@ END_TEST
   poolFree(pool); \
 }
 
-START_TEST(repl) {
+START_TEST(repl)
+  {
 
     assertEval(L"(let ()"
-                 "  (def + (fn (a b) (builtin :add a b)))"
-                 "  (+ 1 2))",
+               "  (def + (fn (a b) (builtin :add a b)))"
+               "  (+ 1 2))",
                L"3");
 
     assertEval(L"(if 1 2 3)",
@@ -678,9 +679,9 @@ START_TEST(repl) {
                L"nil");
 
     assertEval(L"(let ()"
-                "  (def + (fn (a b) (builtin :add a b)))"
-                "  (let (a 100) "
-                "    (+ a 20)))",
+               "  (def + (fn (a b) (builtin :add a b)))"
+               "  (let (a 100) "
+               "    (+ a 20)))",
                L"120");
 
     assertEval(L"(let (x (fn (a b) (builtin :add a b))) (x 1 2))",
@@ -821,6 +822,14 @@ START_TEST(repl) {
     assertEval(L"(= \"asdf\" (str \"as\" \"df\"))", L"true");
     assertEval(L"(= 'asdf (symbol (str \"as\" \"df\")))", L"true");
     assertEval(L"(= :asdf (keyword (str \"as\" \"df\")))", L"true");
+
+    assertEval(L"(= nil nil)", L"true");
+    assertEval(L"(= '(1) '(1))", L"true");
+    assertEval(L"(= '(1 2) '(1 2 3))", L"false");
+    assertEval(L"(= '(1 2) '(1 4))", L"false");
+    assertEval(L"(= '(1 (2 3) 4) '(1 (4 5) 7))", L"false");
+    assertEval(L"(= '(1 (2 3) 4) (list 1 (list 2 3) 4))", L"true");
+
   }
 END_TEST
 

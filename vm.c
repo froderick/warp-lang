@@ -1927,10 +1927,6 @@ RetVal tryLoadVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   String *str = NULL;
   throws(deref(&vm->gc, (void*)&str, varName.value, error));
 
-  if (wcscmp(stringValue(str), L"second") == 0) {
-      printf("what\n");
-  }
-
   Var *var = NULL;
   if (!resolveVar(&vm->namespaces, stringValue(str), str->length, &var)) {
     // fail: not all vars exist
@@ -3989,7 +3985,7 @@ RetVal tryInitCFns(VM *vm, Error *error) {
   throws(tryDefineCFn(vm, L"prn",       1, false, tryPrnEval,          error));
   throws(tryDefineCFn(vm, L"+",         2, false, tryAddEval,          error));
   throws(tryDefineCFn(vm, L"-",         2, false, trySubEval,          error));
-  throws(tryDefineCFn(vm, L"=",         2, false, tryCmpEval,          error));
+  throws(tryDefineCFn(vm, L"eq",        2, false, tryCmpEval,          error));
   throws(tryDefineCFn(vm, L"join",      1, false, tryStrJoinBuiltin,   error));
   throws(tryDefineCFn(vm, L"pr-str",    1, false, tryPrStrBuiltin,     error));
   throws(tryDefineCFn(vm, L"print-str", 1, false, tryPrintStrBuiltin,  error));

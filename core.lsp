@@ -2,8 +2,8 @@
 ;; pre-macro primitives
 ;;
 
-(def nil? (fn nil? (x) (= nil x)))
-(def zero? (fn zero? (n) (= n 0)))
+(def nil? (fn nil? (x) (eq nil x)))
+(def zero? (fn zero? (n) (eq n 0)))
 (def second (fn second (seq) (first (rest seq))))
 (def inc (fn inc (n) (+ n 1)))
 (def dec (fn dec (n) (- n 1)))
@@ -105,7 +105,7 @@
 
 (defn list? (x)
   (let (t (get-type x))
-    (or (= t 0) (= t 7))))
+    (or (eq t 0) (eq t 7))))
 
 (defmacro -> (x & exprs)
   (let (->helper (fn ->helper (x exprs)
@@ -134,6 +134,7 @@
                    (_count (inc i) (rest remaining)))))
     (_count 0 seq)))
 
+
 ;; todo: throw exceptions on invalid input
 (defmacro cond (& seq)
   (if (empty? seq)
@@ -144,6 +145,18 @@
       `(if ~test
          ~expr
          (cond ~@seq)))))
+
+(defn = (x y)
+  (if (and (list? x) (list? y))
+    (let (_equal-all (fn _equal-all (x y)
+                       (cond
+                         (and (empty? x) (empty? y)) true
+                         (and (empty? x)) false
+                         (and (empty? y)) false
+                         (not (= (first x) (first y))) false
+                         :else (_equal-all (rest x) (rest y)))))
+      (_equal-all x y))
+    (eq x y)))
 
 ;; todo: print-bytecode for vars and for arbitrary expressions, deref vars / @, macroexpand
 
@@ -170,4 +183,7 @@
 
 (defn example ()
   (and (+ 1 2) (+ 3 'x)))
+
+
+
 

@@ -1089,7 +1089,7 @@ RetVal tryCompileTopLevel(Pool_t pool, FormRoot *root, CodeUnit *codeUnit, Error
   }
 
   // TODO: we don't populate these yet
-  codeUnit->code.maxOperandStackSize = 10;
+  codeUnit->code.maxOperandStackSize = 100;
 
   return R_SUCCESS;
   failure:
