@@ -112,6 +112,9 @@ void evalResultInitContents(VMEvalResult *r) {
    VT_LIST,
    VT_CLOSURE,
    VT_CFN,
+   VT_ARRAY,
+   VT_MAP,
+   VT_MAP_ENTRY,
 //  VT_OBJECT,
 //  VT_CHAR,
 } ValueType;
@@ -227,6 +230,30 @@ typedef struct Cons {
   Value next; // this must be a Cons, or Nil
 } Cons;
 
+typedef struct Array {
+  ObjectHeader header;
+
+  uint64_t length;
+  size_t elementsOffset;
+} Array;
+
+Value* arrayElements(Array *x) { return (void*)x + x->elementsOffset; }
+
+typedef struct MapEntry {
+  ObjectHeader header;
+
+  Value key;
+  Value value;
+  uint32_t hash;
+} MapEntry;
+
+typedef struct Map {
+  ObjectHeader header;
+
+  uint64_t size;
+  Value array;
+} Map;
+
 typedef struct GC {
 
   // the total memory allocated
@@ -301,6 +328,7 @@ typedef struct Invocable {
 typedef RetVal (*TryRelocateChildren)(VM_t vm, void *oldHeap, void *obj, Error *error);
 typedef RetVal (*TryPrn)(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error);
 typedef RetVal (*TryHashCode)(VM_t vm, Value value, uint32_t *hash, Error *error);
+typedef RetVal (*TryEquals)(VM_t vm, Value this, Value that, bool *equal, Error *error);
 
 typedef struct ValueTypeInfo {
   const char *name;
@@ -309,6 +337,7 @@ typedef struct ValueTypeInfo {
   TryRelocateChildren tryRelocateChildren;
   TryPrn tryPrn;
   TryHashCode tryHashCode;
+  TryEquals tryEquals;
 } ValueTypeInfo;
 
 typedef struct ValueTypeTable {
@@ -1684,6 +1713,130 @@ uint32_t stringHash(String *s) {
   return h;
 }
 
+RetVal tryNilHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
+  *hash = 0;
+  return R_SUCCESS;
+}
+
+RetVal tryUIntHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
+  *hash = value.value * 31;
+  return R_SUCCESS;
+}
+
+RetVal tryBoolHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
+  *hash = value.value * 31;
+  return R_SUCCESS;
+}
+
+RetVal tryFnHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
+  *hash = value.value * 31;
+  return R_SUCCESS;
+}
+
+RetVal tryHashCode(VM *vm, Value value, uint32_t *hash, Error *error);
+
+// TODO: understand why this works
+RetVal tryListHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
+  RetVal ret;
+
+  Value seq = value;
+  uint32_t h = 1;
+
+  while (seq.type != VT_NIL) {
+
+    Cons *cons = NULL;
+    throws(deref(&vm->gc, (void *) &cons, seq.value, error));
+
+    uint32_t elemHash = 0;
+    throws(tryHashCode(vm, cons->value, &elemHash, error));
+
+    h = (31 * h) + elemHash;
+    seq = cons->next;
+  }
+
+  *hash = h;
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryClosureHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
+  *hash = value.value * 31;
+  return R_SUCCESS;
+}
+
+RetVal tryCFnHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
+  *hash = value.value * 31;
+  return R_SUCCESS;
+}
+
+RetVal tryArrayHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
+  *hash = value.value * 31;
+  return R_SUCCESS;
+}
+
+RetVal tryMapEntryHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
+  RetVal ret;
+
+  MapEntry *entry;
+  throws(deref(&vm->gc, (void*)&entry, value.value, error));
+
+  if (entry->hash == 0 && (entry->key.type != T_NIL || entry->value.type != T_NIL)) {
+
+    uint32_t keyHash = 0;
+    if (entry->key.type != T_NIL) {
+      throws(tryHashCode(vm, entry->key, &keyHash, error));
+    }
+
+    uint32_t valueHash = 0;
+    if (entry->value.type != T_NIL) {
+      throws(tryHashCode(vm, entry->value, &valueHash, error));
+    }
+
+    entry->hash = keyHash + valueHash;
+  }
+
+  *hash = entry->hash;
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+// TODO: understand why this works
+RetVal tryMapHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
+  RetVal ret;
+
+  Map *map;
+  throws(deref(&vm->gc, (void*)&map, value.value, error));
+
+  Array *array;
+  throws(deref(&vm->gc, (void*)&array, map->array.value, error));
+
+  uint32_t h = 0;
+
+  for (uint64_t i=0; i<array->length; i++) {
+
+    Value e = arrayElements(array)[i];
+
+    if (e.type == VT_NIL) {
+      // empty
+    }
+    else if (e.type == VT_MAP_ENTRY) {
+      uint32_t entryHash = 0;
+      throws(tryHashCode(vm, e, &entryHash, error));
+      h += entryHash;
+    }
+    else {
+      throwRuntimeError(error, "map arrays may only contain nils and map-entries: %s", getValueTypeName(vm, e.type));
+    }
+  }
+
+  *hash = h;
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
 RetVal tryStringHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
   RetVal ret;
   String *s = NULL;
@@ -1796,6 +1949,9 @@ RetVal tryCmpEval(VM *vm, ExecFrame_t frame, Error *error) {
         }
         break;
       }
+
+      default:
+        explode("Unhandled");
     }
   }
 
@@ -2532,6 +2688,42 @@ RetVal tryRelocateChildrenClosure(VM_t vm, void *oldHeap, void *obj, Error *erro
     return ret;
 }
 
+RetVal tryRelocateChildrenArray(VM_t vm, void *oldHeap, void *obj, Error *error) {
+  RetVal ret;
+
+  Array *arr = obj;
+  for (uint16_t i=0; i<arr->length; i++) {
+    throws(relocate(vm, oldHeap, &arrayElements(arr)[i], error));
+  }
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryRelocateChildrenMap(VM_t vm, void *oldHeap, void *obj, Error *error) {
+  RetVal ret;
+
+  Map *map = obj;
+  throws(relocate(vm, oldHeap, &map->array, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryRelocateChildrenMapEntry(VM_t vm, void *oldHeap, void *obj, Error *error) {
+  RetVal ret;
+
+  MapEntry *mapEntry = obj;
+  throws(relocate(vm, oldHeap, &mapEntry->key, error));
+  throws(relocate(vm, oldHeap, &mapEntry->value, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
 RetVal tryPrnNil(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   expr->type = N_NIL;
   return R_SUCCESS;
@@ -2586,7 +2778,7 @@ RetVal equalsString(VM *vm, Value value, wchar_t *cmpStr, bool *equals, Error *e
 
   return R_SUCCESS;
   failure:
-    return ret;
+  return ret;
 }
 
 RetVal tryPrnStr(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
@@ -2601,7 +2793,7 @@ RetVal tryPrnStr(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
 
   return R_SUCCESS;
   failure:
-    return ret;
+  return ret;
 }
 
 RetVal tryPrnSymbol(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
@@ -2673,18 +2865,12 @@ RetVal tryReadProperty(VM *vm, Value *ptr, Property *p, Error *error) {
   return R_SUCCESS;
 
   failure:
-    return ret;
+  return ret;
 }
 
-RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
+RetVal tryPrnMetadata(VM_t vm, Value metadata, Expr *expr, Error *error) {
   RetVal ret;
 
-  Cons *cons;
-  throws(deref(&vm->gc, (void*)&cons, result.value, error));
-
-  expr->type = N_LIST;
-
-  Value metadata = cons->header.metadata;
   while (!isEmpty(metadata)) {
 
     Property p;
@@ -2705,10 +2891,25 @@ RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) 
     }
   }
 
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
+  RetVal ret;
+
+  Cons *cons;
+  throws(deref(&vm->gc, (void*)&cons, result.value, error));
+
+  expr->type = N_LIST;
+
+  throws(tryPrnMetadata(vm, cons->header.metadata, expr, error));
+
   listInitContents(&expr->list);
   Expr *elem;
 
-  tryMalloc(elem, sizeof(Expr), "Expr");
+  tryPalloc(pool, elem, sizeof(Expr), "Expr");
   exprInitContents(elem);
 
   throws(tryVMPrn(vm, cons->value, pool, elem, error));
@@ -2723,7 +2924,7 @@ RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) 
 
     throws(deref(&vm->gc, (void *) &cons, cons->next.value, error));
 
-    tryMalloc(elem, sizeof(Expr), "Expr");
+    tryPalloc(pool, elem, sizeof(Expr), "Expr");
     exprInitContents(elem);
 
     throws(tryVMPrn(vm, cons->value, pool, elem, error));
@@ -2732,7 +2933,288 @@ RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) 
 
   return R_SUCCESS;
   failure:
+  return ret;
+}
+
+RetVal tryPrnArray(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
+  expr->type = N_STRING;
+  wchar_t function[] = L"<array>";
+  expr->string.length = wcslen(function);
+  return tryCopyText(pool, function, &expr->string.value, expr->string.length, error);
+}
+
+RetVal tryPrnMap(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
+  RetVal ret;
+
+  Map *map;
+  throws(deref(&vm->gc, (void*)&map, result.value, error));
+
+  Array *array;
+  throws(deref(&vm->gc, (void*)&array, map->array.value, error));
+
+  expr->type = N_MAP;
+  throws(tryPrnMetadata(vm, map->header.metadata, expr, error));
+
+  mapInitContents(&expr->map);
+
+  for (uint64_t i=0; i<array->length; i++) {
+    Value entryRef = arrayElements(array)[i];
+
+    if (entryRef.type == VT_MAP_ENTRY) {
+
+      MapEntry *entry = NULL;
+      throws(deref(&vm->gc, (void *) &entry, entryRef.value, error));
+
+      Expr *keyExpr = NULL;
+      tryPalloc(pool, keyExpr, sizeof(Expr), "Expr");
+      exprInitContents(keyExpr);
+      throws(tryVMPrn(vm, entry->key, pool, keyExpr, error));
+
+      Expr *valueExpr = NULL;
+      tryPalloc(pool, valueExpr, sizeof(Expr), "Expr");
+      exprInitContents(valueExpr);
+      throws(tryVMPrn(vm, entry->value, pool, valueExpr, error));
+
+      throws(tryMapPut(pool, &expr->map, keyExpr, valueExpr, error));
+    }
+  }
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryEqualsNil(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  *equal = that.type == T_NIL;
+  return R_SUCCESS;
+}
+
+RetVal tryEqualsUInt(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  *equal = this.type == that.type && this.value == that.value;
+  return R_SUCCESS;
+}
+
+RetVal tryEqualsBool(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  *equal = this.type == that.type && this.value == that.value;
+  return R_SUCCESS;
+}
+
+RetVal tryEqualsFn(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  *equal = this.type == that.type && this.value == that.value;
+  return R_SUCCESS;
+}
+
+RetVal tryEqualsStr(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  RetVal ret;
+
+  if (this.type != that.type) {
+    *equal = false;
+  }
+  else if (this.value == that.value) {
+    *equal = true;
+  }
+  else {
+
+    String *a = NULL;
+    throws(deref(&vm->gc, (void*)&a, this.value, error));
+
+    String *b = NULL;
+    throws(deref(&vm->gc, (void*)&b, that.value, error));
+
+    if (a->length != b->length) {
+      *equal = false;
+    }
+    else {
+      *equal = wcscmp(stringValue(a), stringValue(b)) == 0;
+    }
+  }
+
+  return R_SUCCESS;
+  failure:
     return ret;
+}
+
+RetVal tryEqualsSymbol(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  RetVal ret;
+
+  if (this.type != that.type) {
+    *equal = false;
+  }
+  else if (this.value == that.value) {
+    *equal = true;
+  }
+  else {
+
+    Symbol *a = NULL;
+    throws(deref(&vm->gc, (void*)&a, this.value, error));
+
+    Symbol *b = NULL;
+    throws(deref(&vm->gc, (void*)&b, that.value, error));
+
+    if (a->length != b->length) {
+      *equal = false;
+    }
+    else {
+      *equal = wcscmp(symbolValue(a), symbolValue(b)) == 0;
+    }
+  }
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryEqualsKeyword(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  RetVal ret;
+
+  if (this.type != that.type) {
+    *equal = false;
+  }
+  else if (this.value == that.value) {
+    *equal = true;
+  }
+  else {
+
+    Keyword *a = NULL;
+    throws(deref(&vm->gc, (void*)&a, this.value, error));
+
+    Keyword *b = NULL;
+    throws(deref(&vm->gc, (void*)&b, that.value, error));
+
+    if (a->length != b->length) {
+      *equal = false;
+    }
+    else {
+      *equal = wcscmp(keywordValue(a), keywordValue(b)) == 0;
+    }
+  }
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryEquals(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  RetVal ret;
+
+  TryEquals tryEquals = vm->valueTypeTable.valueTypes[this.type].tryEquals;
+  if (tryEquals == NULL) {
+    throwRuntimeError(error, "equals not supported for type: %s", getValueTypeName(vm, this.type));
+  }
+  else {
+    throws(tryEquals(vm, this, that, equal, error));
+  }
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryEqualsList(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  RetVal ret;
+
+  if (this.type != that.type) {
+    *equal = false;
+  }
+  else if (this.value == that.value) {
+    *equal = true;
+  }
+  else {
+
+    bool e = true;
+
+    while (this.type != T_NIL) {
+
+      Cons *a = NULL;
+      throws(deref(&vm->gc, (void *) &a, this.value, error));
+
+      Cons *b = NULL;
+      throws(deref(&vm->gc, (void *) &a, that.value, error));
+
+      bool elementEqual = false;
+      throws(tryEquals(vm, a->value, b->value, &elementEqual, error));
+      if (!elementEqual) {
+        e = false;
+        break;
+      }
+
+      bool nextTypesMismatched = a->next.type != b->next.type;
+      if (nextTypesMismatched) {
+        e = false;
+        break;
+      }
+
+      this = a->next;
+      that = b->next;
+    }
+
+    *equal = e;
+  }
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryEqualsClosure(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  *equal = this.type == that.type && this.value == that.value;
+  return R_SUCCESS;
+}
+
+RetVal tryEqualsCFn(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  *equal = this.type == that.type && this.value == that.value;
+  return R_SUCCESS;
+}
+
+RetVal tryEqualsArray(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  *equal = this.type == that.type && this.value == that.value;
+  return R_SUCCESS;
+}
+
+RetVal tryEqualsMap(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  if (this.type == that.type && this.value == that.value) {
+    *equal = true;
+  }
+  else {
+    // TODO
+    *equal = false;
+  }
+  return R_SUCCESS;
+}
+
+RetVal tryEqualsMapEntry(VM_t vm, Value this, Value that, bool *equal, Error *error) {
+  RetVal ret;
+
+  if (this.type != that.type) {
+    *equal = false;
+  }
+  else if (this.value == that.value) {
+    *equal = true;
+  }
+  else {
+    MapEntry *a = NULL;
+    throws(deref(&vm->gc, (void *) &a, this.value, error));
+
+    MapEntry *b = NULL;
+    throws(deref(&vm->gc, (void *) &b, this.value, error));
+
+    bool keyEqual = false;
+    throws(tryEquals(vm, a->key, b->key, &keyEqual, error));
+
+    if (!keyEqual) {
+      *equal = false;
+    }
+    else {
+      bool valueEqual = false;
+      throws(tryEquals(vm, a->value, b->value, &valueEqual, error));
+      *equal = valueEqual;
+    }
+  }
+
+  return R_SUCCESS;
+  failure:
+  return ret;
 }
 
 ValueTypeTable valueTypeTableCreate() {
@@ -2755,61 +3237,92 @@ ValueTypeTable valueTypeTableCreate() {
                         .isTruthy = &isTruthyNo,
                         .tryRelocateChildren = NULL,
                         .tryPrn = &tryPrnNil,
-                        .tryHashCode = NULL},
+                        .tryHashCode = &tryNilHashCode,
+                        .tryEquals = &tryEqualsNil,},
       [VT_UINT]      = {.name = "uint",
                         .isHeapObject = false,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = NULL,
                         .tryPrn = &tryPrnInt,
-                        .tryHashCode = NULL },
+                        .tryHashCode = &tryUIntHashCode,
+                        .tryEquals = &tryEqualsUInt},
       [VT_BOOL]      = {.name = "bool",
                         .isHeapObject = false,
                         .isTruthy = &isTruthyBool,
                         .tryRelocateChildren = NULL,
                         .tryPrn = &tryPrnBool,
-                        .tryHashCode = NULL },
+                        .tryHashCode = &tryBoolHashCode,
+                        .tryEquals = &tryEqualsBool},
       [VT_FN]        = {.name = "fn",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = &tryRelocateChildrenFn,
                         .tryPrn = &tryPrnFn,
-                        .tryHashCode = NULL },
+                        .tryHashCode = &tryFnHashCode,
+                        .tryEquals = &tryEqualsFn},
       [VT_STR]       = {.name = "str",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = NULL,
                         .tryPrn = &tryPrnStr,
-                        .tryHashCode = &tryStringHashCode},
+                        .tryHashCode = &tryStringHashCode,
+                        .tryEquals = &tryEqualsStr},
       [VT_SYMBOL]    = {.name = "symbol",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = NULL,
                         .tryPrn = &tryPrnSymbol,
-                        .tryHashCode = &trySymbolHashCode},
+                        .tryHashCode = &trySymbolHashCode,
+                        .tryEquals = &tryEqualsSymbol},
       [VT_KEYWORD]   = {.name = "keyword",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = NULL,
                         .tryPrn = &tryPrnKeyword,
-                        .tryHashCode = &tryKeywordHashCode},
+                        .tryHashCode = &tryKeywordHashCode,
+                        .tryEquals = &tryEqualsKeyword},
       [VT_LIST]      = {.name = "list",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = &tryRelocateChildrenList,
                         .tryPrn = &tryPrnList,
-                        .tryHashCode = NULL},
+                        .tryHashCode = &tryListHashCode,
+                        .tryEquals = &tryEqualsList},
       [VT_CLOSURE]   = {.name = "closure",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = &tryRelocateChildrenClosure,
                         .tryPrn = &tryPrnClosure,
-                        .tryHashCode = NULL},
+                        .tryHashCode = &tryClosureHashCode,
+                        .tryEquals = &tryEqualsClosure},
       [VT_CFN]       = {.name = "cfn",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .tryRelocateChildren = NULL,
                         .tryPrn = &tryPrnCFn,
-                        .tryHashCode = NULL},
+                        .tryHashCode = &tryCFnHashCode,
+                        .tryEquals = &tryEqualsCFn},
+      [VT_ARRAY]     = {.name = "array",
+                        .isHeapObject = true,
+                        .isTruthy = &isTruthyYes,
+                        .tryRelocateChildren = &tryRelocateChildrenArray,
+                        .tryPrn = &tryPrnArray,
+                        .tryHashCode = &tryArrayHashCode,
+                        .tryEquals = &tryEqualsArray},
+      [VT_MAP]       = {.name = "map",
+                        .isHeapObject = true,
+                        .isTruthy = &isTruthyYes,
+                        .tryRelocateChildren = &tryRelocateChildrenMap,
+                        .tryPrn = &tryPrnMap,
+                        .tryHashCode = &tryMapHashCode,
+                        .tryEquals = &tryEqualsMap},
+      [VT_MAP_ENTRY] = {.name = "map-entry",
+                        .isHeapObject = true,
+                        .isTruthy = &isTruthyYes,
+                        .tryRelocateChildren = &tryRelocateChildrenMapEntry,
+                        .tryPrn = NULL,
+                        .tryHashCode = &tryMapEntryHashCode,
+                        .tryEquals = &tryEqualsMapEntry},
   };
   memcpy(table.valueTypes, valueTypes, sizeof(valueTypes));
   table.numValueTypes = sizeof(valueTypes) / sizeof(valueTypes[0]);
@@ -4007,6 +4520,407 @@ RetVal tryDefineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnIn
   return ret;
 }
 
+void arrayInitContents(Array *a) {
+  objectHeaderInitContents(&a->header);
+  a->length = 0;
+  a->elementsOffset = 0;
+}
+
+RetVal tryMakeArray(VM *vm, ExecFrame_t frame, uint64_t length, Value *value, Error *error) {
+  RetVal ret;
+
+  Array *arr = NULL;
+
+  size_t elementsSize = length * sizeof(Value);
+  size_t size = sizeof(Array) + elementsSize;
+
+  uint64_t offset = 0;
+
+  throws(alloc(vm, frame, size, (void*)&arr, &offset, error));
+
+  value->type = VT_ARRAY;
+  value->value = offset;
+
+  arrayInitContents(arr);
+  arr->header.type = VT_ARRAY;
+  arr->header.size = size;
+  arr->length = length;
+  arr->elementsOffset = sizeof(Array);
+
+  Value *elements = arrayElements(arr);
+  Value init = nil();
+  for (uint64_t i=0; i<length; i++) {
+    elements[i] = init;
+  }
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+void _mapInitContents(Map *m) {
+  objectHeaderInitContents(&m->header);
+  m->array = nil();
+}
+
+#define MIN_MAP_BUCKETS 16
+
+RetVal tryMakeMapConf(VM *vm, ExecFrame_t frame, Value *value, Error *error) {
+  RetVal ret;
+
+  {
+    Value array;
+    throws(tryMakeArray(vm, frame, MIN_MAP_BUCKETS, &array, error));
+    throws(pushOperand(frame, array, error));
+  }
+
+  Map *map = NULL;
+
+  size_t size = sizeof(Map);
+
+  uint64_t offset = 0;
+
+  throws(alloc(vm, frame, size, (void*)&map, &offset, error));
+
+  value->type = VT_MAP;
+  value->value = offset;
+
+  _mapInitContents(map);
+  map->header.type = VT_MAP;
+  map->header.size = size;
+
+  throws(popOperand(frame, &map->array, error));
+  map->size = 0;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+/*
+ * TODO: add a 'suspend gc' feature, so that c functions can prevent it from happening while doing critical stuff
+ * - having two different models for allocation sucks, it duplicates a lot of code (hydration vs execution)
+ * - having to register things in the op stack is noisy and error prone
+ */
+
+RetVal tryMakeMap(VM *vm, ExecFrame_t frame, Value *value, Error *error) {
+  RetVal ret;
+
+  {
+    Value array;
+    throws(tryMakeArray(vm, frame, MIN_MAP_BUCKETS, &array, error));
+    throws(pushOperand(frame, array, error));
+  }
+
+  Map *map = NULL;
+
+  size_t size = sizeof(Map);
+
+  uint64_t offset = 0;
+
+  throws(alloc(vm, frame, size, (void*)&map, &offset, error));
+
+  value->type = VT_MAP;
+  value->value = offset;
+
+  _mapInitContents(map);
+  map->header.type = VT_MAP;
+  map->header.size = size;
+
+  throws(popOperand(frame, &map->array, error));
+  map->size = 0;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryHashMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
+  RetVal ret;
+
+  Value value;
+  throws(tryMakeMap(vm, frame, &value, error));
+
+  throws(pushOperand(frame, value, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+void mapEntryInitContents(MapEntry *e) {
+  objectHeaderInitContents(&e->header);
+  e->key = nil();
+  e->value = nil();
+  e->hash = 0;
+}
+
+RetVal tryMakeMapEntry(VM *vm, ExecFrame_t frame, Value *value, Error *error) {
+  RetVal ret;
+
+  MapEntry *entry = NULL;
+
+  size_t size = sizeof(MapEntry);
+
+  uint64_t offset = 0;
+
+  throws(alloc(vm, frame, size, (void*)&entry, &offset, error));
+
+  value->type = VT_MAP_ENTRY;
+  value->value = offset;
+
+  mapEntryInitContents(entry);
+  entry->header.type = VT_MAP_ENTRY;
+  entry->header.size = size;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+#define MIN_LOAD .40
+#define MAX_LOAD .70
+
+RetVal tryPutMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
+  RetVal ret;
+
+  Value map, key, value;
+
+  throws(popOperand(frame, &value, error));
+  throws(popOperand(frame, &key, error));
+  throws(popOperand(frame, &map, error));
+
+  uint32_t hash = 0;
+  throws(tryHashCode(vm, key, &hash, error));
+
+  bool putHappened = false;
+  bool makeNewEntry = false;
+  uint64_t newEntryIndex = 0;
+  {
+    Map *m;
+    throws(deref(&vm->gc, (void *) &m, map.value, error));
+
+    Array *array;
+    throws(deref(&vm->gc, (void *) &array, m->array.value, error));
+
+    uint64_t index = hash % array->length;
+
+    for (uint64_t i = index; i < array->length; i++) {
+
+      Value bucket = arrayElements(array)[i];
+
+      if (bucket.type == VT_NIL) {
+        makeNewEntry = true;
+        newEntryIndex = i;
+        break;
+      }
+
+      MapEntry *entry;
+      throws(deref(&vm->gc, (void *) &entry, bucket.value, error));
+
+      bool keyEqual = false;
+      throws(tryEquals(vm, key, entry->key, &keyEqual, error));
+
+      if (keyEqual) {
+        // found a match, replace the value
+        entry->value = value;
+        putHappened = true;
+        break;
+      }
+    }
+  }
+
+  if (putHappened) {
+    // great
+  }
+  else if (makeNewEntry) {
+
+    // keep args safe from gc
+    throws(pushOperand(frame, map, error));
+    throws(pushOperand(frame, key, error));
+    throws(pushOperand(frame, value, error));
+
+    // may cause gc
+    Value entryRef;
+    throws(tryMakeMapEntry(vm, frame, &entryRef, error));
+
+    throws(popOperand(frame, &value, error));
+    throws(popOperand(frame, &key, error));
+    throws(popOperand(frame, &map, error));
+
+    Map *m;
+    throws(deref(&vm->gc, (void *) &m, map.value, error));
+
+    Array *array;
+    throws(deref(&vm->gc, (void *) &array, m->array.value, error));
+
+    arrayElements(array)[newEntryIndex] = entryRef;
+
+    MapEntry *entry;
+    throws(deref(&vm->gc, (void *) &entry, entryRef.value, error));
+
+    entry->key = key;
+    entry->value = value;
+    entry->hash = hash;
+
+    m->size += 1;
+  }
+  else {
+    throwRuntimeError(error, "could not find unused or equivalent key slot for value");
+  }
+
+  /*
+   * TODO: can we tweak alloc() to let us allocate a whole set of map entries in one go?
+   * this would simplify rehashing in terms of avoiding the gc only once
+   *
+   * TODO: is there an easy way to protect builtin arguments from relocation in gc?
+   * - could keep a reference to them explicitly in the stack frame or some such
+   * - also, could prevent allocation when c functions are running
+   * both ideas have problems
+   */
+
+  float load = 0;
+  uint64_t arraySize = 0;
+  {
+    Map *m;
+    throws(deref(&vm->gc, (void *) &m, map.value, error));
+
+    Array *array;
+    throws(deref(&vm->gc, (void *) &array, m->array.value, error));
+
+    arraySize = array->length;
+    load = (float)m->size / (float)array->length;
+  }
+ /*
+(do
+  (def x (hash-map))
+  (assoc x "one" "two"))
+  */
+
+  if (load > MAX_LOAD || (load > MIN_MAP_BUCKETS && load < MIN_LOAD)) {
+
+    uint64_t newArraySize;
+    if (load > MAX_LOAD) {
+      newArraySize = arraySize * 2;
+    }
+    else {
+      newArraySize = arraySize / 2;
+      if (newArraySize < MIN_MAP_BUCKETS) {
+        newArraySize = MIN_MAP_BUCKETS;
+      }
+    }
+
+    // make new array
+    throws(pushOperand(frame, map, error));
+    Value newArrayRef;
+    throws(tryMakeArray(vm, frame, newArraySize, &newArrayRef, error));
+    throws(popOperand(frame, &map, error));
+
+    // reuse the existing map entries
+
+    Map *m;
+    throws(deref(&vm->gc, (void *) &m, map.value, error));
+
+    Array *oldArray;
+    throws(deref(&vm->gc, (void *) &oldArray, m->array.value, error));
+
+    Array *newArray;
+    throws(deref(&vm->gc, (void *) &newArray, newArrayRef.value, error));
+
+    for (uint64_t i=0; i<oldArray->length; i++) {
+      Value rehomeRef = arrayElements(oldArray)[i];
+
+      if (rehomeRef.type == VT_NIL) {
+        continue;
+      }
+
+      uint64_t index;
+      {
+        MapEntry *rehomeEntry;
+        throws(deref(&vm->gc, (void *) &rehomeEntry, rehomeRef.value, error));
+
+        index = rehomeEntry->hash % newArray->length;
+      }
+      bool rehomed = false;
+
+      for (uint64_t j = index; j < newArray->length; j++) {
+        Value *newHome = &arrayElements(newArray)[j];
+
+        if (newHome->type == VT_NIL) {
+          *newHome = rehomeRef;
+          rehomed = true;
+          break;
+        }
+      }
+
+      if (!rehomed) {
+        throwRuntimeError(error, "failed to rehome");
+      }
+    }
+
+    m->array = newArrayRef;
+  }
+
+  throws(pushOperand(frame, map, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryGetMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
+  RetVal ret;
+
+  Value map, key;
+
+  throws(popOperand(frame, &key, error));
+  throws(popOperand(frame, &map, error));
+
+  uint32_t hash = 0;
+  throws(tryHashCode(vm, key, &hash, error));
+
+  Value foundValue = nil();
+  {
+    Map *m;
+    throws(deref(&vm->gc, (void *) &m, map.value, error));
+
+    Array *array;
+    throws(deref(&vm->gc, (void *) &array, m->array.value, error));
+
+    uint64_t index = hash % array->length;
+
+    for (uint64_t i = index; i < array->length; i++) {
+
+      Value bucket = arrayElements(array)[i];
+
+      if (bucket.type == VT_NIL) {
+        break;
+      }
+
+      MapEntry *entry;
+      throws(deref(&vm->gc, (void *) &entry, bucket.value, error));
+
+      bool keyEqual = false;
+      throws(tryEquals(vm, key, entry->key, &keyEqual, error));
+
+      if (keyEqual) {
+        foundValue = entry->value;
+        break;
+      }
+    }
+  }
+
+  throws(pushOperand(frame, foundValue, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
 RetVal tryInitCFns(VM *vm, Error *error) {
   RetVal ret;
 
@@ -4026,6 +4940,9 @@ RetVal tryInitCFns(VM *vm, Error *error) {
   throws(tryDefineCFn(vm, L"print-str", 1, false, tryPrintStrBuiltin,  error));
   throws(tryDefineCFn(vm, L"symbol",    1, false, trySymbolBuiltin,    error));
   throws(tryDefineCFn(vm, L"keyword",   1, false, tryKeywordBuiltin,   error));
+  throws(tryDefineCFn(vm, L"hash-map",  0, false, tryHashMapBuiltin,   error));
+  throws(tryDefineCFn(vm, L"assoc",     3, false, tryPutMapBuiltin,    error));
+  throws(tryDefineCFn(vm, L"get",       2, false, tryGetMapBuiltin,    error));
 
   return R_SUCCESS;
   failure:
@@ -4087,6 +5004,27 @@ void printCodeUnit(CodeUnit *unit) {
   InstTable table = instTableCreate();
   _printCodeUnit(&table, unit);
 }
+
+/*
+ * TODO: the suffering I'm encountering is because unlike the JVM, I'm directly interacting with gc'd memory rather
+ * than interacting with it through a gc-proof layer.
+ *
+ * Ideally, I'd define objects generically, with a predefined number of 'slots' for fields.
+ * I could even embed the number of slots at the front of the object, so the object could be traversed
+ * by gc automatically.
+ *
+ * I'd make defines to describe field name -> field number, and use them to get/set field values.
+ * I'd need special array support. The new world would be arrays, objects, and primitives.
+ *
+ * I'd still need native support for defining functions, though the constants could be built up in an array and referenced.
+ *
+ *
+ * In my actual c functions, I'd still need a way to alias my objects such that I'm not holding direct references
+ * to them. I could make a JNI-like registry for each c function call, and expose an API to the c functions that honors
+ * the ids from that registry.
+ *
+ * *But the upshot of this is that my c code is largely library code, and I'm writing it on the wrong side of the fence.*
+ */
 
 
 

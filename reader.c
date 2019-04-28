@@ -424,6 +424,12 @@ void mapInitContents(ExprMap *map) {
   map->tail = NULL;
 }
 
+void mapElementInitContents(MapElement *e) {
+  e->key = NULL;
+  e->value = NULL;
+  e->next = NULL;
+}
+
 RetVal tryMapMake(Pool_t pool, Expr **ptr, Error *error) {
   RetVal ret;
 
@@ -552,6 +558,8 @@ RetVal tryMapPut(Pool_t pool, ExprMap *map, Expr *key, Expr *value, Error *error
   else {
     MapElement *elem;
     tryPalloc(pool, elem, sizeof(MapElement), "MapElement");
+
+    mapElementInitContents(elem);
 
     elem->key = key;
     elem->value = value;

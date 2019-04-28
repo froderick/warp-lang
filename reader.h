@@ -99,4 +99,7 @@ RetVal tryExprPrn(Pool_t pool, Expr* expr, Error *error);
 void listInitContents(ExprList *list);
 RetVal tryListAppend(Pool_t pool, ExprList *list, Expr *expr, Error *error);
 
+void mapInitContents(ExprMap *map);
+RetVal tryMapPut(Pool_t pool, ExprMap *map, Expr *key, Expr *value, Error *error);
+
 #endif //WARP_LANG_READER_H
