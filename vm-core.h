@@ -1,0 +1,6 @@
+#ifndef WARP_LANG_VM_CORE_H
+#define WARP_LANG_VM_CORE_H
+
+
+
+#endif //WARP_LANG_VM_CORE_H
