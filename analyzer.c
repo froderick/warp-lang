@@ -768,27 +768,6 @@ void _listInitContents(FormList *list) {
   formsInitContents(&list->forms);
 }
 
-RetVal tryListAnalyze(AnalyzerContext *ctx, Expr *expr, FormList *list, Error *error) {
-
-  RetVal ret;
-
-  _listInitContents(list);
-
-  throws(tryFormsAllocate(ctx->pool, &list->forms, expr->list.length - 1, error));
-
-  ListElement *argExpr = expr->list.head->next;
-  for (int i=0; i<list->forms.numForms; i++) {
-    Form *arg = list->forms.forms + i;
-    throws(tryFormAnalyzeContents(ctx, argExpr->expr, arg, error));
-    argExpr = argExpr->next;
-  }
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
 RetVal tryEnvRefAnalyze(AnalyzerContext *ctx, Expr *expr, uint16_t bindingIndex, FormEnvRef *envRef, Error *error) {
   envRef->bindingIndex = bindingIndex;
   return R_SUCCESS;
@@ -1220,11 +1199,11 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *err
 
   if (output.type == RT_RESULT) {
 
-//    printf("macroexpand occurred {\n    ");
-//    throws(tryExprPrn(ctx->pool, expr, error));
-//    printf("\n    =>\n    ");
-//    throws(tryExprPrn(ctx->pool, &output.result, error));
-//    printf("\n}\n");
+    printf("macroexpand occurred {\n    ");
+    throws(tryExprPrn(ctx->pool, expr, error));
+    printf("\n    =>\n    ");
+    throws(tryExprPrn(ctx->pool, &output.result, error));
+    printf("\n}\n");
 
     throws(tryFormAnalyzeContents(ctx, &output.result, form, error));
     return R_SUCCESS;
@@ -1327,12 +1306,6 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
 
         if (wcscmp(sym, L"syntax-quote") == 0) {
           throws(trySyntaxQuoteAnalyze(ctx, expr, form, error));
-          break;
-        }
-
-        if (wcscmp(sym, L"list") == 0) {
-          form->type = F_LIST;
-          throws(tryListAnalyze(ctx, expr, &form->list, error));
           break;
         }
 

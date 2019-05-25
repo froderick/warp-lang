@@ -100,6 +100,17 @@
              ~sym
              (or ~@seq))))))
 
+(defmacro list (& seq)
+  (if (empty? seq)
+    nil
+    (let (n (first seq)
+          seq (rest seq)
+          sym (gensym))
+      (if (empty? seq)
+        `(let (~sym ~n) (cons ~sym nil))
+        `(let (~sym ~n)
+             (cons ~sym (list ~@seq)))))))
+
 (defn not (a)
   (if a false true))
 
