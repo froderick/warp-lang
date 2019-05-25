@@ -758,8 +758,6 @@ START_TEST(repl)
 
     assertEval(L"(let () (def x 100) user/x)", L"100");
 
-    assertEval(L"(builtin :list 1 2)", L"(1 2)");
-
     assertEval(L"(list 1 2)", L"(1 2)");
 
     assertEval(L"`(1 2 ~(builtin :add 3 1))", L"(1 2 4)");
