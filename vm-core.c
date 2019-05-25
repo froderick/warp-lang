@@ -110,6 +110,7 @@ typedef struct Frame {
   void *activationRecord;
   uint64_t activationRecordSize;
 
+  uint16_t numLocals;
   Value *locals;
 
   uint64_t opStackMaxDepth;
@@ -165,6 +166,7 @@ typedef struct VMCore {
   Stack stack;
   RefRegistry refs;
   ValueTypeTable valueTypeTable;
+  Frame *current;
 } VMCore;
 
 /*
@@ -210,6 +212,10 @@ void fnInitContents(Fn *fn) {
 /*
  * ValueType protocols
  */
+
+const char* valueTypeName(VMCore *core, Value value) {
+  return core->valueTypeTable.valueTypes[value.type].name;
+}
 
 bool isHeapObject(VMCore *core, Value value) {
   return core->valueTypeTable.valueTypes[value.type].isHeapObject;
@@ -319,11 +325,12 @@ void* alloc(VMCore *core, uint64_t length, Value *value) {
   return ptr;
 }
 
-void* deref(Heap *heap, uint64_t offset) {
-  if (offset > heap->heapSize) {
+void* deref(VMCore *core, Value value) {
+  uint64_t offset = value.value;
+  if (offset > core->heap.heapSize) {
     explode("invalid memory address");
   }
-  return heap->currentHeap + offset;
+  return core->heap.currentHeap + offset;
 }
 
 bool inCurrentHeap(Heap *heap, void *ptr) {
@@ -663,15 +670,19 @@ void frameInitContents(Frame *f) {
   f->activationRecord = NULL;
   f->activationRecordSize = 0;
   f->locals = NULL;
+  f->numLocals = 0;
   f->opStackMaxDepth = 0;
   f->opStackUsedDepth = 0;
   f->opStack = NULL;
   f->result = nil();
 }
 
-Frame* pushFrame(Stack *stack,
-                 Frame *parent, uint16_t numLocals, uint16_t maxOpStackDepth,
+Frame* pushFrame(VMCore *core,
+                 uint16_t numLocals, uint16_t maxOpStackDepth,
                  void* activationRecordPtr, size_t activationRecordSize) {
+
+  Stack *stack = &core->stack;
+  Frame *parent = core->current;
 
   Frame *frame = stackAllocate(stack, sizeof(Frame), "Frame");
   frameInitContents(frame);
@@ -682,18 +693,28 @@ Frame* pushFrame(Stack *stack,
   frame->activationRecord = stackAllocate(stack, activationRecordSize, "activationRecord");
   memcpy(frame->activationRecord, activationRecordPtr, activationRecordSize);
 
+  frame->numLocals = numLocals;
   frame->locals = stackAllocate(stack, sizeof(Value) * numLocals, "locals");
 
   frame->opStackMaxDepth = maxOpStackDepth;
   frame->opStack = stackAllocate(stack, sizeof(Value) * maxOpStackDepth, "opStack");
 
+  core->current = frame;
+
   return frame;
 }
 
-Frame* popFrame(Stack *stack, Frame *current) {
-  Frame *parent = current->parent;
-  stackFree(stack, current);
-  return parent;
+Frame* popFrame(VMCore *core) {
+
+  if (core->current == NULL) {
+    explode("no frames on stack");
+  }
+
+  Frame *popped = core->current;
+  core->current = core->current->parent;
+  stackFree(&core->stack, popped);
+
+  return core->current;
 }
 
 /* RefRegistry implementation
@@ -745,7 +766,9 @@ void refRegistryFreeContents(RefRegistry *r) {
   }
 }
 
-Ref createRef(RefRegistry *registry, Value value) {
+Ref createRef(VMCore *core, Value value) {
+
+  RefRegistry *registry = &core->refs;
 
   RefElem *newHead = NULL;
   if (registry->free != NULL) { // look for free first
@@ -767,6 +790,16 @@ Ref createRef(RefRegistry *registry, Value value) {
 
   Ref ref = (Ref)&newHead;
   return ref;
+}
+
+Value refDeref(Ref ref) {
+  RefElem *elem = (RefElem*)ref;
+  return elem->heapObject;
+}
+
+Ref getRefType(Ref ref) {
+  RefElem *elem = (RefElem*)ref;
+  return elem->heapObject.type;
 }
 
 void destroyRef(RefRegistry *registry, Ref ref) {
@@ -797,6 +830,7 @@ void coreInitContents(VMCore *core) {
   heapCreate(&core->heap, TEN_MB);
   stackInitContents(&core->stack);
   refRegistryInitContents(&core->refs);
+  core->current = NULL;
 }
 
 void coreFreeContents(VMCore *core) {
@@ -804,6 +838,7 @@ void coreFreeContents(VMCore *core) {
     heapFreeContents(&core->heap);
     stackFreeContents(&core->stack);
     refRegistryFreeContents(&core->refs);
+    core->current = NULL;
   }
 }
 
@@ -825,6 +860,79 @@ VMCore_t coreCreate() {
 void coreDestroy(VMCore_t core) {
   coreFreeContents(core);
   free(core);
+}
+
+ValueType coreGetType(Ref ref) {
+  return getRefType(ref);
+}
+
+Ref coreBoolCreate(VMCore_t core, bool b) {
+
+  Value value;
+  value.type = VT_BOOL;
+  value.value = b;
+
+  return createRef(core, value);
+}
+
+RetVal coreBoolGet(VMCore_t core, Ref boolRef, bool *result, Error *error) {
+  RetVal ret;
+
+  Value value = refDeref(boolRef);
+  if (value.type != VT_BOOL) {
+    throwRuntimeError(error, "not a bool: %s", valueTypeName(core, value));
+  }
+
+  *result = value.value;
+
+  return R_SUCCESS;
+  failure: return ret;
+}
+
+Ref coreUintCreate(VMCore_t core, uint64_t i) {
+
+  Value value;
+  value.type = VT_UINT;
+  value.value = i;
+
+  return createRef(core, value);
+}
+
+RetVal coreUintGet(VMCore_t core, Ref boolRef, uint64_t *result, Error *error) {
+  RetVal ret;
+
+  Value value = refDeref(boolRef);
+  if (value.type != VT_UINT) {
+    throwRuntimeError(error, "not a uint: %s", valueTypeName(core, value));
+  }
+
+  *result = value.value;
+
+  return R_SUCCESS;
+  failure: return ret;
+}
+
+Ref coreCharCreate(VMCore_t core, wchar_t c) {
+
+  Value value;
+  value.type = VT_CHAR;
+  value.value = c;
+
+  return createRef(core, value);
+}
+
+RetVal coreCharGet(VMCore_t core, Ref boolRef, wchar_t *result, Error *error) {
+  RetVal ret;
+
+  Value value = refDeref(boolRef);
+  if (value.type != VT_CHAR) {
+    throwRuntimeError(error, "not a char: %s", valueTypeName(core, value));
+  }
+
+  *result = value.value;
+
+  return R_SUCCESS;
+  failure: return ret;
 }
 
 Ref coreArrayCreate(VMCore_t core, uint64_t length) {
@@ -851,8 +959,289 @@ Ref coreArrayCreate(VMCore_t core, uint64_t length) {
     elements[i] = init;
   }
 
-  return createRef(&core->refs, value);
+  return createRef(core, value);
 }
+
+RetVal coreArrayLength(VMCore_t core, Ref arrayRef, uint64_t *length, Error *error) {
+  RetVal ret;
+
+  Value value = refDeref(arrayRef);
+  if (value.type != VT_ARRAY) {
+    throwRuntimeError(error, "not an array %s", valueTypeName(core, value));
+  }
+
+  Array *array = deref(core, value);
+  *length = array->length;
+
+  return R_SUCCESS;
+  failure: return ret;
+}
+
+RetVal coreArrayGet(VMCore_t core, Ref arrayRef, uint64_t index, Value *result, Error *error) {
+  RetVal ret;
+
+  Value value = refDeref(arrayRef);
+  if (value.type != VT_ARRAY) {
+    throwRuntimeError(error, "not an array %s", valueTypeName(core, value));
+  }
+
+  Array *array = deref(core, value);
+  if (index >= array->length) {
+    throwRuntimeError(error, "array index out of bounds: %" PRIu64, index);
+  }
+
+  *result = arrayElements(array)[index];
+
+  return R_SUCCESS;
+  failure: return ret;
+}
+
+RetVal coreArraySet(VMCore_t core, Ref arrayRef, uint64_t index, Value setValue, Error *error) {
+  RetVal ret;
+
+  Value value = refDeref(arrayRef);
+  if (value.type != VT_ARRAY) {
+    throwRuntimeError(error, "not an array %s", valueTypeName(core, value));
+  }
+
+  Array *array = deref(core, value);
+  if (index >= array->length) {
+    throwRuntimeError(error, "array index out of bounds: %" PRIu64, index);
+  }
+
+  arrayElements(array)[index] = setValue;
+
+  return R_SUCCESS;
+  failure: return ret;
+}
+
+Ref coreRecordCreate(VMCore_t core, uint16_t numFields) {
+  Record *record = NULL;
+
+  size_t size = sizeof(Record) + (numFields * sizeof(Value));
+
+  Value value;
+  value.type = VT_RECORD;
+
+  record = alloc(core, size, &value);
+
+  recordInitContents(record);
+  record->header.type = value.type;
+  record->header.size = size;
+
+  Value *fields = recordFields(record);
+  Value init = nil();
+  for (uint64_t i=0; i<numFields; i++) {
+    fields[i] = init;
+  }
+
+  return createRef(core, value);
+}
+
+RetVal coreRecordGet(VMCore_t core, Ref recordRef, uint64_t index, Value *result, Error *error) {
+  RetVal ret;
+
+  Value value = refDeref(recordRef);
+  if (value.type != VT_RECORD) {
+    throwRuntimeError(error, "not a record: %s", valueTypeName(core, value));
+  }
+
+  Record *record = deref(core, value);
+
+  {
+    void *obj = record;
+    void *ptr = recordFields(record);
+    void *recordFieldsEnd = obj + record->header.size;
+    if (ptr >= recordFieldsEnd) {
+      throwRuntimeError(error, "record field index out of bounds: %" PRIu64, index);
+    }
+  }
+
+  *result = recordFields(record)[index];
+
+  return R_SUCCESS;
+  failure: return ret;
+}
+
+RetVal coreRecordSet(VMCore_t core, Ref arrayRef, uint64_t index, Value setValue, Error *error) {
+  RetVal ret;
+
+  Value value = refDeref(arrayRef);
+  if (value.type != VT_RECORD) {
+    throwRuntimeError(error, "not a record: %s", valueTypeName(core, value));
+  }
+
+  Record *record = deref(core, value);
+
+  {
+    void *obj = record;
+    void *ptr = recordFields(record);
+    void *recordFieldsEnd = obj + record->header.size;
+    if (ptr >= recordFieldsEnd) {
+      throwRuntimeError(error, "record field index out of bounds: %" PRIu64, index);
+    }
+  }
+
+  recordFields(record)[index] = setValue;
+
+  return R_SUCCESS;
+  failure: return ret;
+}
+
+Ref coreFnCreate(VMCore_t core, void* data) {
+  Fn *fn = NULL;
+
+  size_t size = sizeof(Fn);
+
+  Value value;
+  value.type = VT_FN;
+
+  fn = alloc(core, size, &value);
+
+  fnInitContents(fn);
+  fn->header.type = value.type;
+  fn->header.size = size;
+  fn->fnPtr = data;
+
+  return createRef(core, value);
+}
+
+RetVal coreFnGet(VMCore_t core, Ref recordRef, void **ptr, Error *error) {
+  RetVal ret;
+
+  Value value = refDeref(recordRef);
+  if (value.type != VT_FN) {
+    throwRuntimeError(error, "not an fn: %s", valueTypeName(core, value));
+  }
+
+  Fn *fn = deref(core, value);
+  *ptr = fn->fnPtr;
+
+  return R_SUCCESS;
+  failure: return ret;
+}
+
+typedef struct Frame *Frame_t;
+
+Frame_t coreFrameCurrent(VMCore_t core) {
+  return core->current;
+}
+
+Frame_t coreFrameParent(VMCore_t core, Frame_t frame) {
+  if (frame == NULL) {
+    explode("frame cannot be null");
+  }
+  return frame->parent;
+}
+
+void coreOpStackPush(VMCore_t core, Frame_t frame, Ref ref) {
+
+  if (frame->opStackMaxDepth == frame->opStackUsedDepth + 1) {
+    explode("cannot allocate op stack greater than max %" PRIu64, frame->opStackMaxDepth);
+  }
+
+  frame->opStack[frame->opStackUsedDepth] = refDeref(ref);
+  frame->opStackUsedDepth += 1;
+}
+
+Ref coreOpStackPop(VMCore_t core, Frame_t frame) {
+
+  if (frame->opStackUsedDepth == 0) {
+    explode("cannot pop from empty op stack")
+  }
+
+  frame->opStackUsedDepth -= 1;
+  Value value = frame->opStack[frame->opStackUsedDepth];
+
+  return createRef(core, value);
+}
+
+Ref coreLocalGet(VMCore_t core, Frame_t frame, uint16_t index) {
+
+  if (index >= frame->numLocals) {
+    explode("local index out of bounds: %u", index);
+  }
+
+  Value value = frame->locals[index];
+  return createRef(core, value);
+}
+
+void coreLocalSet(VMCore_t core, Frame_t frame, uint16_t index, Ref setRef) {
+
+  if (index >= frame->numLocals) {
+    explode("local index out of bounds: %u", index);
+  }
+
+  Value value = refDeref(setRef);
+  frame->locals[index] = value;
+}
+
+Frame_t coreFramePush(VMCore_t core,
+                      uint16_t numLocals, uint16_t maxOpStackDepth,
+                      void* activationRecordPtr, size_t activationRecordSize) {
+
+  return pushFrame(core, numLocals, maxOpStackDepth, activationRecordPtr, activationRecordSize);
+}
+
+Frame_t coreFramePop(VMCore_t core) {
+  return popFrame(core);
+}
+
+void* coreFrameActivationRecord(VMCore_t core, Frame_t frame) {
+  return frame->activationRecord;
+}
+
+uint64_t tcoreFrameActivationRecordSize(VMCore_t core, Frame_t frame) {
+  return frame->activationRecordSize;
+}
+
+Ref coreFrameResultGet(VMCore_t core, Frame_t frame) {
+  Value value = frame->result;
+  return createRef(core, value);
+}
+
+void coreFrameResultSet(VMCore_t core, Frame_t frame, Ref setRef) {
+  Value value = refDeref(setRef);
+  frame->result = value;
+}
+
+void corePushLocal(VMCore_t core, uint16_t localIndex) {
+
+  Frame_t frame = core->current;
+  if (localIndex >= frame->numLocals) {
+    explode("local index out of bounds: %u", localIndex);
+  }
+
+  if (frame->opStackMaxDepth == frame->opStackUsedDepth + 1) {
+    explode("cannot allocate op stack greater than max %" PRIu64, frame->opStackMaxDepth);
+  }
+
+  frame->opStack[frame->opStackUsedDepth] = frame->locals[localIndex];
+  frame->opStackUsedDepth += 1;
+}
+
+void corePopLocal(VMCore_t core, uint16_t localIndex) {
+
+  Frame_t frame = core->current;
+  if (localIndex >= frame->numLocals) {
+    explode("local index out of bounds: %u", localIndex);
+  }
+
+  if (frame->opStackUsedDepth == 0) {
+    explode("cannot pop from empty op stack")
+  }
+
+  frame->opStackUsedDepth -= 1;
+  frame->locals[localIndex] = frame->opStack[frame->opStackUsedDepth];
+}
+
+// TODO: is it reasonable to expect the interpreter to never need to create refs?
+
+// TODO: the interpreter currently depends upon Fn and Closure, which suggests they should be built-in
+
+// TODO: what is the cost of, on every instruction
+// - calling a function to get the next instruction + index, derefing the ref that points to the value, which points to the function, which can be used to create a pointer to the code, which then gets read by index
+// - calling a function to
 
 void coreRefDestroy(VMCore_t core, Ref ref) {
   destroyRef(&core->refs, ref);
@@ -864,7 +1253,7 @@ void coreRefDestroy(VMCore_t core, Ref ref) {
 // real function definition. someday if collecting unused code becomes important we can worry
 // about it then
 
-// non-ref interactions
+// non-ref interactions (the interpreter should be able to use these exclusively)
 // - push a local to the op-stack
 // - pop from the op-stack to a local
 // - push a constant to the op-stack
@@ -877,34 +1266,39 @@ void coreRefDestroy(VMCore_t core, Ref ref) {
 // - pop from the op-stack to a local record field by index
 // - push a constant record field to the op-stack by index
 
+// - pop to the current frame result
+// - push child frame result to its parent's op stack
+
+// ref-based interactions (this is for c library code that juggles refs, not the interpreter)
+
 // interact with heap via refs
-// - create array with given width and length
-// - get array length
-// - get array element width
-// - get array element value by index
-// - set array element value by index
-// - create record with given number of fields
-// - get record field value by index
-// - set record field value by index
-// - create fn with supplied code ptr
-// - get fn code ptr
+// X create array with given width and length
+// X get array length
+// X get array element width
+// X get array element value by index
+// X set array element value by index
+// X create record with given number of fields
+// X get record field value by index
+// X set record field value by index
+// X create fn with supplied code ptr
+// X get fn code ptr
 
 // interact with stack objects via refs
-// - get a handle to the current frame
-// - get a handle to the parent of a frame
-// - push/pop from op-stack by frame
-// - get local value by index by frame
-// - set local value by index by frame
-// - push a new frame on top the current one
-// - pop the current frame
-// - get a pointer to the activation record
-// - get the activation record size
-// - get the result
-// - set the result
+// X get a handle to the current frame
+// X get a handle to the parent of a frame
+// X push/pop from op-stack by frame
+// X get local value by index by frame
+// X set local value by index by frame
+// X push a new frame on top the current one
+// X pop the current frame
+// X get a pointer to the activation record
+// X get the activation record size
+// X get the result
+// X set the result
 
 // general ref functions
-// - get object type / assert object type
-// - delete ref
+// X get object type / assert object type
+// X delete ref
 
 
 
