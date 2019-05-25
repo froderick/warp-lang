@@ -780,28 +780,6 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     uint8_t addCode[] = { I_CMP };
     throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
   }
-  else if (wcscmp(builtin->name.value, L"first") == 0) {
-
-    if (builtin->args.numForms!= 1) {
-      throwCompilerError(error, "first takes only one argument, got %u", builtin->args.numForms);
-    }
-
-    throws(tryCompile(&form->builtin.args.forms[0], output, error));
-
-    uint8_t addCode[] = { I_FIRST };
-    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
-  }
-  else if (wcscmp(builtin->name.value, L"rest") == 0) {
-
-    if (builtin->args.numForms!= 1) {
-      throwCompilerError(error, "rest takes only one argument, got %u", builtin->args.numForms);
-    }
-
-    throws(tryCompile(&form->builtin.args.forms[0], output, error));
-
-    uint8_t addCode[] = { I_REST };
-    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
-  }
   else if (wcscmp(builtin->name.value, L"cons") == 0) {
 
     if (builtin->args.numForms!= 2) {
@@ -813,67 +791,6 @@ RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
     }
 
     uint8_t addCode[] = { I_CONS };
-    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
-  }
-  else if (wcscmp(builtin->name.value, L"setmacro") == 0) {
-
-    if (builtin->args.numForms != 1) {
-      throwCompilerError(error, "setmacro takes one argument, got %u", builtin->args.numForms);
-    }
-
-    for (int i=0; i < form->builtin.args.numForms; i++) {
-      throws(tryCompile(&form->builtin.args.forms[i], output, error));
-    }
-
-    uint8_t addCode[] = { I_SET_MACRO };
-    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
-  }
-  else if (wcscmp(builtin->name.value, L"getmacro") == 0) {
-
-    if (builtin->args.numForms != 1) {
-      throwCompilerError(error, "getmacro takes one argument, got %u", builtin->args.numForms);
-    }
-
-    for (int i=0; i < form->builtin.args.numForms; i++) {
-      throws(tryCompile(&form->builtin.args.forms[i], output, error));
-    }
-
-    uint8_t addCode[] = { I_GET_MACRO };
-    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
-  }
-  else if (wcscmp(builtin->name.value, L"gc") == 0) {
-
-    if (builtin->args.numForms != 0) {
-      throwCompilerError(error, "gc takes no arguments, got %u", builtin->args.numForms);
-    }
-
-    uint8_t addCode[] = { I_GC };
-    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
-  }
-  else if (wcscmp(builtin->name.value, L"type") == 0) {
-
-    if (builtin->args.numForms != 1) {
-      throwCompilerError(error, "type takes only one argument, got %u", builtin->args.numForms);
-    }
-
-    for (int i=0; i < form->builtin.args.numForms; i++) {
-      throws(tryCompile(&form->builtin.args.forms[i], output, error));
-    }
-
-    uint8_t addCode[] = { I_GET_TYPE };
-    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
-  }
-  else if (wcscmp(builtin->name.value, L"prn") == 0) {
-
-    if (builtin->args.numForms != 1) {
-      throwCompilerError(error, "prn takes only one argument, got %u", builtin->args.numForms);
-    }
-
-    for (int i=0; i < form->builtin.args.numForms; i++) {
-      throws(tryCompile(&form->builtin.args.forms[i], output, error));
-    }
-
-    uint8_t addCode[] = { I_PRN };
     throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
   }
   else {

@@ -705,16 +705,16 @@ START_TEST(repl)
     assertEval(L"'(1 2 3)",
                L"(1 2 3)");
 
-    assertEval(L"(builtin :first '(x y z))",
+    assertEval(L"(first '(x y z))",
                L"x");
 
-    assertEval(L"(builtin :first nil)",
+    assertEval(L"(first nil)",
                L"nil");
 
-    assertEval(L"(builtin :rest '(x y z))",
+    assertEval(L"(rest '(x y z))",
                L"(y z)");
 
-    assertEval(L"(builtin :rest nil)",
+    assertEval(L"(rest nil)",
                L"nil");
 
     assertEval(L"(builtin :cons nil nil)",
@@ -754,7 +754,7 @@ START_TEST(repl)
 
     assertEval(L"(let () "
                "    (def foo (fn (x) x))"
-               "    (builtin :setmacro \"foo\"))", L"nil");
+               "    (set-macro \"foo\"))", L"nil");
 
     assertEval(L"(let () (def x 100) user/x)", L"100");
 

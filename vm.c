@@ -2570,14 +2570,6 @@ InstTable instTableCreate() {
       [I_CLEAR_HANDLER]    = { .name = "I_CLEAR_HANDLER",   .print = printInst,           .tryEval = tryClearHandlerEval },
 
       [I_CONS]             = { .name = "I_CONS",            .print = printInst,           .tryEval = tryConsEval },
-      [I_FIRST]            = { .name = "I_FIRST",           .print = printInst,           .tryEval = tryFirstEval},
-      [I_REST]             = { .name = "I_REST",            .print = printInst,           .tryEval = tryRestEval },
-      [I_SET_MACRO]        = { .name = "I_SET_MACRO",       .print = printInst,           .tryEval = trySetMacroEval},
-      [I_GET_MACRO]        = { .name = "I_GET_MACRO",       .print = printInst,           .tryEval = tryGetMacroEval},
-      [I_GC]               = { .name = "I_GC",              .print = printInst,           .tryEval = tryGCEval},
-      [I_GET_TYPE]         = { .name = "I_GET_TYPE",        .print = printInst,           .tryEval = tryGetTypeEval },
-      [I_PRN]              = { .name = "I_PRN",             .print = printInst,           .tryEval = tryPrnEval },
-
 
 //      [I_NEW]         = { .name = "I_NEW",         .print = printUnknown},
 //      [I_GET_FIELD]   = { .name = "I_GET_FIELD",   .print = printUnknown},
