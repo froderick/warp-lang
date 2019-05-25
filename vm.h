@@ -36,7 +36,6 @@ typedef struct Code {
 typedef enum InstType {
 
   I_LOAD_CONST,      // (8), typeIndex  (16) | (-> value)
-
   I_LOAD_LOCAL,      // (8), typeIndex  (16) | (-> value)
   I_STORE_LOCAL,     // (8), typeIndex  (16) | (objectref ->)
   I_INVOKE_DYN,      // (8)              | (objectref, args... -> ...)
@@ -54,15 +53,7 @@ typedef enum InstType {
   I_SWAP,            // (8),             | (a, b -> b, a)
   I_SET_HANDLER,     // (8),             | (jumpAddr, handler ->)
   I_CLEAR_HANDLER,   // (8),             | (->)
-
   I_CONS,            // (8),             | (x, seq -> newseq)
-//  I_FIRST,           // (8),             | (seq -> x)
-//  I_REST,            // (8),             | (seq -> seq)
-//  I_SET_MACRO,       // (8),             | (name -> nil)
-//  I_GET_MACRO,       // (8),             | (name -> bool)
-//  I_GC,              // (8),             | (->)
-//  I_GET_TYPE,        // (8),             | (value -> value)
-//  I_PRN,             // (8),             | (value -> nil)
 
   // requires garbage collection
   I_NEW,         // (8), objlen (16) | (-> objectref)

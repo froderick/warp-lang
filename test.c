@@ -717,13 +717,13 @@ START_TEST(repl)
     assertEval(L"(rest nil)",
                L"nil");
 
-    assertEval(L"(builtin :cons nil nil)",
+    assertEval(L"(cons nil nil)",
                L"(nil)");
 
-    assertEval(L"(builtin :cons 'x nil)",
+    assertEval(L"(cons 'x nil)",
                L"(x)");
 
-    assertEval(L"(builtin :cons 'x '(y z))",
+    assertEval(L"(cons 'x '(y z))",
                L"(x y z)");
 
     assertEval(L"(def x)",

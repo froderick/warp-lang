@@ -104,12 +104,10 @@
   (if (empty? seq)
     nil
     (let (n (first seq)
-          seq (rest seq)
-          sym (gensym))
+          seq (rest seq))
       (if (empty? seq)
-        `(let (~sym ~n) (cons ~sym nil))
-        `(let (~sym ~n)
-             (cons ~sym (list ~@seq)))))))
+        `(cons ~n nil)
+        `(cons ~n (list ~@seq))))))
 
 (defn not (a)
   (if a false true))
