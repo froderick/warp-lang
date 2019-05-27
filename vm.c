@@ -427,14 +427,14 @@ RetVal setPc(ExecFrame_t frame, uint16_t newPc, Error *error);
 RetVal getConst(ExecFrame_t frame, uint16_t constantIndex, Value *ptr, Error *error);
 RetVal getLocal(ExecFrame_t frame, uint16_t localIndex, Value *ptr, Error *error);
 RetVal setLocal(ExecFrame_t frame, uint16_t localIndex, Value value, Error *error);
-RetVal getLocalRef(ExecFrame_t frame, uint16_t localIndex, Value **ptr, Error *error);
+Value* getLocalRef(ExecFrame_t frame, uint16_t localIndex);
 uint16_t numLocals(ExecFrame_t frame);
 uint64_t numOperands(ExecFrame_t frame);
-RetVal getOperandRef(ExecFrame_t frame, uint64_t opIndex, Value **ptr, Error *error);
+Value* getOperandRef(ExecFrame_t frame, uint64_t opIndex);
 uint16_t pushOperand(ExecFrame_t frame, Value value, Error *error);
 uint16_t popOperand(ExecFrame_t frame, Value *value, Error *error);
 Value getFnRef(ExecFrame_t frame);
-RetVal setFnRef(VM *vm, ExecFrame_t frame, Value value, Error *error);
+void setFnRef(VM *vm, ExecFrame_t frame, Value value);
 
 bool hasResult(ExecFrame_t frame);
 bool hasParent(ExecFrame_t frame);
@@ -537,7 +537,7 @@ RetVal tryGCInitContents(GC *gc, uint64_t maxHeapSize, Error *error) {
     return ret;
 }
 
-void collect(VM *vm, ExecFrame_t frame, Error *error);
+void collect(VM *vm, ExecFrame_t frame);
 
 #define R_OOM 1
 
@@ -574,7 +574,7 @@ RetVal alloc(VM *vm, ExecFrame_t frame, uint64_t length, void **ptr, uint64_t *o
   int success = _alloc(&vm->gc, length, ptr, offset);
 
   if (success == R_OOM) {
-    collect(vm, frame, error);
+    collect(vm, frame);
 
     success = _alloc(&vm->gc, length, ptr, offset);
 
@@ -588,18 +588,12 @@ RetVal alloc(VM *vm, ExecFrame_t frame, uint64_t length, void **ptr, uint64_t *o
     return ret;
 }
 
-RetVal deref(GC *gc, void **ptr, uint64_t offset, Error *error) {
-  RetVal ret;
-
-  if (offset > gc->heapSize) {
-    throwRuntimeError(error, "invalid memory address");
+void* deref(GC *gc, Value value) {
+  uint64_t offset = value.value;
+  if (value.value > gc->heapSize) {
+    explode("invalid memory address");
   }
-
-  *ptr = gc->currentHeap + offset;
-
-  return R_SUCCESS;
-  failure:
-  return ret;
+  return gc->currentHeap + offset;
 }
 
 bool inCurrentHeap(GC *gc, void *ptr) {
@@ -649,8 +643,7 @@ uint64_t now() {
   return millis;
 }
 
-void collect(VM *vm, ExecFrame_t frame, Error *error) {
-  RetVal ret;
+void collect(VM *vm, ExecFrame_t frame) {
 
   uint64_t oldHeapUsed = vm->gc.allocPtr - vm->gc.currentHeap;
 
@@ -697,25 +690,19 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
       relocate(vm, oldHeap, &newFnRef);
 
       if (oldFnRef.value != newFnRef.value) {
-        throws(setFnRef(vm, current, newFnRef, error));
+        setFnRef(vm, current, newFnRef);
       }
     }
 
     uint16_t locals = numLocals(current);
     for (uint16_t i=0; i<locals; i++) {
-
-      Value *val = NULL;
-      throws(getLocalRef(current, i, &val, error));
-
+      Value *val = getLocalRef(current, i);
       relocate(vm, oldHeap, val);
     }
 
     uint64_t operands = numOperands(current);
     for (uint64_t i=0; i<operands; i++) {
-
-      Value *val = NULL;
-      throws(getOperandRef(current, i, &val, error));
-
+      Value *val = getOperandRef(current, i);
       relocate(vm, oldHeap, val);
     }
 
@@ -742,12 +729,6 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
   uint64_t duration = end - start;
 
   printf("gc: completed, %" PRIu64 " bytes recovered, %" PRIu64 " bytes used, took %" PRIu64 "ms\n", sizeRecovered, newHeapUsed, duration);
-
-  return;
-
-  failure:
-    printf("collect() failed, terminating process :)\n");
-    exit(-1);
 }
 
 /* RefRegistry implementation
@@ -1599,7 +1580,7 @@ RetVal tryPopInvocable(VM *vm, Value pop, Invocable *invocable, Error *error) {
   switch (invocable->fnRef.type) {
     case VT_FN: {
 
-      throws(deref(&vm->gc, (void*)&invocable->fn, invocable->fnRef.value, error));
+      invocable->fn = deref(&vm->gc, invocable->fnRef);
 
       invocable->hasClosure = false;
       invocable->closure = NULL;
@@ -1607,15 +1588,15 @@ RetVal tryPopInvocable(VM *vm, Value pop, Invocable *invocable, Error *error) {
     }
     case VT_CLOSURE: {
 
-      throws(deref(&vm->gc, (void*)&invocable->closure, invocable->fnRef.value, error));
+      invocable->closure = deref(&vm->gc, invocable->fnRef);
 
       invocable->hasClosure = true;
       invocable->fnRef = invocable->closure->fn;
-      throws(deref(&vm->gc, (void*)&invocable->fn, invocable->closure->fn.value, error));
+      invocable->fn = deref(&vm->gc, invocable->closure->fn);
       break;
     }
     case VT_CFN: {
-      throws(deref(&vm->gc, (void*)&invocable->fn, invocable->fnRef.value, error));
+      invocable->fn = deref(&vm->gc, invocable->fnRef);
     }
     default:
       // fail: not all values are invocable
@@ -1670,8 +1651,8 @@ RetVal tryPreprocessArguments(VM *vm, ExecFrame_t parent, uint16_t numArgs, bool
         throws(tryAllocateCons(vm, parent, nil(), nil(), &seq, error));
 
         // gc possibility over, so pop sequence and arg from the stack and set them on cons
-        Cons *cons = NULL;
-        throws(deref(&vm->gc, (void*)&cons, seq.value, error));
+        Cons *cons = deref(&vm->gc, seq);
+
         throws(popOperand(parent, &cons->next, error));
         throws(popOperand(parent, &cons->value, error));
 
@@ -1688,8 +1669,8 @@ RetVal tryPreprocessArguments(VM *vm, ExecFrame_t parent, uint16_t numArgs, bool
       throws(tryAllocateCons(vm, parent, nil(), nil(), &seq, error));
 
       // gc possibility over, so pop arg from the stack and it on cons
-      Cons *cons = NULL;
-      throws(deref(&vm->gc, (void*)&cons, seq.value, error));
+      Cons *cons = deref(&vm->gc, seq);
+
       throws(popOperand(parent, &cons->value, error));
 
       // put the one-element sequence back on the stack
@@ -1753,8 +1734,7 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
 RetVal tryInvokeCFn(VM *vm, ExecFrame_t frame, Value cFn, Error *error) {
   RetVal ret;
 
-  CFn *fn = NULL;
-  throws(deref(&vm->gc, (void*)&fn, cFn.value, error));
+  CFn *fn = deref(&vm->gc, cFn);
   throws(tryPreprocessArguments(vm, frame, fn->numArgs, fn->usesVarArgs, error));
   throws(fn->ptr(vm, frame, error));
 
@@ -1888,8 +1868,7 @@ RetVal tryListHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
 
   while (seq.type != VT_NIL) {
 
-    Cons *cons = NULL;
-    throws(deref(&vm->gc, (void *) &cons, seq.value, error));
+    Cons *cons = deref(&vm->gc, seq);
 
     uint32_t elemHash = 0;
     throws(tryHashCode(vm, cons->value, &elemHash, error));
@@ -1922,8 +1901,7 @@ RetVal tryArrayHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
 RetVal tryMapEntryHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
   RetVal ret;
 
-  MapEntry *entry;
-  throws(deref(&vm->gc, (void*)&entry, value.value, error));
+  MapEntry *entry = deref(&vm->gc, value);
 
   if (entry->hash == 0 && (entry->key.type != T_NIL || entry->value.type != T_NIL)) {
 
@@ -1950,11 +1928,9 @@ RetVal tryMapEntryHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
 RetVal tryMapHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
   RetVal ret;
 
-  Map *map;
-  throws(deref(&vm->gc, (void*)&map, value.value, error));
+  Map *map = deref(&vm->gc, value);
 
-  Array *array;
-  throws(deref(&vm->gc, (void*)&array, map->array.value, error));
+  Array *array = deref(&vm->gc, map->array);
 
   uint32_t h = 0;
 
@@ -1983,8 +1959,7 @@ RetVal tryMapHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
 
 RetVal tryStringHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
   RetVal ret;
-  String *s = NULL;
-  throws(deref(&vm->gc, (void *) &s, value.value, error));
+  String *s = deref(&vm->gc, value);
   *hash = stringHash(s);
   return R_SUCCESS;
   failure:
@@ -2005,8 +1980,7 @@ uint32_t symbolHash(Symbol *s) {
 
 RetVal trySymbolHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
   RetVal ret;
-  Symbol *s = NULL;
-  throws(deref(&vm->gc, (void *) &s, value.value, error));
+  Symbol *s = deref(&vm->gc, value);
   *hash = symbolHash(s);
   return R_SUCCESS;
   failure:
@@ -2027,8 +2001,7 @@ uint32_t keywordHash(Keyword *s) {
 
 RetVal tryKeywordHashCode(VM_t vm, Value value, uint32_t *hash, Error *error) {
   RetVal ret;
-  Keyword *s = NULL;
-  throws(deref(&vm->gc, (void *) &s, value.value, error));
+  Keyword *s = deref(&vm->gc, value);
   *hash = keywordHash(s);
   return R_SUCCESS;
   failure:
@@ -2228,8 +2201,7 @@ RetVal tryDefVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(readIndex(frame, &constantIndex, error));
   throws(getConst(frame, constantIndex, &varName, error));
 
-  String *str = NULL;
-  throws(deref(&vm->gc, (void*)&str, varName.value, error));
+  String *str = deref(&vm->gc, varName);
 
   throws(tryDefVar(&vm->namespaces, stringValue(str), str->length, value, error));
 
@@ -2257,8 +2229,7 @@ RetVal tryLoadVarEval(VM *vm, ExecFrame_t frame, Error *error) {
     throwRuntimeError(error, "expected a string: %s", getValueTypeName(vm, varName.type));
   }
 
-  String *str = NULL;
-  throws(deref(&vm->gc, (void*)&str, varName.value, error));
+  String *str = deref(&vm->gc, varName);
 
   Var *var = NULL;
   if (!resolveVar(&vm->namespaces, stringValue(str), str->length, &var)) {
@@ -2301,8 +2272,7 @@ RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
         getValueTypeName(vm, fnValue.type));
   }
 
-  Fn *fn;
-  throws(deref(&vm->gc, (void*)&fn, fnValue.value, error));
+  Fn *fn = deref(&vm->gc, fnValue);
 
   Closure *closure = NULL;
 
@@ -2428,8 +2398,7 @@ RetVal tryConsEval(VM *vm, ExecFrame_t frame, Error *error) {
     throwRuntimeError(error, "cannot cons onto a value of type %s", getValueTypeName(vm, seq.type));
   }
 
-  Cons *cons = NULL;
-  throws(deref(&vm->gc, (void*)&cons, result.value, error));
+  Cons *cons = deref(&vm->gc, result);
   cons->value = x;
   cons->next = seq;
 
@@ -2454,8 +2423,7 @@ RetVal tryFirstEval(VM *vm, ExecFrame_t frame, Error *error) {
     result = nil();
   }
   else if (seq.type == VT_LIST) {
-    Cons *cons;
-    throws(deref(&vm->gc, (void*)&cons, seq.value, error));
+    Cons *cons = deref(&vm->gc, seq);
     result = cons->value;
   }
   else {
@@ -2483,10 +2451,7 @@ RetVal tryRestEval(VM *vm, ExecFrame_t frame, Error *error) {
     result = nil();
   }
   else if (seq.type == VT_LIST) {
-
-    Cons *cons;
-    throws(deref(&vm->gc, (void*)&cons, seq.value, error));
-
+    Cons *cons = deref(&vm->gc, seq);
     result = cons->next;
   }
   else {
@@ -2512,14 +2477,12 @@ RetVal trySetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   uint64_t symLength = 0;
 
   if (strValue.type == VT_STR) {
-    String *str = NULL;
-    throws(deref(&vm->gc, (void*)&str, strValue.value, error));
+    String *str = deref(&vm->gc, strValue);
     sym = stringValue(str);
     symLength = str->length;
   }
   else if (strValue.type == VT_SYMBOL) {
-    Symbol *s = NULL;
-    throws(deref(&vm->gc, (void*)&s, strValue.value, error));
+    Symbol *s = deref(&vm->gc, strValue);
     sym = symbolValue(s);
     symLength = s->length;
   }
@@ -2559,14 +2522,12 @@ RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   uint64_t symLength = 0;
 
   if (strValue.type == VT_STR) {
-    String *str = NULL;
-    throws(deref(&vm->gc, (void*)&str, strValue.value, error));
+    String *str = deref(&vm->gc, strValue);
     sym = stringValue(str);
     symLength = str->length;
   }
   else if (strValue.type == VT_SYMBOL) {
-    Symbol *s = NULL;
-    throws(deref(&vm->gc, (void*)&s, strValue.value, error));
+    Symbol *s = deref(&vm->gc, strValue);
     sym = symbolValue(s);
     symLength = s->length;
   }
@@ -2574,8 +2535,7 @@ RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
     throwRuntimeError(error, "only strings or symbols can identify vars: %s", getValueTypeName(vm, strValue.type));
   }
 
-  String *str = NULL;
-  throws(deref(&vm->gc, (void*)&str, strValue.value, error));
+  String *str = deref(&vm->gc, strValue);
 
   Value result;
   result.type = VT_BOOL;
@@ -2598,7 +2558,7 @@ RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryGCEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  collect(vm, frame, error);
+  collect(vm, frame);
 
   throws(pushOperand(frame, nil(), error));
 
@@ -2866,8 +2826,7 @@ RetVal equalsString(VM *vm, Value value, wchar_t *cmpStr, bool *equals, Error *e
   *equals = false;
   if (value.type == VT_STR) {
 
-    String *str = NULL;
-    throws(deref(&vm->gc, (void*)&str, value.value, error));
+    String *str = deref(&vm->gc, value);
 
     if (wcscmp(stringValue(str), cmpStr) == 0) {
       *equals = true;
@@ -2882,8 +2841,7 @@ RetVal equalsString(VM *vm, Value value, wchar_t *cmpStr, bool *equals, Error *e
 RetVal tryPrnStr(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   RetVal ret;
 
-  String *str = NULL;
-  throws(deref(&vm->gc, (void*)&str, result.value, error));
+  String *str = deref(&vm->gc, result);
 
   expr->type = N_STRING;
   expr->string.length = str->length;
@@ -2898,8 +2856,7 @@ RetVal tryPrnSymbol(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error
 
   RetVal ret;
 
-  Symbol *sym = NULL;
-  throws(deref(&vm->gc, (void*)&sym, result.value, error));
+  Symbol *sym = deref(&vm->gc, result);
 
   expr->type = N_SYMBOL;
   expr->symbol.length = sym->length;
@@ -2913,8 +2870,7 @@ RetVal tryPrnSymbol(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error
 RetVal tryPrnKeyword(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   RetVal ret;
 
-  Keyword *kw = NULL;
-  throws(deref(&vm->gc, (void*)&kw, result.value, error));
+  Keyword *kw = deref(&vm->gc, result);
 
   expr->type = N_KEYWORD;
   expr->keyword.length = kw->length;
@@ -2942,21 +2898,20 @@ RetVal tryReadProperty(VM *vm, Value *ptr, Property *p, Error *error) {
                       getValueTypeName(vm, ptr->type));
   }
 
-  Cons *properties;
-  throws(deref(&vm->gc, (void*)&properties, ptr->value, error));
+  Cons *properties = deref(&vm->gc, *ptr);
 
   if (properties->value.type != VT_KEYWORD) {
     throwRuntimeError(error, "expected keyword for property key: %s",
                       getValueTypeName(vm, properties->value.type));
   }
 
-  throws(deref(&vm->gc, (void*)&p->key, properties->value.value, error));
+  p->key = deref(&vm->gc, properties->value);
 
   if (isEmpty(properties->next)) {
     throwRuntimeError(error, "expected value for property but only found a key: %ls", keywordValue(p->key));
   }
 
-  throws(deref(&vm->gc, (void*)&properties, properties->next.value, error));
+  properties = deref(&vm->gc, properties->next);
   p->value = properties->value;
 
   *ptr = properties->next;
@@ -2997,8 +2952,7 @@ RetVal tryPrnMetadata(VM_t vm, Value metadata, Expr *expr, Error *error) {
 RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   RetVal ret;
 
-  Cons *cons;
-  throws(deref(&vm->gc, (void*)&cons, result.value, error));
+  Cons *cons = deref(&vm->gc, result);
 
   expr->type = N_LIST;
 
@@ -3020,7 +2974,7 @@ RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) 
                         getValueTypeName(vm, cons->next.type));
     }
 
-    throws(deref(&vm->gc, (void *) &cons, cons->next.value, error));
+    cons = deref(&vm->gc, cons->next);
 
     tryPalloc(pool, elem, sizeof(Expr), "Expr");
     exprInitContents(elem);
@@ -3044,11 +2998,9 @@ RetVal tryPrnArray(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error)
 RetVal tryPrnMap(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   RetVal ret;
 
-  Map *map;
-  throws(deref(&vm->gc, (void*)&map, result.value, error));
+  Map *map = deref(&vm->gc, result);
 
-  Array *array;
-  throws(deref(&vm->gc, (void*)&array, map->array.value, error));
+  Array *array = deref(&vm->gc, map->array);
 
   expr->type = N_MAP;
   throws(tryPrnMetadata(vm, map->header.metadata, expr, error));
@@ -3060,8 +3012,7 @@ RetVal tryPrnMap(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
 
     if (entryRef.type == VT_MAP_ENTRY) {
 
-      MapEntry *entry = NULL;
-      throws(deref(&vm->gc, (void *) &entry, entryRef.value, error));
+      MapEntry *entry = deref(&vm->gc, entryRef);
 
       Expr *keyExpr = NULL;
       tryPalloc(pool, keyExpr, sizeof(Expr), "Expr");
@@ -3113,11 +3064,8 @@ RetVal tryEqualsStr(VM_t vm, Value this, Value that, bool *equal, Error *error) 
   }
   else {
 
-    String *a = NULL;
-    throws(deref(&vm->gc, (void*)&a, this.value, error));
-
-    String *b = NULL;
-    throws(deref(&vm->gc, (void*)&b, that.value, error));
+    String *a = deref(&vm->gc, this);
+    String *b = deref(&vm->gc, that);
 
     if (a->length != b->length) {
       *equal = false;
@@ -3143,11 +3091,8 @@ RetVal tryEqualsSymbol(VM_t vm, Value this, Value that, bool *equal, Error *erro
   }
   else {
 
-    Symbol *a = NULL;
-    throws(deref(&vm->gc, (void*)&a, this.value, error));
-
-    Symbol *b = NULL;
-    throws(deref(&vm->gc, (void*)&b, that.value, error));
+    Symbol *a = deref(&vm->gc, this);
+    Symbol *b = deref(&vm->gc, that);
 
     if (a->length != b->length) {
       *equal = false;
@@ -3173,11 +3118,8 @@ RetVal tryEqualsKeyword(VM_t vm, Value this, Value that, bool *equal, Error *err
   }
   else {
 
-    Keyword *a = NULL;
-    throws(deref(&vm->gc, (void*)&a, this.value, error));
-
-    Keyword *b = NULL;
-    throws(deref(&vm->gc, (void*)&b, that.value, error));
+    Keyword *a = deref(&vm->gc, this);
+    Keyword *b = deref(&vm->gc, that);
 
     if (a->length != b->length) {
       *equal = false;
@@ -3224,11 +3166,8 @@ RetVal tryEqualsList(VM_t vm, Value this, Value that, bool *equal, Error *error)
 
     while (this.type != T_NIL) {
 
-      Cons *a = NULL;
-      throws(deref(&vm->gc, (void *) &a, this.value, error));
-
-      Cons *b = NULL;
-      throws(deref(&vm->gc, (void *) &a, that.value, error));
+      Cons *a = deref(&vm->gc, this);
+      Cons *b = deref(&vm->gc, that);
 
       bool elementEqual = false;
       throws(tryEquals(vm, a->value, b->value, &elementEqual, error));
@@ -3291,11 +3230,8 @@ RetVal tryEqualsMapEntry(VM_t vm, Value this, Value that, bool *equal, Error *er
     *equal = true;
   }
   else {
-    MapEntry *a = NULL;
-    throws(deref(&vm->gc, (void *) &a, this.value, error));
-
-    MapEntry *b = NULL;
-    throws(deref(&vm->gc, (void *) &b, this.value, error));
+    MapEntry *a = deref(&vm->gc, this);
+    MapEntry *b = deref(&vm->gc, that);
 
     bool keyEqual = false;
     throws(tryEquals(vm, a->key, b->key, &keyEqual, error));
@@ -3855,18 +3791,11 @@ RetVal getLocal(ExecFrame *frame, uint16_t localIndex, Value *ptr, Error *error)
   return ret;
 }
 
-RetVal getLocalRef(ExecFrame *frame, uint16_t localIndex, Value **ptr, Error *error) {
-  RetVal ret;
-
+Value* getLocalRef(ExecFrame *frame, uint16_t localIndex) {
   if (localIndex >= frame->fn->numLocals) {
-    throwRuntimeError(error, "no such local: %u", localIndex);
+    explode("no such local: %u", localIndex);
   }
-
-  *ptr = &frame->locals[localIndex];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  return &frame->locals[localIndex];
 }
 
 RetVal setLocal(ExecFrame *frame, uint16_t localIndex, Value value, Error *error) {
@@ -3891,18 +3820,11 @@ uint64_t numOperands(ExecFrame *frame) {
   return frame->opStack->usedDepth;
 }
 
-RetVal getOperandRef(ExecFrame *frame, uint64_t opIndex, Value **ptr, Error *error) {
-  RetVal ret;
-
+Value* getOperandRef(ExecFrame *frame, uint64_t opIndex) {
   if (opIndex >= frame->opStack->usedDepth) {
-    throwRuntimeError(error, "no such operand: %" PRIu64, opIndex);
+    explode("no such operand: %" PRIu64, opIndex);
   }
-
-  *ptr = &frame->opStack->stack[opIndex];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  return &frame->opStack->stack[opIndex];
 }
 
 uint16_t pushOperand(ExecFrame *frame, Value value, Error *error) {
@@ -3929,18 +3851,9 @@ Value getFnRef(ExecFrame *frame) {
   return frame->fnRef;
 }
 
-RetVal setFnRef(VM *vm, ExecFrame *frame, Value value, Error *error) {
-  RetVal ret;
-
+void setFnRef(VM *vm, ExecFrame *frame, Value value) {
   frame->fnRef = value;
-  frame->fn = NULL;
-
-  throws(deref(&vm->gc, (void*)&frame->fn, value.value, error));
-
-  return R_SUCCESS;
-  failure:
-    return ret;
-
+  frame->fn = deref(&vm->gc, value);
 }
 
 bool hasResult(ExecFrame *frame) {
@@ -4088,8 +4001,7 @@ RetVal getException(ExecFrame_t frame, VMException *e, Error *error) {
 RetVal pushFrame(VM *vm, ExecFrame **framePtr, Value newFn, Error *error) {
   RetVal ret;
 
-  Fn *fn = NULL;
-  throws(deref(&vm->gc, (void*)&fn, newFn.value, error));
+  Fn *fn = deref(&vm->gc, newFn);
 
   // clean up on fail
   ExecFrame_t parent = NULL;
@@ -4130,8 +4042,7 @@ RetVal pushFrame(VM *vm, ExecFrame **framePtr, Value newFn, Error *error) {
 RetVal replaceFrame(VM *vm, ExecFrame *frame, Value newFn, Error *error) {
   RetVal ret;
 
-  Fn *fn = NULL;
-  throws(deref(&vm->gc, (void*)&fn, newFn.value, error));
+  Fn *fn = deref(&vm->gc, newFn);
 
   // resize locals if needed
   uint16_t newNumLocals = fn->numLocals + fn->numCaptures;
@@ -4326,13 +4237,11 @@ RetVal tryStrJoinBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   Value cursor = strings;
   while (cursor.type != VT_NIL) {
 
-    Cons *seq = NULL;
-    throws(deref(&vm->gc, (void*)&seq, cursor.value, error));
+    Cons *seq = deref(&vm->gc, cursor);
 
     ASSERT_STR(seq->value);
 
-    String *string = NULL;
-    throws(deref(&vm->gc, (void*)&string, seq->value.value, error));
+    String *string = deref(&vm->gc, seq->value);
     totalLength += string->length;
 
     cursor = seq->next;
@@ -4343,8 +4252,7 @@ RetVal tryStrJoinBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
 
   Value resultRef = nil();
   throws(tryStringMakeBlank(vm, frame, totalLength, &resultRef, error));
-  String *result = NULL;
-  throws(deref(&vm->gc, (void*)&result, resultRef.value, error));
+  String *result = deref(&vm->gc, resultRef);
 
   // get the list back again after allocation
   throws(popOperand(frame, &strings, error));
@@ -4353,11 +4261,9 @@ RetVal tryStrJoinBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
 
   cursor = strings;
   while (cursor.type != VT_NIL) {
-    Cons *seq = NULL;
-    throws(deref(&vm->gc, (void*)&seq, cursor.value, error));
+    Cons *seq = deref(&vm->gc, cursor);
 
-    String *string = NULL;
-    throws(deref(&vm->gc, (void*)&string, seq->value.value, error));
+    String *string = deref(&vm->gc, seq->value);
 
     wchar_t *writePtr = (void*)result + result->valueOffset + totalSizeWritten;
     size_t textSize = string->length * sizeof(wchar_t);
@@ -4394,8 +4300,7 @@ RetVal tryPrStrBuiltinConf(VM *vm, ExecFrame_t frame, bool readable, Error *erro
 
   Value resultRef = nil();
   throws(tryStringMakeBlank(vm, frame, stringBufferLength(b), &resultRef, error));
-  String *result = NULL;
-  throws(deref(&vm->gc, (void*)&result, resultRef.value, error));
+  String *result = deref(&vm->gc, resultRef);
 
   memcpy(stringValue(result), stringBufferText(b), stringBufferLength(b) * sizeof(wchar_t));
 
@@ -4458,8 +4363,7 @@ RetVal trySymbolBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
 
   uint64_t length = 0;
   {
-    String *string = NULL;
-    throws(deref(&vm->gc, (void *) &string, value.value, error));
+    String *string = deref(&vm->gc, value);
     length = string->length;
   }
 
@@ -4473,10 +4377,8 @@ RetVal trySymbolBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   throws(popOperand(frame, &value, error));
 
   // actually copy string into symbol
-  String *string = NULL;
-  throws(deref(&vm->gc, (void *) &string, value.value, error));
-  Symbol *sym = NULL;
-  throws(deref(&vm->gc, (void *) &sym, result.value, error));
+  String *string = deref(&vm->gc, value);
+  Symbol *sym = deref(&vm->gc, result);
   memcpy(symbolValue(sym), stringValue(string), sym->length * sizeof(wchar_t));
 
   throws(pushOperand(frame, result, error));
@@ -4523,8 +4425,7 @@ RetVal tryKeywordBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
 
   uint64_t length = 0;
   {
-    String *string = NULL;
-    throws(deref(&vm->gc, (void *) &string, value.value, error));
+    String *string = deref(&vm->gc, value);
     length = string->length;
   }
 
@@ -4538,10 +4439,8 @@ RetVal tryKeywordBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   throws(popOperand(frame, &value, error));
 
   // actually copy string into symbol
-  String *string = NULL;
-  throws(deref(&vm->gc, (void *) &string, value.value, error));
-  Keyword *kw = NULL;
-  throws(deref(&vm->gc, (void *) &kw, result.value, error));
+  String *string = deref(&vm->gc, value);
+  Keyword *kw = deref(&vm->gc, result);
   memcpy(keywordValue(kw), stringValue(string), kw->length * sizeof(wchar_t));
 
   throws(pushOperand(frame, result, error));
@@ -4790,11 +4689,9 @@ RetVal tryPutMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   bool makeNewEntry = false;
   uint64_t newEntryIndex = 0;
   {
-    Map *m;
-    throws(deref(&vm->gc, (void *) &m, map.value, error));
+    Map *m = deref(&vm->gc, map);
 
-    Array *array;
-    throws(deref(&vm->gc, (void *) &array, m->array.value, error));
+    Array *array = deref(&vm->gc, m->array);
 
     uint64_t index = hash % array->length;
 
@@ -4808,8 +4705,7 @@ RetVal tryPutMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
         break;
       }
 
-      MapEntry *entry;
-      throws(deref(&vm->gc, (void *) &entry, bucket.value, error));
+      MapEntry *entry = deref(&vm->gc, bucket);
 
       bool keyEqual = false;
       throws(tryEquals(vm, key, entry->key, &keyEqual, error));
@@ -4841,16 +4737,13 @@ RetVal tryPutMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
     throws(popOperand(frame, &key, error));
     throws(popOperand(frame, &map, error));
 
-    Map *m;
-    throws(deref(&vm->gc, (void *) &m, map.value, error));
+    Map *m = deref(&vm->gc, map);
 
-    Array *array;
-    throws(deref(&vm->gc, (void *) &array, m->array.value, error));
+    Array *array = deref(&vm->gc, m->array);
 
     arrayElements(array)[newEntryIndex] = entryRef;
 
-    MapEntry *entry;
-    throws(deref(&vm->gc, (void *) &entry, entryRef.value, error));
+    MapEntry *entry = deref(&vm->gc, entryRef);
 
     entry->key = key;
     entry->value = value;
@@ -4875,11 +4768,9 @@ RetVal tryPutMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   float load = 0;
   uint64_t arraySize = 0;
   {
-    Map *m;
-    throws(deref(&vm->gc, (void *) &m, map.value, error));
+    Map *m = deref(&vm->gc, map);
 
-    Array *array;
-    throws(deref(&vm->gc, (void *) &array, m->array.value, error));
+    Array *array = deref(&vm->gc, m->array);
 
     arraySize = array->length;
     load = (float)m->size / (float)array->length;
@@ -4911,14 +4802,11 @@ RetVal tryPutMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
 
     // reuse the existing map entries
 
-    Map *m;
-    throws(deref(&vm->gc, (void *) &m, map.value, error));
+    Map *m = deref(&vm->gc, map);
 
-    Array *oldArray;
-    throws(deref(&vm->gc, (void *) &oldArray, m->array.value, error));
+    Array *oldArray = deref(&vm->gc, m->array);
 
-    Array *newArray;
-    throws(deref(&vm->gc, (void *) &newArray, newArrayRef.value, error));
+    Array *newArray = deref(&vm->gc, newArrayRef);
 
     for (uint64_t i=0; i<oldArray->length; i++) {
       Value rehomeRef = arrayElements(oldArray)[i];
@@ -4929,8 +4817,7 @@ RetVal tryPutMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
 
       uint64_t index;
       {
-        MapEntry *rehomeEntry;
-        throws(deref(&vm->gc, (void *) &rehomeEntry, rehomeRef.value, error));
+        MapEntry *rehomeEntry = deref(&vm->gc, rehomeRef);
 
         index = rehomeEntry->hash % newArray->length;
       }
@@ -4974,11 +4861,9 @@ RetVal tryGetMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
 
   Value foundValue = nil();
   {
-    Map *m;
-    throws(deref(&vm->gc, (void *) &m, map.value, error));
+    Map *m = deref(&vm->gc, map);
 
-    Array *array;
-    throws(deref(&vm->gc, (void *) &array, m->array.value, error));
+    Array *array = deref(&vm->gc, m->array);
 
     uint64_t index = hash % array->length;
 
@@ -4990,8 +4875,7 @@ RetVal tryGetMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
         break;
       }
 
-      MapEntry *entry;
-      throws(deref(&vm->gc, (void *) &entry, bucket.value, error));
+      MapEntry *entry = deref(&vm->gc, bucket);
 
       bool keyEqual = false;
       throws(tryEquals(vm, key, entry->key, &keyEqual, error));
