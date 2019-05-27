@@ -325,7 +325,7 @@ typedef struct Invocable {
   Closure *closure;
 } Invocable;
 
-typedef RetVal (*TryRelocateChildren)(VM_t vm, void *oldHeap, void *obj, Error *error);
+typedef void (*RelocateChildren)(VM_t vm, void *oldHeap, void *obj);
 typedef RetVal (*TryPrn)(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error);
 typedef RetVal (*TryHashCode)(VM_t vm, Value value, uint32_t *hash, Error *error);
 typedef RetVal (*TryEquals)(VM_t vm, Value this, Value that, bool *equal, Error *error);
@@ -334,7 +334,7 @@ typedef struct ValueTypeInfo {
   const char *name;
   bool isHeapObject;
   bool (*isTruthy)(Value value);
-  TryRelocateChildren tryRelocateChildren;
+  RelocateChildren relocateChildren;
   TryPrn tryPrn;
   TryHashCode tryHashCode;
   TryEquals tryEquals;
@@ -347,11 +347,49 @@ typedef struct ValueTypeTable {
 
 // vm state
 
+
+/*
+ * TODO: if I add a global roots pointers registry and an API to add/remove pointers to roots from this registry
+ * then I can protect myself from GC even mid-instruction.
+ *
+ * I could also add a stack-frame dedicated space for this, so as to avoid dealing with linked lists globally
+ * and to get automatic cleanup of temporary roots. This would mean that my stack frames would no longer be
+ * of a fixed size, but this is already technically true because of the way I'm using the opstack for this purpose.
+ *
+ * Also, CFns really shouldn't be touching the stack frame directly, there should be a way to bundle up those
+ * arguments properly.
+ *
+ * Also, Pairs (lists, now) are a good idea to build directly into the VM.
+ */
+
+
+/*
+ * RefRegistry data structures
+ */
+
+typedef struct RefElem RefElem;
+
+typedef struct RefElem {
+  Value heapObject;
+  RefElem *prev, *next;
+} RefElem;
+
+typedef struct RefRegistry {
+  RefElem *used;
+  RefElem *free;
+} RefRegistry;
+
+/*
+ * A Ref is really a direct memory pointer to a RefElem struct.
+ */
+typedef uint64_t Ref;
+
 typedef struct VM {
   GC gc;
   Namespaces namespaces;
   InstTable instTable;
   ValueTypeTable valueTypeTable;
+  RefRegistry refs;
 } VM;
 
 // frames
@@ -400,7 +438,7 @@ RetVal setFnRef(VM *vm, ExecFrame_t frame, Value value, Error *error);
 
 bool hasResult(ExecFrame_t frame);
 bool hasParent(ExecFrame_t frame);
-RetVal getParent(ExecFrame_t frame, ExecFrame_t *ptr, Error *error);
+ExecFrame_t getParent(ExecFrame_t frame);
 RetVal setResult(ExecFrame_t frame, Value result, Error *error);
 RetVal getResult(ExecFrame_t frame, Value *ptr, Error *error);
 
@@ -445,13 +483,10 @@ bool isTruthy(VM *vm, Value value) {
   return vm->valueTypeTable.valueTypes[value.type].isTruthy(value);
 }
 
-RetVal tryRelocateChildren(VM *vm, ValueType type, void *oldHeap, void *obj, Error *error) {
-  TryRelocateChildren relocate = vm->valueTypeTable.valueTypes[type].tryRelocateChildren;
+void relocateChildren(VM *vm, ValueType type, void *oldHeap, void *obj) {
+  RelocateChildren relocate = vm->valueTypeTable.valueTypes[type].relocateChildren;
   if (relocate != NULL) {
-    return relocate(vm, oldHeap, obj, error);
-  }
-  else {
-    return R_SUCCESS;
+    relocate(vm, oldHeap, obj);
   }
 }
 
@@ -571,19 +606,18 @@ bool inCurrentHeap(GC *gc, void *ptr) {
   return gc->currentHeap <= ptr && ptr < gc->currentHeapEnd;
 }
 
-RetVal relocate(VM *vm, void *oldHeap, Value *value, Error *error) {
-  RetVal ret;
+void relocate(VM *vm, void *oldHeap, Value *value) {
 
   if (!isHeapObject(vm, *value)) {
     // only relocate heap objects
-    return R_SUCCESS;
+    return;
   }
 
   GC *gc = &vm->gc;
 
   void *ptr = NULL;
   if (value->value > gc->heapSize) {
-    throwRuntimeError(error, "invalid memory address");
+    explode("invalid memory address");
   }
   ptr = oldHeap + value->value;
 
@@ -598,7 +632,7 @@ RetVal relocate(VM *vm, void *oldHeap, Value *value, Error *error) {
     uint64_t offset = 0;
 
     if (_alloc(gc, size, &newPtr, &offset) == R_OOM) {
-      throwRuntimeError(error, "out of memory, cannot allocate %lu bytes mid-gc", size);
+      explode("out of memory, cannot allocate %lu bytes mid-gc", size);
     }
 
     memcpy(newPtr, ptr, size);
@@ -606,10 +640,6 @@ RetVal relocate(VM *vm, void *oldHeap, Value *value, Error *error) {
 
     *forwardPtr = newPtr;
   }
-
-  return R_SUCCESS;
-  failure:
-    return ret;
 }
 
 uint64_t now() {
@@ -640,12 +670,19 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
 
   memset(vm->gc.currentHeap, 0, vm->gc.heapSize);
 
+  // relocate refs
+  RefElem *refElem = vm->refs.used;
+  while (refElem != NULL) {
+    relocate(vm, oldHeap, &refElem->heapObject);
+    refElem = refElem->next;
+  }
+
   // relocate var roots
   for (uint64_t i=0; i<vm->namespaces.numNamespaces; i++) {
     Namespace *ns = &vm->namespaces.namespaces[i];
     for (uint64_t j=0; j<ns->localVars.length; j++) {
       Var *var = &ns->localVars.vars[j];
-      throws(relocate(vm, oldHeap, &var->value, error));
+      relocate(vm, oldHeap, &var->value);
     }
   }
 
@@ -657,7 +694,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
     {
       Value oldFnRef = getFnRef(current);
       Value newFnRef = oldFnRef;
-      throws(relocate(vm, oldHeap, &newFnRef, error));
+      relocate(vm, oldHeap, &newFnRef);
 
       if (oldFnRef.value != newFnRef.value) {
         throws(setFnRef(vm, current, newFnRef, error));
@@ -670,7 +707,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
       Value *val = NULL;
       throws(getLocalRef(current, i, &val, error));
 
-      throws(relocate(vm, oldHeap, val, error));
+      relocate(vm, oldHeap, val);
     }
 
     uint64_t operands = numOperands(current);
@@ -679,14 +716,14 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
       Value *val = NULL;
       throws(getOperandRef(current, i, &val, error));
 
-      throws(relocate(vm, oldHeap, val, error));
+      relocate(vm, oldHeap, val);
     }
 
     if (!hasParent(current)) {
       break;
     }
     else {
-      throws(getParent(current, &current, error) != R_SUCCESS);
+      current = getParent(current);
     }
   }
 
@@ -695,7 +732,7 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
   // relocate all the objects this object references
   while (scanptr < vm->gc.allocPtr) {
     ObjectHeader *header = scanptr;
-    throws(tryRelocateChildren(vm, header->type, oldHeap, scanptr, error));
+    relocateChildren(vm, header->type, oldHeap, scanptr);
     scanptr += header->size;
   }
 
@@ -711,6 +748,114 @@ void collect(VM *vm, ExecFrame_t frame, Error *error) {
   failure:
     printf("collect() failed, terminating process :)\n");
     exit(-1);
+}
+
+/* RefRegistry implementation
+ *
+ * The purpose of a registry is to hold references to heap objects from c
+ * code in such a way that the collector can discover them and avoid premature
+ * collection. Holding these references directly in c code is a problem
+ * because the copying gc needs to be able to rewrite all the references
+ * periodically. The c call stack is unavailable to the collector, so a layer
+ * of indirection is needed to accomplish this.
+ *
+ * The VM has a single global registry for now, which is based on a
+ * doubly-linked list. This is not good for cache locality, but we can fix this
+ * later. Generally we only need refs when writing c code that manipulates
+ * refs outside of places managed exclusively by the VM (stack, heap,
+ * op-stack, etc).
+ */
+
+void refElemInitContents(RefElem *e) {
+  e->heapObject = nil();
+  e->prev = NULL;
+  e->next = NULL;
+}
+
+void refRegistryInitContents(RefRegistry *r) {
+  r->used = NULL;
+  r->free = NULL;
+}
+
+void refRegistryFreeContents(RefRegistry *r) {
+  if (r != NULL) {
+    RefElem *elem = NULL;
+
+    elem = r->free;
+    while (elem != NULL) {
+      RefElem *freeMe = elem;
+      elem = elem->next;
+      free(freeMe);
+    }
+    r->free = NULL;
+
+    elem = r->used;
+    while (elem != NULL) {
+      RefElem *freeMe = elem;
+      elem = elem->next;
+      free(freeMe);
+    }
+    r->used = NULL;
+  }
+}
+
+Ref createRef(VM *vm, Value value) {
+
+  RefRegistry *registry = &vm->refs;
+
+  RefElem *newHead = NULL;
+  if (registry->free != NULL) { // look for free first
+    newHead = registry->free;
+    registry->free = registry->free->next;
+  }
+  else { // allocate
+    newHead = malloc(sizeof(RefElem));
+    if (newHead == NULL) {
+      explode("failed to allocate RefElem");
+    }
+  }
+
+  newHead->heapObject = value;
+  newHead->prev = NULL;
+  newHead->next = registry->used;
+
+  registry->used = newHead;
+
+  Ref ref = (Ref)&newHead;
+  return ref;
+}
+
+Value refDeref(Ref ref) {
+  RefElem *elem = (RefElem*)ref;
+  return elem->heapObject;
+}
+
+Ref getRefType(Ref ref) {
+  RefElem *elem = (RefElem*)ref;
+  return elem->heapObject.type;
+}
+
+void destroyRef(VM *vm, Ref ref) {
+
+  RefRegistry *registry = &vm->refs;
+
+  RefElem *elem = (RefElem*)ref;
+
+  // clear
+  elem->heapObject = nil();
+
+  // remove
+  if (elem->prev != NULL) {
+    elem->prev->next = elem->next;
+  }
+  if (elem->next != NULL) {
+    elem->next->prev = elem->prev;
+  }
+
+  // add to free list
+  elem->prev = NULL;
+  elem->next = registry->free;
+  registry->free = elem;
 }
 
 /*
@@ -1638,8 +1783,7 @@ RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
     throws(pushFrame(vm, &frame, invocable.fnRef, error));
     pushed = true;
 
-    ExecFrame_t parent;
-    throws(getParent(frame, &parent, error));
+    ExecFrame_t parent = getParent(frame);
 
     throws(tryInvokePopulateLocals(vm, parent, frame, invocable, error));
   }
@@ -2090,9 +2234,7 @@ RetVal tryDefVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   throws(tryDefVar(&vm->namespaces, stringValue(str), str->length, value, error));
 
   // define always returns nil
-  Value result;
-  result.type = VT_NIL;
-  result.value = 0;
+  Value result = nil();
   throws(pushOperand(frame, result, error));
 
   return R_SUCCESS;
@@ -2641,79 +2783,43 @@ bool isTruthyYes(Value v) { return true; }
 bool isTruthyNo(Value v) { return false; }
 bool isTruthyBool(Value v) { return v.value; }
 
-RetVal tryRelocateChildrenFn(VM_t vm, void *oldHeap, void *obj, Error *error) {
-  RetVal ret;
-
+void relocateChildrenFn(VM_t vm, void *oldHeap, void *obj) {
   Fn *fn = obj;
   for (uint16_t i=0; i<fn->numConstants; i++) {
-    throws(relocate(vm, oldHeap, &fnConstants(fn)[i], error));
+    relocate(vm, oldHeap, &fnConstants(fn)[i]);
   }
-
-  return R_SUCCESS;
-  failure:
-    return ret;
 }
 
-RetVal tryRelocateChildrenList(VM_t vm, void *oldHeap, void *obj, Error *error) {
-  RetVal ret;
-
+void relocateChildrenList(VM_t vm, void *oldHeap, void *obj) {
   Cons *cons = obj;
-  throws(relocate(vm, oldHeap, &cons->value, error));
-  throws(relocate(vm, oldHeap, &cons->next, error));
-
-  return R_SUCCESS;
-  failure:
-    return ret;
+  relocate(vm, oldHeap, &cons->value);
+  relocate(vm, oldHeap, &cons->next);
 }
 
-RetVal tryRelocateChildrenClosure(VM_t vm, void *oldHeap, void *obj, Error *error) {
-  RetVal ret;
-
+void relocateChildrenClosure(VM_t vm, void *oldHeap, void *obj) {
   Closure *closure = obj;
-  throws(relocate(vm, oldHeap, &closure->fn, error));
+  relocate(vm, oldHeap, &closure->fn);
   for (uint16_t i=0; i<closure->numCaptures; i++) {
-    throws(relocate(vm, oldHeap, &closureCaptures(closure)[i], error));
+    relocate(vm, oldHeap, &closureCaptures(closure)[i]);
   }
-
-  return R_SUCCESS;
-  failure:
-    return ret;
 }
 
-RetVal tryRelocateChildrenArray(VM_t vm, void *oldHeap, void *obj, Error *error) {
-  RetVal ret;
-
+void relocateChildrenArray(VM_t vm, void *oldHeap, void *obj) {
   Array *arr = obj;
   for (uint16_t i=0; i<arr->length; i++) {
-    throws(relocate(vm, oldHeap, &arrayElements(arr)[i], error));
+    relocate(vm, oldHeap, &arrayElements(arr)[i]);
   }
-
-  return R_SUCCESS;
-  failure:
-  return ret;
 }
 
-RetVal tryRelocateChildrenMap(VM_t vm, void *oldHeap, void *obj, Error *error) {
-  RetVal ret;
-
+void relocateChildrenMap(VM_t vm, void *oldHeap, void *obj) {
   Map *map = obj;
-  throws(relocate(vm, oldHeap, &map->array, error));
-
-  return R_SUCCESS;
-  failure:
-  return ret;
+  relocate(vm, oldHeap, &map->array);
 }
 
-RetVal tryRelocateChildrenMapEntry(VM_t vm, void *oldHeap, void *obj, Error *error) {
-  RetVal ret;
-
+void relocateChildrenMapEntry(VM_t vm, void *oldHeap, void *obj) {
   MapEntry *mapEntry = obj;
-  throws(relocate(vm, oldHeap, &mapEntry->key, error));
-  throws(relocate(vm, oldHeap, &mapEntry->value, error));
-
-  return R_SUCCESS;
-  failure:
-  return ret;
+  relocate(vm, oldHeap, &mapEntry->key);
+  relocate(vm, oldHeap, &mapEntry->value);
 }
 
 RetVal tryPrnNil(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
@@ -3218,7 +3324,7 @@ ValueTypeTable valueTypeTableCreate() {
     table.valueTypes[i].name = NULL;
     table.valueTypes[i].isHeapObject = false;
     table.valueTypes[i].isTruthy = NULL;
-    table.valueTypes[i].tryRelocateChildren = NULL;
+    table.valueTypes[i].relocateChildren = NULL;
     table.valueTypes[i].tryPrn = NULL;
   }
 
@@ -3227,91 +3333,91 @@ ValueTypeTable valueTypeTableCreate() {
       [VT_NIL]       = {.name = "nil",
                         .isHeapObject = false,
                         .isTruthy = &isTruthyNo,
-                        .tryRelocateChildren = NULL,
+                        .relocateChildren = NULL,
                         .tryPrn = &tryPrnNil,
                         .tryHashCode = &tryNilHashCode,
                         .tryEquals = &tryEqualsNil,},
       [VT_UINT]      = {.name = "uint",
                         .isHeapObject = false,
                         .isTruthy = &isTruthyYes,
-                        .tryRelocateChildren = NULL,
+                        .relocateChildren = NULL,
                         .tryPrn = &tryPrnInt,
                         .tryHashCode = &tryUIntHashCode,
                         .tryEquals = &tryEqualsUInt},
       [VT_BOOL]      = {.name = "bool",
                         .isHeapObject = false,
                         .isTruthy = &isTruthyBool,
-                        .tryRelocateChildren = NULL,
+                        .relocateChildren = NULL,
                         .tryPrn = &tryPrnBool,
                         .tryHashCode = &tryBoolHashCode,
                         .tryEquals = &tryEqualsBool},
       [VT_FN]        = {.name = "fn",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
-                        .tryRelocateChildren = &tryRelocateChildrenFn,
+                        .relocateChildren = &relocateChildrenFn,
                         .tryPrn = &tryPrnFn,
                         .tryHashCode = &tryFnHashCode,
                         .tryEquals = &tryEqualsFn},
       [VT_STR]       = {.name = "str",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
-                        .tryRelocateChildren = NULL,
+                        .relocateChildren = NULL,
                         .tryPrn = &tryPrnStr,
                         .tryHashCode = &tryStringHashCode,
                         .tryEquals = &tryEqualsStr},
       [VT_SYMBOL]    = {.name = "symbol",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
-                        .tryRelocateChildren = NULL,
+                        .relocateChildren = NULL,
                         .tryPrn = &tryPrnSymbol,
                         .tryHashCode = &trySymbolHashCode,
                         .tryEquals = &tryEqualsSymbol},
       [VT_KEYWORD]   = {.name = "keyword",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
-                        .tryRelocateChildren = NULL,
+                        .relocateChildren = NULL,
                         .tryPrn = &tryPrnKeyword,
                         .tryHashCode = &tryKeywordHashCode,
                         .tryEquals = &tryEqualsKeyword},
       [VT_LIST]      = {.name = "list",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
-                        .tryRelocateChildren = &tryRelocateChildrenList,
+                        .relocateChildren = &relocateChildrenList,
                         .tryPrn = &tryPrnList,
                         .tryHashCode = &tryListHashCode,
                         .tryEquals = &tryEqualsList},
       [VT_CLOSURE]   = {.name = "closure",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
-                        .tryRelocateChildren = &tryRelocateChildrenClosure,
+                        .relocateChildren = &relocateChildrenClosure,
                         .tryPrn = &tryPrnClosure,
                         .tryHashCode = &tryClosureHashCode,
                         .tryEquals = &tryEqualsClosure},
       [VT_CFN]       = {.name = "cfn",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
-                        .tryRelocateChildren = NULL,
+                        .relocateChildren = NULL,
                         .tryPrn = &tryPrnCFn,
                         .tryHashCode = &tryCFnHashCode,
                         .tryEquals = &tryEqualsCFn},
       [VT_ARRAY]     = {.name = "array",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
-                        .tryRelocateChildren = &tryRelocateChildrenArray,
+                        .relocateChildren = &relocateChildrenArray,
                         .tryPrn = &tryPrnArray,
                         .tryHashCode = &tryArrayHashCode,
                         .tryEquals = &tryEqualsArray},
       [VT_MAP]       = {.name = "map",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
-                        .tryRelocateChildren = &tryRelocateChildrenMap,
+                        .relocateChildren = &relocateChildrenMap,
                         .tryPrn = &tryPrnMap,
                         .tryHashCode = &tryMapHashCode,
                         .tryEquals = &tryEqualsMap},
       [VT_MAP_ENTRY] = {.name = "map-entry",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
-                        .tryRelocateChildren = &tryRelocateChildrenMapEntry,
+                        .relocateChildren = &relocateChildrenMapEntry,
                         .tryPrn = NULL,
                         .tryHashCode = &tryMapEntryHashCode,
                         .tryEquals = &tryEqualsMapEntry},
@@ -3350,9 +3456,7 @@ void printEvalError(ExecFrame_t frame, Error *error) {
       break;
     }
     else {
-      if (getParent(current, &current, error) != R_SUCCESS) {
-        break;
-      }
+      current = getParent(current);
     }
   }
 }
@@ -3377,7 +3481,7 @@ RetVal tryExceptionMake(ExecFrame_t frame, Pool_t pool, VMException *exception, 
         break;
       }
       else {
-        throws(getParent(current, &current, error) != R_SUCCESS);
+        current = getParent(current);
       }
     }
   }
@@ -3430,7 +3534,7 @@ RetVal tryExceptionMake(ExecFrame_t frame, Pool_t pool, VMException *exception, 
     }
 
     if (hasParent(current)) {
-      throws(getParent(current, &current, error));
+      current = getParent(current);
     }
   }
 
@@ -3511,7 +3615,7 @@ RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Pool_t outputPool, Error *error) 
         ExecFrame_t parent;
 
         throws(getResult(frame, &result, error));
-        throws(getParent(frame, &parent, error));
+        parent = getParent(frame);
         throws(pushOperand(parent, result, error));
 
         popFrame(frame);
@@ -3847,18 +3951,11 @@ bool hasParent(ExecFrame *frame) {
   return frame->parent != NULL;
 }
 
-RetVal getParent(ExecFrame *frame, ExecFrame **ptr, Error *error) {
-  RetVal ret;
-
+ExecFrame_t getParent(ExecFrame *frame) {
   if (frame->parent == NULL) {
-    throwRuntimeError(error, "no parent available");
+    explode("no parent available");
   }
-
-  *ptr = frame->parent;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  return frame->parent;
 }
 
 RetVal setResult(ExecFrame *frame, Value result, Error *error) {
@@ -4949,6 +5046,7 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
   throws(tryGCInitContents(&vm->gc, 1024 * 1000, error));
   throws(tryNamespacesInitContents(&vm->namespaces, error));
   throws(tryInitCFns(vm, error));
+  refRegistryInitContents(&vm->refs);
 
   ret = R_SUCCESS;
   return ret;
@@ -4960,6 +5058,7 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
 void vmFreeContents(VM *vm) {
   if (vm != NULL) {
     GCFreeContents(&vm->gc);
+    refRegistryFreeContents(&vm->refs);
   }
 }
 
