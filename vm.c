@@ -431,8 +431,8 @@ Value* getLocalRef(ExecFrame_t frame, uint16_t localIndex);
 uint16_t numLocals(ExecFrame_t frame);
 uint64_t numOperands(ExecFrame_t frame);
 Value* getOperandRef(ExecFrame_t frame, uint64_t opIndex);
-uint16_t pushOperand(ExecFrame_t frame, Value value, Error *error);
-uint16_t popOperand(ExecFrame_t frame, Value *value, Error *error);
+void pushOperand(ExecFrame_t frame, Value value);
+Value popOperand(ExecFrame_t frame);
 Value getFnRef(ExecFrame_t frame);
 void setFnRef(VM *vm, ExecFrame_t frame, Value value);
 
@@ -1504,7 +1504,7 @@ RetVal tryLoadConstEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   throws(readIndex(frame, &constantIndex, error));
   throws(getConst(frame, constantIndex, &constant, error));
-  throws(pushOperand(frame, constant, error));
+  pushOperand(frame, constant);
 
   return R_SUCCESS;
 
@@ -1521,7 +1521,7 @@ RetVal tryLoadLocalEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   throws(readIndex(frame, &localIndex, error));
   throws(getLocal(frame, localIndex, &v, error));
-  throws(pushOperand(frame, v, error));
+  pushOperand(frame, v);
 
   return R_SUCCESS;
 
@@ -1537,7 +1537,7 @@ RetVal tryStoreLocalEval(VM *vm, ExecFrame_t frame, Error *error) {
   Value v;
 
   throws(readIndex(frame, &localIndex, error));
-  throws(popOperand(frame, &v, error));
+  v = popOperand(frame);
   throws(setLocal(frame, localIndex, v, error));
 
   return R_SUCCESS;
@@ -1618,8 +1618,7 @@ RetVal tryPreprocessArguments(VM *vm, ExecFrame_t parent, uint16_t numArgs, bool
 
   RetVal ret;
 
-  Value numArgsSupplied;
-  throws(popOperand(parent, &numArgsSupplied, error));
+  Value numArgsSupplied = popOperand(parent);
 
   if (numArgsSupplied.type != VT_UINT) {
     throwRuntimeError(error, "first op stack value must be number of arguments supplied: %s",
@@ -1636,7 +1635,7 @@ RetVal tryPreprocessArguments(VM *vm, ExecFrame_t parent, uint16_t numArgs, bool
     if (numArgsSupplied.value > numArgs) {
 
       // push empty varargs sequence
-      throws(pushOperand(parent, nil(), error));
+      pushOperand(parent, nil());
 
       // read the extra args into that sequence, push it back on the stack
       uint16_t numVarArgs = (numArgsSupplied.value - numArgs) + 1;
@@ -1650,11 +1649,11 @@ RetVal tryPreprocessArguments(VM *vm, ExecFrame_t parent, uint16_t numArgs, bool
         // gc possibility over, so pop sequence and arg from the stack and set them on cons
         Cons *cons = deref(&vm->gc, seq);
 
-        throws(popOperand(parent, &cons->next, error));
-        throws(popOperand(parent, &cons->value, error));
+        cons->next = popOperand(parent);
+        cons->value = popOperand(parent);
 
         // put the new sequence back on the stack
-        throws(pushOperand(parent, seq, error));
+        pushOperand(parent, seq);
       }
     }
     else if (numArgsSupplied.value == numArgs) {
@@ -1668,14 +1667,14 @@ RetVal tryPreprocessArguments(VM *vm, ExecFrame_t parent, uint16_t numArgs, bool
       // gc possibility over, so pop arg from the stack and it on cons
       Cons *cons = deref(&vm->gc, seq);
 
-      throws(popOperand(parent, &cons->value, error));
+      cons->value = popOperand(parent);
 
       // put the one-element sequence back on the stack
-      throws(pushOperand(parent, seq, error));
+      pushOperand(parent, seq);
     }
     else if (numArgsSupplied.value == numArgs - 1) {
       // the final argument will be an empty list, make sure the list is present on the op stack
-      throws(pushOperand(parent, nil(), error));
+      pushOperand(parent, nil());
     }
     else {
       throwRuntimeError(error, "required arguments not supplied, expected %u or more arguments but got %" PRIu64,
@@ -1695,8 +1694,7 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
   throws(tryPreprocessArguments(vm, parent, invocable.fn->numArgs, invocable.fn->usesVarArgs, error));
 
   for (uint16_t i = 0; i < invocable.fn->numArgs; i++) {
-    Value arg;
-    throws(popOperand(parent, &arg, error));
+    Value arg = popOperand(parent);
 
     uint16_t idx = invocable.fn->numArgs - (1 + i);
     throws(setLocal(child, idx, arg, error));
@@ -1747,8 +1745,7 @@ RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
   // for cleanup on failure
   bool pushed = false;
 
-  Value pop = nil();
-  throws(popOperand(frame, &pop, error));
+  Value pop = popOperand(frame);
 
   if (pop.type == VT_CFN) {
     throws(tryInvokeCFn(vm, frame, pop, error));
@@ -1788,8 +1785,7 @@ RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryInvokeDynTailEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value pop = nil();
-  throws(popOperand(frame, &pop, error));
+  Value pop = popOperand(frame);
 
   if (pop.type == VT_CFN) {
     throws(tryInvokeCFn(vm, frame, pop, error));
@@ -1811,8 +1807,7 @@ RetVal tryInvokeDynTailEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryRetEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value v;
-  throws(popOperand(frame, &v, error));
+  Value v = popOperand(frame);
   throws(setResult(frame, v, error));
   return R_SUCCESS;
 
@@ -2026,9 +2021,8 @@ RetVal tryHashCode(VM *vm, Value value, uint32_t *hash, Error *error) {
 RetVal tryCmpEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value a, b;
-  throws(popOperand(frame, &a, error));
-  throws(popOperand(frame, &b, error));
+  Value a = popOperand(frame);
+  Value b = popOperand(frame);
 
   Value c;
   c.type = VT_BOOL;
@@ -2069,7 +2063,7 @@ RetVal tryCmpEval(VM *vm, ExecFrame_t frame, Error *error) {
     }
   }
 
-  throws(pushOperand(frame, c, error));
+  pushOperand(frame, c);
 
   return R_SUCCESS;
 
@@ -2094,8 +2088,7 @@ RetVal tryJmpEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryJmpIfEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value test;
-  throws(popOperand(frame, &test, error));
+  Value test = popOperand(frame);
 
   bool truthy = isTruthy(vm, test);
 
@@ -2115,8 +2108,7 @@ RetVal tryJmpIfEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryJmpIfNotEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value test;
-  throws(popOperand(frame, &test, error));
+  Value test = popOperand(frame);
 
   bool truthy = isTruthy(vm, test);
 
@@ -2136,9 +2128,8 @@ RetVal tryJmpIfNotEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryAddEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value a, b;
-  throws(popOperand(frame, &b, error));
-  throws(popOperand(frame, &a, error));
+  Value b = popOperand(frame);
+  Value a = popOperand(frame);
 
   if (a.type != VT_UINT) {
     throwRuntimeError(error, "can only add integers: %s", getValueTypeName(vm, a.type));
@@ -2151,7 +2142,7 @@ RetVal tryAddEval(VM *vm, ExecFrame_t frame, Error *error) {
   c.type = VT_UINT;
   c.value = a.value + b.value;
 
-  throws(pushOperand(frame, c, error));
+  pushOperand(frame, c);
 
   return R_SUCCESS;
 
@@ -2163,9 +2154,8 @@ RetVal tryAddEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal trySubEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value a, b;
-  throws(popOperand(frame, &b, error));
-  throws(popOperand(frame, &a, error));
+  Value b = popOperand(frame);
+  Value a = popOperand(frame);
 
   if (a.type != VT_UINT) {
     throwRuntimeError(error, "can only subtract integers: %s", getValueTypeName(vm, a.type));
@@ -2178,7 +2168,7 @@ RetVal trySubEval(VM *vm, ExecFrame_t frame, Error *error) {
   c.type = VT_UINT;
   c.value = a.value - b.value;
 
-  throws(pushOperand(frame, c, error));
+  pushOperand(frame, c);
 
   return R_SUCCESS;
 
@@ -2194,7 +2184,7 @@ RetVal tryDefVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   uint16_t constantIndex;
   Value varName;
 
-  throws(popOperand(frame, &value, error));
+  value = popOperand(frame);
   throws(readIndex(frame, &constantIndex, error));
   throws(getConst(frame, constantIndex, &varName, error));
 
@@ -2204,7 +2194,7 @@ RetVal tryDefVarEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   // define always returns nil
   Value result = nil();
-  throws(pushOperand(frame, result, error));
+  pushOperand(frame, result);
 
   return R_SUCCESS;
 
@@ -2238,7 +2228,7 @@ RetVal tryLoadVarEval(VM *vm, ExecFrame_t frame, Error *error) {
 //    throwRuntimeError(error, "cannot take the value of a macro: '%ls/%ls'", var->namespace, var->name);
 //  }
   else {
-    throws(pushOperand(frame, var->value, error));
+    pushOperand(frame, var->value);
   }
 
   return R_SUCCESS;
@@ -2291,13 +2281,12 @@ RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   // pop captures in reverse order, same as arguments
   for (uint16_t i=0; i<closure->numCaptures; i++) {
-    Value capture;
-    throws(popOperand(frame, &capture, error));
+    Value capture = popOperand(frame);
     uint16_t idx = closure->numCaptures - (1 + i);
     closureCaptures(closure)[idx] = capture;
   }
 
-  throws(pushOperand(frame, closureValue, error));
+  pushOperand(frame, closureValue);
 
   return R_SUCCESS;
 
@@ -2309,12 +2298,11 @@ RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal trySwapEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value a, b;
-  throws(popOperand(frame, &a, error));
-  throws(popOperand(frame, &b, error));
+  Value a = popOperand(frame);
+  Value b = popOperand(frame);
 
-  throws(pushOperand(frame, a, error));
-  throws(pushOperand(frame, b, error));
+  pushOperand(frame, a);
+  pushOperand(frame, b);
 
   return R_SUCCESS;
 
@@ -2385,9 +2373,8 @@ RetVal tryConsEval(VM *vm, ExecFrame_t frame, Error *error) {
   Value result = nil();
   throws(tryAllocateCons(vm, frame, nil(), nil(), &result, error));
 
-  Value x, seq;
-  throws(popOperand(frame, &seq, error));
-  throws(popOperand(frame, &x, error));
+  Value seq = popOperand(frame);
+  Value x = popOperand(frame);
 
   if (seq.type != VT_NIL && seq.type != VT_LIST) {
     throwRuntimeError(error, "cannot cons onto a value of type %s", getValueTypeName(vm, seq.type));
@@ -2397,7 +2384,7 @@ RetVal tryConsEval(VM *vm, ExecFrame_t frame, Error *error) {
   cons->value = x;
   cons->next = seq;
 
-  throws(pushOperand(frame, result, error));
+  pushOperand(frame, result);
 
   return R_SUCCESS;
 
@@ -2409,8 +2396,7 @@ RetVal tryConsEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryFirstEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value seq;
-  throws(popOperand(frame, &seq, error));
+  Value seq = popOperand(frame);
 
   Value result;
 
@@ -2425,7 +2411,7 @@ RetVal tryFirstEval(VM *vm, ExecFrame_t frame, Error *error) {
     throwRuntimeError(error, "cannot get first from a value of type %s", getValueTypeName(vm, seq.type));
   }
 
-  throws(pushOperand(frame, result, error));
+  pushOperand(frame, result);
 
   return R_SUCCESS;
 
@@ -2437,8 +2423,7 @@ RetVal tryFirstEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryRestEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value seq;
-  throws(popOperand(frame, &seq, error));
+  Value seq = popOperand(frame);
 
   Value result;
 
@@ -2453,7 +2438,7 @@ RetVal tryRestEval(VM *vm, ExecFrame_t frame, Error *error) {
     throwRuntimeError(error, "cannot get rest from a value of type %s", getValueTypeName(vm, seq.type));
   }
 
-  throws(pushOperand(frame, result, error));
+  pushOperand(frame, result);
 
   return R_SUCCESS;
 
@@ -2465,8 +2450,7 @@ RetVal tryRestEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal trySetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value strValue;
-  throws(popOperand(frame, &strValue, error));
+  Value strValue = popOperand(frame);
 
   wchar_t *sym = NULL;
   uint64_t symLength = 0;
@@ -2498,7 +2482,7 @@ RetVal trySetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
     var->isMacro = true;
   }
 
-  throws(pushOperand(frame, nil(), error));
+  pushOperand(frame, nil());
 
   return R_SUCCESS;
 
@@ -2510,8 +2494,7 @@ RetVal trySetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value strValue;
-  throws(popOperand(frame, &strValue, error));
+  Value strValue = popOperand(frame);
 
   wchar_t *sym = NULL;
   uint64_t symLength = 0;
@@ -2541,7 +2524,7 @@ RetVal tryGetMacroEval(VM *vm, ExecFrame_t frame, Error *error) {
     result.value = var->isMacro;
   }
 
-  throws(pushOperand(frame, result, error));
+  pushOperand(frame, result);
 
   return R_SUCCESS;
 
@@ -2555,7 +2538,7 @@ RetVal tryGCEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   collect(vm, frame);
 
-  throws(pushOperand(frame, nil(), error));
+  pushOperand(frame, nil());
 
   return R_SUCCESS;
 
@@ -2567,14 +2550,13 @@ RetVal tryGCEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryGetTypeEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value value;
-  throws(popOperand(frame, &value, error));
+  Value value = popOperand(frame);
 
   Value typeId;
   typeId.type = VT_UINT;
   typeId.value = value.type;
 
-  throws(pushOperand(frame, typeId, error));
+  pushOperand(frame, typeId);
 
   return R_SUCCESS;
 
@@ -2593,15 +2575,14 @@ RetVal tryPrnEval(VM *vm, ExecFrame_t frame, Error *error) {
   Pool_t pool = NULL;
   throws(tryPoolCreate(&pool, ONE_KB, error));
 
-  Value value;
-  throws(popOperand(frame, &value, error));
+  Value value = popOperand(frame);
 
   Expr expr;
   throws(tryVMPrn(vm, value, pool, &expr, error));
   throws(tryExprPrn(pool, &expr, error));
   printf("\n");
 
-  throws(pushOperand(frame, nil(), error));
+  pushOperand(frame, nil());
 
   ret = R_SUCCESS;
   goto done;
@@ -3547,7 +3528,7 @@ RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Pool_t outputPool, Error *error) 
 
         throws(getResult(frame, &result, error));
         parent = getParent(frame);
-        throws(pushOperand(parent, result, error));
+        pushOperand(parent, result);
 
         popFrame(frame);
       }
@@ -3632,35 +3613,22 @@ void opStackFreeContents(OpStack *stack) {
   }
 }
 
-RetVal tryOpStackPush(OpStack *stack, Value v, Error *error) {
-  RetVal ret;
-
+void tryOpStackPush(OpStack *stack, Value v) {
   if (stack->maxDepth == stack->usedDepth + 1) {
-    throwRuntimeError(error, "cannot allocate op stack greater than max %" PRIu64, stack->maxDepth);
+    explode("cannot allocate op stack greater than max %" PRIu64, stack->maxDepth);
   }
-
   stack->stack[stack->usedDepth] = v;
   stack->usedDepth = stack->usedDepth + 1;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
-RetVal tryOpStackPop(OpStack *stack, Value *ptr, Error *error) {
-
-  RetVal ret;
+Value opStackPop(OpStack *stack) {
 
   if (stack->usedDepth == 0) {
-    throwRuntimeError(error, "cannot pop from empty op stack")
+    explode("cannot pop from empty op stack")
   }
 
   stack->usedDepth = stack->usedDepth - 1;
-  *ptr = stack->stack[stack->usedDepth];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  return stack->stack[stack->usedDepth];
 }
 
 /*
@@ -3822,24 +3790,12 @@ Value* getOperandRef(ExecFrame *frame, uint64_t opIndex) {
   return &frame->opStack->stack[opIndex];
 }
 
-uint16_t pushOperand(ExecFrame *frame, Value value, Error *error) {
-  RetVal ret;
-
-  throws(tryOpStackPush(frame->opStack, value, error));
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+void pushOperand(ExecFrame *frame, Value value) {
+  tryOpStackPush(frame->opStack, value);
 }
 
-uint16_t popOperand(ExecFrame *frame, Value *value, Error *error) {
-  RetVal ret;
-
-  throws(tryOpStackPop(frame->opStack, value, error));
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+Value popOperand(ExecFrame *frame) {
+  return opStackPop(frame->opStack);
 }
 
 Value getFnRef(ExecFrame *frame) {
@@ -4216,8 +4172,7 @@ RetVal tryStringMakeBlank(VM *vm, ExecFrame_t frame, uint64_t length, Value *val
 RetVal tryStrJoinBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value strings;
-  throws(popOperand(frame, &strings, error));
+  Value strings = popOperand(frame);
   ASSERT_SEQ(strings);
 
   uint64_t totalLength = 0;
@@ -4236,14 +4191,14 @@ RetVal tryStrJoinBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   }
 
   // store the list on the op stack while we allocate since gc may happen
-  throws(pushOperand(frame, strings, error));
+  pushOperand(frame, strings);
 
   Value resultRef = nil();
   throws(tryStringMakeBlank(vm, frame, totalLength, &resultRef, error));
   String *result = deref(&vm->gc, resultRef);
 
   // get the list back again after allocation
-  throws(popOperand(frame, &strings, error));
+  strings = popOperand(frame);
 
   uint64_t totalSizeWritten = 0;
 
@@ -4261,7 +4216,7 @@ RetVal tryStrJoinBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
     cursor = seq->next;
   }
 
-  throws(pushOperand(frame, resultRef, error));
+  pushOperand(frame, resultRef);
 
   return R_SUCCESS;
   failure:
@@ -4271,8 +4226,7 @@ RetVal tryStrJoinBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryPrStrBuiltinConf(VM *vm, ExecFrame_t frame, bool readable, Error *error) {
   RetVal ret;
 
-  Value value;
-  throws(popOperand(frame, &value, error));
+  Value value = popOperand(frame);
 
   // note: using off-heap memory to construct the string
   Pool_t pool = NULL;
@@ -4292,7 +4246,7 @@ RetVal tryPrStrBuiltinConf(VM *vm, ExecFrame_t frame, bool readable, Error *erro
 
   memcpy(stringValue(result), stringBufferText(b), stringBufferLength(b) * sizeof(wchar_t));
 
-  throws(pushOperand(frame, resultRef, error));
+  pushOperand(frame, resultRef);
 
   ret = R_SUCCESS;
   goto done;
@@ -4339,8 +4293,7 @@ RetVal trySymbolMakeBlank(VM *vm, ExecFrame_t frame, uint64_t length, Value *res
 RetVal trySymbolBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value value;
-  throws(popOperand(frame, &value, error));
+  Value value = popOperand(frame);
 
   ASSERT_STR(value);
 
@@ -4351,20 +4304,20 @@ RetVal trySymbolBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   }
 
   // keep the string safely on the op stack while we allocate
-  throws(pushOperand(frame, value, error));
+  pushOperand(frame, value);
 
   Value result;
   throws(trySymbolMakeBlank(vm, frame, length, &result, error));
 
   // pop string back off now we're done allocating
-  throws(popOperand(frame, &value, error));
+  value = popOperand(frame);
 
   // actually copy string into symbol
   String *string = deref(&vm->gc, value);
   Symbol *sym = deref(&vm->gc, result);
   memcpy(symbolValue(sym), stringValue(string), sym->length * sizeof(wchar_t));
 
-  throws(pushOperand(frame, result, error));
+  pushOperand(frame, result);
 
   return R_SUCCESS;
   failure:
@@ -4394,8 +4347,7 @@ RetVal tryKeywordMakeBlank(VM *vm, ExecFrame_t frame, uint64_t length, Value *re
 RetVal tryKeywordBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value value;
-  throws(popOperand(frame, &value, error));
+  Value value = popOperand(frame);
 
   ASSERT_STR(value);
 
@@ -4406,20 +4358,20 @@ RetVal tryKeywordBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   }
 
   // keep the string safely on the op stack while we allocate
-  throws(pushOperand(frame, value, error));
+  pushOperand(frame, value);
 
   Value result;
   throws(tryKeywordMakeBlank(vm, frame, length, &result, error));
 
   // pop string back off now we're done allocating
-  throws(popOperand(frame, &value, error));
+  value = popOperand(frame);
 
   // actually copy string into symbol
   String *string = deref(&vm->gc, value);
   Keyword *kw = deref(&vm->gc, result);
   memcpy(keywordValue(kw), stringValue(string), kw->length * sizeof(wchar_t));
 
-  throws(pushOperand(frame, result, error));
+  pushOperand(frame, result);
 
   return R_SUCCESS;
   failure:
@@ -4527,7 +4479,7 @@ RetVal tryMakeMapConf(VM *vm, ExecFrame_t frame, Value *value, Error *error) {
   {
     Value array;
     throws(tryMakeArray(vm, frame, MIN_MAP_BUCKETS, &array, error));
-    throws(pushOperand(frame, array, error));
+    pushOperand(frame, array);
   }
 
   Map *map = NULL;
@@ -4541,7 +4493,7 @@ RetVal tryMakeMapConf(VM *vm, ExecFrame_t frame, Value *value, Error *error) {
   map->header.type = VT_MAP;
   map->header.size = size;
 
-  throws(popOperand(frame, &map->array, error));
+  map->array = popOperand(frame);
   map->size = 0;
 
   return R_SUCCESS;
@@ -4562,7 +4514,7 @@ RetVal tryMakeMap(VM *vm, ExecFrame_t frame, Value *value, Error *error) {
   {
     Value array;
     throws(tryMakeArray(vm, frame, MIN_MAP_BUCKETS, &array, error));
-    throws(pushOperand(frame, array, error));
+    pushOperand(frame, array);
   }
 
   Map *map = NULL;
@@ -4576,7 +4528,7 @@ RetVal tryMakeMap(VM *vm, ExecFrame_t frame, Value *value, Error *error) {
   map->header.type = VT_MAP;
   map->header.size = size;
 
-  throws(popOperand(frame, &map->array, error));
+  map->array = popOperand(frame);
   map->size = 0;
 
   return R_SUCCESS;
@@ -4591,7 +4543,7 @@ RetVal tryHashMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   Value value;
   throws(tryMakeMap(vm, frame, &value, error));
 
-  throws(pushOperand(frame, value, error));
+  pushOperand(frame, value);
 
   return R_SUCCESS;
   failure:
@@ -4628,9 +4580,9 @@ RetVal tryPutMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
 
   Value map, key, value;
 
-  throws(popOperand(frame, &value, error));
-  throws(popOperand(frame, &key, error));
-  throws(popOperand(frame, &map, error));
+  value = popOperand(frame);
+  key = popOperand(frame);
+  map = popOperand(frame);
 
   uint32_t hash = 0;
   throws(tryHashCode(vm, key, &hash, error));
@@ -4675,17 +4627,17 @@ RetVal tryPutMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
   else if (makeNewEntry) {
 
     // keep args safe from gc
-    throws(pushOperand(frame, map, error));
-    throws(pushOperand(frame, key, error));
-    throws(pushOperand(frame, value, error));
+    pushOperand(frame, map);
+    pushOperand(frame, key);
+    pushOperand(frame, value);
 
     // may cause gc
     Value entryRef;
     throws(tryMakeMapEntry(vm, frame, &entryRef, error));
 
-    throws(popOperand(frame, &value, error));
-    throws(popOperand(frame, &key, error));
-    throws(popOperand(frame, &map, error));
+    value = popOperand(frame);
+    key = popOperand(frame);
+    map = popOperand(frame);
 
     Map *m = deref(&vm->gc, map);
 
@@ -4745,10 +4697,10 @@ RetVal tryPutMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
     }
 
     // make new array
-    throws(pushOperand(frame, map, error));
+    pushOperand(frame, map);
     Value newArrayRef;
     throws(tryMakeArray(vm, frame, newArraySize, &newArrayRef, error));
-    throws(popOperand(frame, &map, error));
+    map = popOperand(frame);
 
     // reuse the existing map entries
 
@@ -4791,7 +4743,7 @@ RetVal tryPutMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
     m->array = newArrayRef;
   }
 
-  throws(pushOperand(frame, map, error));
+  pushOperand(frame, map);
 
   return R_SUCCESS;
   failure:
@@ -4803,8 +4755,8 @@ RetVal tryGetMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
 
   Value map, key;
 
-  throws(popOperand(frame, &key, error));
-  throws(popOperand(frame, &map, error));
+  key = popOperand(frame);
+  map = popOperand(frame);
 
   uint32_t hash = 0;
   throws(tryHashCode(vm, key, &hash, error));
@@ -4837,7 +4789,7 @@ RetVal tryGetMapBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
     }
   }
 
-  throws(pushOperand(frame, foundValue, error));
+  pushOperand(frame, foundValue);
 
   return R_SUCCESS;
   failure:
