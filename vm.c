@@ -421,12 +421,12 @@ void objectHeaderInitContents(ObjectHeader *h) {
  * The ExecFrame and operations it supports
  */
 
-RetVal readInstruction(ExecFrame_t frame, uint8_t *ptr, Error *error);
-RetVal readIndex(ExecFrame_t frame, uint16_t *ptr, Error *error);
-RetVal setPc(ExecFrame_t frame, uint16_t newPc, Error *error);
-RetVal getConst(ExecFrame_t frame, uint16_t constantIndex, Value *ptr, Error *error);
-RetVal getLocal(ExecFrame_t frame, uint16_t localIndex, Value *ptr, Error *error);
-RetVal setLocal(ExecFrame_t frame, uint16_t localIndex, Value value, Error *error);
+uint8_t readInstruction(ExecFrame_t frame);
+uint16_t readIndex(ExecFrame_t frame);
+void setPc(ExecFrame_t frame, uint16_t newPc);
+Value getConst(ExecFrame_t frame, uint16_t constantIndex);
+Value getLocal(ExecFrame_t frame, uint16_t localIndex);
+void setLocal(ExecFrame_t frame, uint16_t localIndex, Value value);
 Value* getLocalRef(ExecFrame_t frame, uint16_t localIndex);
 uint16_t numLocals(ExecFrame_t frame);
 uint64_t numOperands(ExecFrame_t frame);
@@ -439,8 +439,8 @@ void setFnRef(VM *vm, ExecFrame_t frame, Value value);
 bool hasResult(ExecFrame_t frame);
 bool hasParent(ExecFrame_t frame);
 ExecFrame_t getParent(ExecFrame_t frame);
-RetVal setResult(ExecFrame_t frame, Value result, Error *error);
-RetVal getResult(ExecFrame_t frame, Value *ptr, Error *error);
+void setResult(ExecFrame_t frame, Value result);
+Value getResult(ExecFrame_t frame);
 
 typedef struct ExceptionHandler {
   uint16_t jumpAddress;
@@ -448,12 +448,12 @@ typedef struct ExceptionHandler {
 } ExceptionHandler;
 
 bool hasHandler(ExecFrame_t frame);
-RetVal getHandler(ExecFrame_t frame, ExceptionHandler *ptr, Error *error);
+ExceptionHandler getHandler(ExecFrame_t frame);
 void setHandler(ExecFrame_t frame, ExceptionHandler handler);
 void clearHandler(ExecFrame_t frame);
 
 bool hasFnName(ExecFrame_t frame);
-RetVal getFnName(ExecFrame_t frame, Text *name, Error *error);
+Text getFnName(ExecFrame_t frame);
 
 bool hasSourceTable(ExecFrame_t frame);
 bool getLineNumber(ExecFrame_t frame, uint64_t *lineNumber);
@@ -461,10 +461,10 @@ bool getFileName(ExecFrame_t frame, Text *fileName);
 
 bool hasException(ExecFrame_t frame);
 void setException(ExecFrame_t frame, VMException e);
-RetVal getException(ExecFrame_t frame, VMException *e, Error *error);
+VMException getException(ExecFrame_t frame);
 
-RetVal pushFrame(VM *vm, ExecFrame_t *frame, Value newFn, Error *error);
-RetVal replaceFrame(VM *vm, ExecFrame_t frame, Value newFn, Error *error);
+void pushFrame(VM *vm, ExecFrame_t *frame, Value newFn);
+void replaceFrame(VM *vm, ExecFrame_t frame, Value newFn);
 void popFrame(ExecFrame_t frame);
 
 /*
@@ -1497,48 +1497,27 @@ RetVal tryAllocateCons(VM *vm, ExecFrame_t frame, Value value, Value next, Value
 
 // (8), typeIndex (16) | (-> value)
 RetVal tryLoadConstEval(VM *vm, ExecFrame_t frame, Error *error) {
-  RetVal ret;
-
-  uint16_t constantIndex;
-  Value constant;
-
-  throws(readIndex(frame, &constantIndex, error));
-  throws(getConst(frame, constantIndex, &constant, error));
+  uint16_t constantIndex = readIndex(frame);
+  Value constant = getConst(frame, constantIndex);
   pushOperand(frame, constant);
-
   return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 // (8), typeIndex (16) | (-> value)
 RetVal tryLoadLocalEval(VM *vm, ExecFrame_t frame, Error *error) {
-  RetVal ret;
-
-  uint16_t localIndex;
-  Value v;
-
-  throws(readIndex(frame, &localIndex, error));
-  throws(getLocal(frame, localIndex, &v, error));
+  uint16_t localIndex = readIndex(frame);
+  Value v = getLocal(frame, localIndex);
   pushOperand(frame, v);
-
   return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 // (8), typeIndex  (16) | (objectref ->)
 RetVal tryStoreLocalEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  uint16_t localIndex;
-  Value v;
-
-  throws(readIndex(frame, &localIndex, error));
-  v = popOperand(frame);
-  throws(setLocal(frame, localIndex, v, error));
+  uint16_t localIndex = readIndex(frame);
+  Value v = popOperand(frame);
+  setLocal(frame, localIndex, v);
 
   return R_SUCCESS;
 
@@ -1697,7 +1676,7 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
     Value arg = popOperand(parent);
 
     uint16_t idx = invocable.fn->numArgs - (1 + i);
-    throws(setLocal(child, idx, arg, error));
+    setLocal(child, idx, arg);
   }
 
   if (invocable.fn->numCaptures > 0) {
@@ -1711,13 +1690,13 @@ RetVal tryInvokePopulateLocals(VM *vm, ExecFrame_t parent, ExecFrame_t child, In
 
     uint16_t nextLocalIdx = invocable.fn->numArgs;
     for (uint16_t i=0; i<invocable.fn->numCaptures; i++) {
-      throws(setLocal(child, nextLocalIdx, closureCaptures(invocable.closure)[i], error));
+      setLocal(child, nextLocalIdx, closureCaptures(invocable.closure)[i]);
       nextLocalIdx = nextLocalIdx + 1;
     }
   }
 
   if (invocable.fn->hasName) {
-    throws(setLocal(child, invocable.fn->bindingSlotIndex, invocable.ref, error));
+    setLocal(child, invocable.fn->bindingSlotIndex, invocable.ref);
   }
 
   return R_SUCCESS;
@@ -1754,7 +1733,7 @@ RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
     Invocable invocable;
     throws(tryPopInvocable(vm, pop, &invocable, error));
 
-    throws(pushFrame(vm, &frame, invocable.fnRef, error));
+    pushFrame(vm, &frame, invocable.fnRef);
     pushed = true;
 
     ExecFrame_t parent = getParent(frame);
@@ -1794,7 +1773,7 @@ RetVal tryInvokeDynTailEval(VM *vm, ExecFrame_t frame, Error *error) {
     Invocable invocable;
     throws(tryPopInvocable(vm, pop, &invocable, error));
 
-    throws(replaceFrame(vm, frame, invocable.fnRef, error));
+    replaceFrame(vm, frame, invocable.fnRef);
     throws(tryInvokePopulateLocals(vm, frame, frame, invocable, error));
   }
 
@@ -1805,14 +1784,9 @@ RetVal tryInvokeDynTailEval(VM *vm, ExecFrame_t frame, Error *error) {
 
 // (8)              | (objectref ->)
 RetVal tryRetEval(VM *vm, ExecFrame_t frame, Error *error) {
-  RetVal ret;
-
   Value v = popOperand(frame);
-  throws(setResult(frame, v, error));
+  setResult(frame, v);
   return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 // TODO: understand why this algorithm works
@@ -2073,55 +2047,37 @@ RetVal tryCmpEval(VM *vm, ExecFrame_t frame, Error *error) {
 
 // (8), offset (16) | (->)
 RetVal tryJmpEval(VM *vm, ExecFrame_t frame, Error *error) {
-  RetVal ret;
-
-  uint16_t newPc;
-  throws(readIndex(frame, &newPc, error));
-  throws(setPc(frame, newPc, error));
+  uint16_t newPc = readIndex(frame);
+  setPc(frame, newPc);
   return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
 // (8), offset (16) | (value ->)
 RetVal tryJmpIfEval(VM *vm, ExecFrame_t frame, Error *error) {
-  RetVal ret;
-
   Value test = popOperand(frame);
 
   bool truthy = isTruthy(vm, test);
 
-  uint16_t newPc;
-  throws(readIndex(frame, &newPc, error));
+  uint16_t newPc = readIndex(frame);
   if (truthy) {
-    throws(setPc(frame, newPc, error));
+    setPc(frame, newPc);
   }
 
   return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 // (8), offset (16) | (value ->)
 RetVal tryJmpIfNotEval(VM *vm, ExecFrame_t frame, Error *error) {
-  RetVal ret;
-
   Value test = popOperand(frame);
 
   bool truthy = isTruthy(vm, test);
 
-  uint16_t newPc;
-  throws(readIndex(frame, &newPc, error));
+  uint16_t newPc = readIndex(frame);
   if (!truthy) {
-    throws(setPc(frame, newPc, error));
+    setPc(frame, newPc);
   }
 
   return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 // (8)              | (a, b -> c)
@@ -2180,13 +2136,9 @@ RetVal trySubEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryDefVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  Value value;
-  uint16_t constantIndex;
-  Value varName;
-
-  value = popOperand(frame);
-  throws(readIndex(frame, &constantIndex, error));
-  throws(getConst(frame, constantIndex, &varName, error));
+  Value value = popOperand(frame);
+  uint16_t constantIndex = readIndex(frame);
+  Value varName = getConst(frame, constantIndex);
 
   String *str = deref(&vm->gc, varName);
 
@@ -2206,11 +2158,8 @@ RetVal tryDefVarEval(VM *vm, ExecFrame_t frame, Error *error) {
 RetVal tryLoadVarEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  uint16_t constantIndex;
-  Value varName;
-
-  throws(readIndex(frame, &constantIndex, error));
-  throws(getConst(frame, constantIndex, &varName, error));
+  uint16_t constantIndex = readIndex(frame);
+  Value varName = getConst(frame, constantIndex);
 
   if (varName.type != VT_STR) {
     throwRuntimeError(error, "expected a string: %s", getValueTypeName(vm, varName.type));
@@ -2248,11 +2197,8 @@ void closureInitContents(Closure *cl) {
 RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
   RetVal ret;
 
-  uint16_t constantIndex;
-  Value fnValue;
-
-  throws(readIndex(frame, &constantIndex, error));
-  throws(getConst(frame, constantIndex, &fnValue, error));
+  uint16_t constantIndex = readIndex(frame);
+  Value fnValue = getConst(frame, constantIndex);
 
   if (fnValue.type != VT_FN) {
     throwRuntimeError(error, "cannot create a closure from this value type: %s",
@@ -2312,30 +2258,20 @@ RetVal trySwapEval(VM *vm, ExecFrame_t frame, Error *error) {
 
 // (8)        | (jumpAddr, handler ->)
 RetVal trySetHandlerEval(VM *vm, ExecFrame_t frame, Error *error) {
-  RetVal ret;
-
   ExceptionHandler handler;
 
-  throws(readIndex(frame, &handler.jumpAddress, error));
-  throws(readIndex(frame, &handler.localIndex, error));
+  handler.jumpAddress = readIndex(frame);
+  handler.localIndex = readIndex(frame);
 
   setHandler(frame, handler);
 
   return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 // (8)        | (->)
 RetVal tryClearHandlerEval(VM *vm, ExecFrame_t frame, Error *error) {
-  RetVal ret;
-
   clearHandler(frame);
   return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 /* 1. It is ok to implement builtin c functions the same way we implement instructions:
@@ -3349,11 +3285,7 @@ void printEvalError(ExecFrame_t frame, Error *error) {
 
     wchar_t *fnName;
     if (hasFnName(current)) {
-      Text text;
-      textInitContents(&text);
-      if (getFnName(current, &text, error) != R_SUCCESS) {
-        break;
-      }
+      Text text = getFnName(current);
       fnName = text.value;
     }
     else {
@@ -3430,8 +3362,7 @@ RetVal tryExceptionMake(ExecFrame_t frame, Pool_t pool, VMException *exception, 
     exFrameInitContents(f);
 
     if (hasFnName(current)) {
-      Text text;
-      throws(getFnName(current, &text, error));
+      Text text = getFnName(current);
       throws(tryTextCopy(pool, &text, &f->functionName, error));
     }
     else {
@@ -3523,22 +3454,19 @@ RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Pool_t outputPool, Error *error) 
         break;
       }
       else {
-        Value result;
-        ExecFrame_t parent;
-
-        throws(getResult(frame, &result, error));
-        parent = getParent(frame);
+        Value result = getResult(frame);
+        ExecFrame_t parent = getParent(frame);
         pushOperand(parent, result);
 
         popFrame(frame);
       }
     }
 
-    throws(readInstruction(frame, &inst, error));
+    inst = readInstruction(frame);
     tryEval = vm->instTable.instructions[inst].tryEval;
 
     if (tryEval == NULL) {
-      throwRuntimeError(error, "instruction unimplemented: %s (%u)", getInstName(&vm->instTable, inst), inst);
+      explode("instruction unimplemented: %s (%u)", getInstName(&vm->instTable, inst), inst);
     }
 
     ret = tryEval(vm, frame, error);
@@ -3590,16 +3518,14 @@ void opStackInitContents(OpStack *stack) {
   stack->stack = NULL;
 }
 
-RetVal tryOpStackInitContents(OpStack *stack, uint64_t maxDepth, Error *error) {
-  RetVal ret;
-
+void opStackCreate(OpStack *stack, uint64_t maxDepth) {
   stack->maxDepth = maxDepth;
   stack->usedDepth = 0;
-  tryMalloc(stack->stack, sizeof(Value) * maxDepth, "Value array");
-  return R_SUCCESS;
 
-  failure:
-  return ret;
+  stack->stack = malloc(sizeof(Value) * maxDepth);
+  if (stack->stack == NULL) {
+    explode("failed to allocate Value array");
+  }
 }
 
 void opStackFreeContents(OpStack *stack) {
@@ -3613,7 +3539,7 @@ void opStackFreeContents(OpStack *stack) {
   }
 }
 
-void tryOpStackPush(OpStack *stack, Value v) {
+void opStackPush(OpStack *stack, Value v) {
   if (stack->maxDepth == stack->usedDepth + 1) {
     explode("cannot allocate op stack greater than max %" PRIu64, stack->maxDepth);
   }
@@ -3677,81 +3603,50 @@ void frameInitContents(ExecFrame *frame) {
   frame->exceptionSet = false;
 }
 
-RetVal readInstruction(ExecFrame *frame, uint8_t *ptr, Error *error) {
-  RetVal ret;
+uint8_t readInstruction(ExecFrame *frame) {
 
   if (frame->pc >= frame->fn->codeLength) {
-    throwRuntimeError(error, "cannot read next instruction, no instructions left");
+    explode("cannot read next instruction, no instructions left");
   }
 
-  *ptr = fnCode(frame->fn)[frame->pc];
+  uint8_t inst = fnCode(frame->fn)[frame->pc];
   frame->pc += 1;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  return inst;
 }
 
-RetVal readIndex(ExecFrame *frame, uint16_t *ptr, Error *error) {
-  RetVal ret;
+uint16_t readIndex(ExecFrame *frame) {
 
   if (frame->pc + 1 >= frame->fn->codeLength) {
-    throwRuntimeError(error, "cannot read next instruction, no instructions left");
+    explode("cannot read next instruction, no instructions left");
   }
 
   uint8_t *code = fnCode(frame->fn);
   uint16_t pc = frame->pc;
-  *ptr = (code[pc] << 8) | code[pc + 1];
+  uint16_t index = (code[pc] << 8) | code[pc + 1];
   frame->pc += 2;
 
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  return index;
 }
 
-RetVal setPc(ExecFrame *frame, uint16_t newPc, Error *error) {
-  RetVal ret;
-
+void setPc(ExecFrame *frame, uint16_t newPc) {
   if (newPc >= frame->fn->codeLength) {
-    throwRuntimeError(error, "no such instruction: %u", newPc);
+    explode("no such instruction: %u", newPc);
   }
-
   frame->pc = newPc;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
-RetVal getConst(ExecFrame *frame, uint16_t constantIndex, Value *ptr, Error *error) {
-  RetVal ret;
-
+Value getConst(ExecFrame *frame, uint16_t constantIndex) {
   if (constantIndex >= frame->fn->numConstants) {
-    throwRuntimeError(error, "no such constant: %u", constantIndex);
+    explode("no such constant: %u", constantIndex);
   }
-
-  *ptr = fnConstants(frame->fn)[constantIndex];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  return fnConstants(frame->fn)[constantIndex];
 }
 
-RetVal getLocal(ExecFrame *frame, uint16_t localIndex, Value *ptr, Error *error) {
-  RetVal ret;
-
+Value getLocal(ExecFrame *frame, uint16_t localIndex) {
   if (localIndex >= frame->fn->numLocals) {
-    throwRuntimeError(error, "no such local: %u", localIndex);
+    explode("no such local: %u", localIndex);
   }
-
-  *ptr = frame->locals[localIndex];
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  return frame->locals[localIndex];
 }
 
 Value* getLocalRef(ExecFrame *frame, uint16_t localIndex) {
@@ -3761,18 +3656,11 @@ Value* getLocalRef(ExecFrame *frame, uint16_t localIndex) {
   return &frame->locals[localIndex];
 }
 
-RetVal setLocal(ExecFrame *frame, uint16_t localIndex, Value value, Error *error) {
-  RetVal ret;
-
+void setLocal(ExecFrame *frame, uint16_t localIndex, Value value) {
   if (localIndex >= frame->fn->numLocals) {
-    throwRuntimeError(error, "no such local: %u", localIndex);
+    explode("no such local: %u", localIndex);
   }
-
   frame->locals[localIndex] = value;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 uint16_t numLocals(ExecFrame *frame) {
@@ -3791,7 +3679,7 @@ Value* getOperandRef(ExecFrame *frame, uint64_t opIndex) {
 }
 
 void pushOperand(ExecFrame *frame, Value value) {
-  tryOpStackPush(frame->opStack, value);
+  opStackPush(frame->opStack, value);
 }
 
 Value popOperand(ExecFrame *frame) {
@@ -3822,51 +3710,30 @@ ExecFrame_t getParent(ExecFrame *frame) {
   return frame->parent;
 }
 
-RetVal setResult(ExecFrame *frame, Value result, Error *error) {
-  RetVal ret;
-
+void setResult(ExecFrame *frame, Value result) {
   if (frame->resultAvailable) {
-    throwRuntimeError(error, "result already set");
+    explode("result already set");
   }
-
   frame->result = result;
   frame->resultAvailable = true;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
-RetVal getResult(ExecFrame *frame, Value *ptr, Error *error) {
-  RetVal ret;
-
+Value getResult(ExecFrame *frame) {
   if (!frame->resultAvailable) {
-    throwRuntimeError(error, "result not set");
+    explode("result not set");
   }
-
-  *ptr = frame->result;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  return frame->result;
 }
 
 bool hasHandler(ExecFrame *frame) {
   return frame->handlerSet;
 }
 
-RetVal getHandler(ExecFrame_t frame, ExceptionHandler *ptr, Error *error) {
-  RetVal ret;
-
+ExceptionHandler getHandler(ExecFrame_t frame) {
   if (!frame->handlerSet) {
-    throwRuntimeError(error, "handler not set");
+    explode("handler not set");
   }
-
-  *ptr = frame->handler;
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  return frame->handler;
 }
 
 void setHandler(ExecFrame_t frame, ExceptionHandler handler) {
@@ -3883,19 +3750,15 @@ bool hasFnName(ExecFrame *frame) {
   return frame->fn->hasName;
 }
 
-RetVal getFnName(ExecFrame_t frame, Text *name, Error *error) {
-  RetVal ret;
-
+Text getFnName(ExecFrame_t frame) {
   if (!frame->fn->hasName) {
-    throwRuntimeError(error, "no fn name found");
+    explode("no fn name found");
   }
-
-  name->value = fnName(frame->fn);
-  name->length = frame->fn->nameLength;
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  Text name;
+  textInitContents(&name);
+  name.value = fnName(frame->fn);
+  name.length = frame->fn->nameLength;
+  return name;
 }
 
 bool hasSourceTable(ExecFrame *frame) {
@@ -3935,21 +3798,14 @@ void setException(ExecFrame_t frame, VMException e) {
   frame->exceptionSet = true;
 }
 
-RetVal getException(ExecFrame_t frame, VMException *e, Error *error) {
-  RetVal ret;
-
+VMException getException(ExecFrame_t frame) {
   if (!frame->exceptionSet) {
-    throwRuntimeError(error, "handler not set");
+    explode("handler not set");
   }
-
-  *e = frame->exception;
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  return frame->exception;
 }
 
-RetVal pushFrame(VM *vm, ExecFrame **framePtr, Value newFn, Error *error) {
+void pushFrame(VM *vm, ExecFrame **framePtr, Value newFn) {
   RetVal ret;
 
   Fn *fn = deref(&vm->gc, newFn);
@@ -3959,10 +3815,16 @@ RetVal pushFrame(VM *vm, ExecFrame **framePtr, Value newFn, Error *error) {
 
   ExecFrame *frame = *framePtr;
   if (frame == NULL) {
-    tryMalloc(frame, sizeof(ExecFrame), "ExecFrame");
+    frame = malloc(sizeof(ExecFrame));
+    if (frame == NULL) {
+      explode("failed to allocate ExecFrame");
+    }
   }
   else {
-    tryMalloc(parent, sizeof(ExecFrame), "ExecFrame");
+    parent = malloc(sizeof(ExecFrame));
+    if (parent == NULL) {
+      explode("failed to allocate ExecFrame")
+    }
     memcpy(parent, frame, sizeof(ExecFrame));
   }
 
@@ -3973,26 +3835,23 @@ RetVal pushFrame(VM *vm, ExecFrame **framePtr, Value newFn, Error *error) {
   child.fnRef = newFn;
   child.fn = fn;
 
-  tryMalloc(child.opStack, sizeof(OpStack), "OpStack");
-  tryMalloc(child.locals, sizeof(Value) * child.fn->numLocals, "Value array");
-  throws(tryOpStackInitContents(child.opStack, child.fn->maxOperandStackSize, error));
+  child.opStack = malloc(sizeof(OpStack));
+  if (child.opStack == NULL) {
+    explode("failed to allocate OpStack");
+  }
+
+  child.locals = malloc(sizeof(Value) * child.fn->numLocals);
+  if (child.locals == NULL) {
+    explode("failed to allocate locals");
+  }
+
+  opStackCreate(child.opStack, child.fn->maxOperandStackSize);
 
   *frame = child;
   *framePtr = frame;
-  return R_SUCCESS;
-
-  failure:
-    if (parent != NULL) {
-      free(parent);
-    }
-    free(child.locals);
-    opStackFreeContents(child.opStack);
-    return ret;
 }
 
-RetVal replaceFrame(VM *vm, ExecFrame *frame, Value newFn, Error *error) {
-  RetVal ret;
-
+void replaceFrame(VM *vm, ExecFrame *frame, Value newFn) {
   Fn *fn = deref(&vm->gc, newFn);
 
   // resize locals if needed
@@ -4000,7 +3859,7 @@ RetVal replaceFrame(VM *vm, ExecFrame *frame, Value newFn, Error *error) {
   if (newNumLocals > frame->fn->numLocals) {
     Value *resizedLocals = realloc(frame->locals, newNumLocals * sizeof(Value));
     if (resizedLocals == NULL) {
-      throwMemoryError(error, "realloc Value array");
+      explode("realloc Value array");
     }
     frame->fn->numLocals = newNumLocals;
     frame->locals = resizedLocals;
@@ -4009,7 +3868,7 @@ RetVal replaceFrame(VM *vm, ExecFrame *frame, Value newFn, Error *error) {
   if (fn->maxOperandStackSize > frame->opStack->maxDepth) {
     Value *resizedStack = realloc(frame->opStack->stack, fn->maxOperandStackSize * sizeof(Value));
     if (resizedStack == NULL) {
-      throwMemoryError(error, "realloc Value array");
+      explode("realloc Value array");
     }
     frame->opStack->maxDepth = fn->maxOperandStackSize;
     frame->opStack->stack = resizedStack;
@@ -4020,11 +3879,6 @@ RetVal replaceFrame(VM *vm, ExecFrame *frame, Value newFn, Error *error) {
   frame->result = nil();
   frame->resultAvailable = false;
   frame->pc = 0;
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
 void popFrame(ExecFrame *frame) {
@@ -4066,7 +3920,7 @@ RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, Value *result, 
   throws(tryFnHydrate(vm, &c, &fnRef, error));
 
   ExecFrame_t frame = NULL;
-  throws(pushFrame(vm, &frame, fnRef, error));
+  pushFrame(vm, &frame, fnRef);
   pushed = true;
 
   throws(tryFrameEval(vm, frame, outputPool, error));
