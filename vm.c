@@ -515,15 +515,17 @@ void GCInitContents(GC *gc) {
   gc->allocPtr = NULL;
 }
 
-RetVal tryGCInitContents(GC *gc, uint64_t maxHeapSize, Error *error) {
-  RetVal ret;
-
+void GCCreate(GC *gc, uint64_t maxHeapSize) {
   GCInitContents(gc);
 
   gc->heapSize = maxHeapSize;
   gc->heapMemorySize = gc->heapSize * 2;
 
-  tryMalloc(gc->heapMemory, gc->heapMemorySize, "GC memory");
+  gc->heapMemory = malloc(gc->heapMemorySize);
+  if (gc->heapMemory == NULL) {
+    explode("failed to allocate memory for GC");
+  }
+
   memset(gc->heapMemory, 0, gc->heapMemorySize);
 
   gc->heapA = gc->heapMemory;
@@ -531,10 +533,6 @@ RetVal tryGCInitContents(GC *gc, uint64_t maxHeapSize, Error *error) {
   gc->currentHeap = gc->heapA;
   gc->currentHeapEnd = gc->currentHeap + gc->heapSize;
   gc->allocPtr = gc->currentHeap;
-
-  return R_SUCCESS;
-  failure:
-    return ret;
 }
 
 void collect(VM *vm, ExecFrame_t frame);
@@ -568,24 +566,26 @@ int _alloc(GC *gc, uint64_t length, void **ptr, uint64_t *offset) {
 /*
  * Allocates, attempts collection if allocation fails.
  */
-RetVal alloc(VM *vm, ExecFrame_t frame, uint64_t length, void **ptr, uint64_t *offset, Error *error) {
-  RetVal ret;
+void* alloc(VM *vm, ExecFrame_t frame, uint64_t length, Value *value) {
 
-  int success = _alloc(&vm->gc, length, ptr, offset);
+  void *ptr = NULL;
+  uint64_t offset = 0;
+
+  int success = _alloc(&vm->gc, length, &ptr, &offset);
 
   if (success == R_OOM) {
     collect(vm, frame);
 
-    success = _alloc(&vm->gc, length, ptr, offset);
+    success = _alloc(&vm->gc, length, &ptr, &offset);
 
     if (success == R_OOM) {
-      throwRuntimeError(error, "out of memory, failed to allocate %" PRIu64 " bytes", length);
+      explode("out of memory, failed to allocate %" PRIu64 " bytes", length);
     }
   }
 
-  return R_SUCCESS;
-  failure:
-    return ret;
+  value->value = offset;
+
+  return ptr;
 }
 
 void* deref(GC *gc, Value value) {
@@ -1477,11 +1477,8 @@ RetVal tryAllocateCons(VM *vm, ExecFrame_t frame, Value value, Value next, Value
 
   size_t size = sizeof(Cons);
 
-  uint64_t offset = 0;
-  throws(alloc(vm, frame, size, (void*)&cons, &offset, error));
-
   ptr->type = VT_LIST;
-  ptr->value = offset;
+  cons = alloc(vm, frame, size, ptr);
 
   consInitContents(cons);
   cons->header.type = VT_LIST;
@@ -2279,12 +2276,10 @@ RetVal tryLoadClosureEval(VM *vm, ExecFrame_t frame, Error *error) {
   size_t capturesSize = fn->numCaptures * sizeof(Value);
   size_t clSize = sizeof(Closure) + capturesSize;
 
-  uint64_t offset = 0;
-  throws(alloc(vm, frame, clSize, (void*)&closure, &offset, error));
-
   Value closureValue;
   closureValue.type = VT_CLOSURE;
-  closureValue.value = offset;
+
+  closure = alloc(vm, frame, clSize, &closureValue);
 
   closureInitContents(closure);
   closure->header.type = VT_CLOSURE;
@@ -4194,12 +4189,8 @@ RetVal tryStringMakeBlank(VM *vm, ExecFrame_t frame, uint64_t length, Value *val
   size_t textSize = (length + 1) * sizeof(wchar_t);
   size_t strSize = sizeof(String) + textSize;
 
-  uint64_t offset = 0;
-
-  throws(alloc(vm, frame, strSize, (void*)&str, &offset, error));
-
   value->type = VT_STR;
-  value->value = offset;
+  str = alloc(vm, frame, strSize, value);
 
   stringInitContents(str);
   str->header.type = VT_STR;
@@ -4210,9 +4201,6 @@ RetVal tryStringMakeBlank(VM *vm, ExecFrame_t frame, uint64_t length, Value *val
   stringValue(str)[length] = L'\0';
 
   return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 /*
@@ -4334,11 +4322,8 @@ RetVal trySymbolMakeBlank(VM *vm, ExecFrame_t frame, uint64_t length, Value *res
   size_t textSize = (length + 1) * sizeof(wchar_t);
   size_t size = sizeof(Symbol) + textSize;
 
-  uint64_t offset = 0;
-  throws(alloc(vm, frame, size, (void*)&sym, &offset, error));
-
   result->type = VT_SYMBOL;
-  result->value = offset;
+  sym = alloc(vm, frame, size, result);
 
   symbolInitContents(sym);
   sym->header.type = VT_SYMBOL;
@@ -4349,8 +4334,6 @@ RetVal trySymbolMakeBlank(VM *vm, ExecFrame_t frame, uint64_t length, Value *res
   symbolValue(sym)[sym->length] = L'\0';
 
   return R_SUCCESS;
-  failure:
-  return ret;
 }
 
 RetVal trySymbolBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
@@ -4389,18 +4372,13 @@ RetVal trySymbolBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
 }
 
 RetVal tryKeywordMakeBlank(VM *vm, ExecFrame_t frame, uint64_t length, Value *result, Error *error) {
-  RetVal ret;
-
   Keyword *kw = NULL;
 
   size_t textSize = (length + 1) * sizeof(wchar_t);
   size_t size = sizeof(Keyword) + textSize;
 
-  uint64_t offset = 0;
-  throws(alloc(vm, frame, size, (void*)&kw, &offset, error));
-
   result->type = VT_KEYWORD;
-  result->value = offset;
+  kw = alloc(vm, frame, size, result);
 
   keywordInitContents(kw);
   kw->header.type = VT_KEYWORD;
@@ -4411,8 +4389,6 @@ RetVal tryKeywordMakeBlank(VM *vm, ExecFrame_t frame, uint64_t length, Value *re
   keywordValue(kw)[kw->length] = L'\0';
 
   return R_SUCCESS;
-  failure:
-  return ret;
 }
 
 RetVal tryKeywordBuiltin(VM *vm, ExecFrame_t frame, Error *error) {
@@ -4515,19 +4491,13 @@ void arrayInitContents(Array *a) {
 }
 
 RetVal tryMakeArray(VM *vm, ExecFrame_t frame, uint64_t length, Value *value, Error *error) {
-  RetVal ret;
-
   Array *arr = NULL;
 
   size_t elementsSize = length * sizeof(Value);
   size_t size = sizeof(Array) + elementsSize;
 
-  uint64_t offset = 0;
-
-  throws(alloc(vm, frame, size, (void*)&arr, &offset, error));
-
   value->type = VT_ARRAY;
-  value->value = offset;
+  arr = alloc(vm, frame, size, value);
 
   arrayInitContents(arr);
   arr->header.type = VT_ARRAY;
@@ -4542,9 +4512,6 @@ RetVal tryMakeArray(VM *vm, ExecFrame_t frame, uint64_t length, Value *value, Er
   }
 
   return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 void _mapInitContents(Map *m) {
@@ -4567,12 +4534,8 @@ RetVal tryMakeMapConf(VM *vm, ExecFrame_t frame, Value *value, Error *error) {
 
   size_t size = sizeof(Map);
 
-  uint64_t offset = 0;
-
-  throws(alloc(vm, frame, size, (void*)&map, &offset, error));
-
   value->type = VT_MAP;
-  value->value = offset;
+  map = alloc(vm, frame, size, value);
 
   _mapInitContents(map);
   map->header.type = VT_MAP;
@@ -4606,12 +4569,8 @@ RetVal tryMakeMap(VM *vm, ExecFrame_t frame, Value *value, Error *error) {
 
   size_t size = sizeof(Map);
 
-  uint64_t offset = 0;
-
-  throws(alloc(vm, frame, size, (void*)&map, &offset, error));
-
   value->type = VT_MAP;
-  value->value = offset;
+  map = alloc(vm, frame, size, value);
 
   _mapInitContents(map);
   map->header.type = VT_MAP;
@@ -4647,27 +4606,18 @@ void mapEntryInitContents(MapEntry *e) {
 }
 
 RetVal tryMakeMapEntry(VM *vm, ExecFrame_t frame, Value *value, Error *error) {
-  RetVal ret;
-
   MapEntry *entry = NULL;
 
   size_t size = sizeof(MapEntry);
 
-  uint64_t offset = 0;
-
-  throws(alloc(vm, frame, size, (void*)&entry, &offset, error));
-
   value->type = VT_MAP_ENTRY;
-  value->value = offset;
+  entry = alloc(vm, frame, size, value);
 
   mapEntryInitContents(entry);
   entry->header.type = VT_MAP_ENTRY;
   entry->header.size = size;
 
   return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 #define MIN_LOAD .40
@@ -4927,7 +4877,7 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
 
   vm->instTable = instTableCreate();
   vm->valueTypeTable = valueTypeTableCreate();
-  throws(tryGCInitContents(&vm->gc, 1024 * 1000, error));
+  GCCreate(&vm->gc, 1024 * 1000);
   throws(tryNamespacesInitContents(&vm->namespaces, error));
   throws(tryInitCFns(vm, error));
   refRegistryInitContents(&vm->refs);
