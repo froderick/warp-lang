@@ -105,18 +105,18 @@ void evalResultInitContents(VMEvalResult *r) {
    VT_NIL,
    VT_UINT,
    VT_BOOL,
+//  VT_CHAR,     // TODO: add this
    VT_FN,
    VT_STR,
    VT_SYMBOL,
    VT_KEYWORD,
-   VT_LIST,
+   VT_LIST,      // TODO: this should be a pair
    VT_CLOSURE,
    VT_CFN,
-   VT_ARRAY,
-   VT_MAP,
-   VT_MAP_ENTRY,
+   VT_ARRAY,     // TODO: vector, but need specializations for vectors of values vs unboxed data (strings, bytes)
+   VT_MAP,       // TODO: maps should not be a builtin vm construct
+   VT_MAP_ENTRY, // TODO: maps should not be a builtin vm construct
 //  VT_OBJECT,
-//  VT_CHAR,
 } ValueType;
 
 typedef struct Value {
