@@ -4303,9 +4303,7 @@ void cFnInitContents(CFn *fn) {
   fn->usesVarArgs = false;
 }
 
-RetVal tryMakeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr, Value *value, Error *error) {
-  RetVal ret;
-
+Value makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
   CFn *fn = NULL;
 
   size_t nameLength = wcslen(name);
@@ -4315,11 +4313,12 @@ RetVal tryMakeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, C
   uint64_t offset = 0;
 
   if (_alloc(&vm->gc, fnSize, (void*)&fn, &offset) == R_OOM) {
-    throwRuntimeError(error, "out of memory, failed to allocate CFn: %ls", name);
+    explode("out of memory, failed to allocate CFn: %ls", name);
   }
 
-  value->type = VT_CFN;
-  value->value = offset;
+  Value value;
+  value.type = VT_CFN;
+  value.value = offset;
 
   cFnInitContents(fn);
   fn->header.type = VT_CFN;
@@ -4333,23 +4332,19 @@ RetVal tryMakeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, C
   memcpy(cFnName(fn), name, nameLength * sizeof(wchar_t));
   cFnName(fn)[nameLength] = L'\0';
 
-  return R_SUCCESS;
-  failure:
-  return ret;
+  return value;
 }
 
-RetVal tryDefineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr, Error *error) {
-  RetVal ret;
+void defineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
 
   size_t nameLength = wcslen(name);
-  Value value = nil();
+  Value value = makeCFn(vm, name, numArgs, varArgs, ptr);
 
-  throws(tryMakeCFn(vm, name, numArgs, varArgs, ptr, &value, error));
-  throws(tryDefVar(&vm->namespaces, name, nameLength, value, error));
-
-  return R_SUCCESS;
-  failure:
-  return ret;
+  Error error;
+  errorInitContents(&error);
+  if (tryDefVar(&vm->namespaces, name, nameLength, value, &error) != R_SUCCESS) {
+    explode("failed to define a var");
+  }
 }
 
 void arrayInitContents(Array *a) {
@@ -4712,32 +4707,27 @@ RetVal tryGetMapBuiltin(VM *vm, Frame_t frame, Error *error) {
   return ret;
 }
 
-RetVal tryInitCFns(VM *vm, Error *error) {
-  RetVal ret;
+void initCFns(VM *vm) {
 
-  throws(tryDefineCFn(vm, L"cons",      2, false, tryConsEval,         error));
-  throws(tryDefineCFn(vm, L"first",     1, false, tryFirstEval,        error));
-  throws(tryDefineCFn(vm, L"rest",      1, false, tryRestEval,         error));
-  throws(tryDefineCFn(vm, L"set-macro", 1, false, trySetMacroEval,     error));
-  throws(tryDefineCFn(vm, L"get-macro", 1, false, tryGetMacroEval,     error));
-  throws(tryDefineCFn(vm, L"gc",        0, false, tryGCEval,           error));
-  throws(tryDefineCFn(vm, L"get-type",  1, false, tryGetTypeEval,      error));
-  throws(tryDefineCFn(vm, L"prn",       1, false, tryPrnEval,          error));
-  throws(tryDefineCFn(vm, L"+",         2, false, tryAddEval,          error));
-  throws(tryDefineCFn(vm, L"-",         2, false, trySubEval,          error));
-  throws(tryDefineCFn(vm, L"eq",        2, false, tryCmpEval,          error));
-  throws(tryDefineCFn(vm, L"join",      1, false, tryStrJoinBuiltin,   error));
-  throws(tryDefineCFn(vm, L"pr-str",    1, false, tryPrStrBuiltin,     error));
-  throws(tryDefineCFn(vm, L"print-str", 1, false, tryPrintStrBuiltin,  error));
-  throws(tryDefineCFn(vm, L"symbol",    1, false, trySymbolBuiltin,    error));
-  throws(tryDefineCFn(vm, L"keyword",   1, false, tryKeywordBuiltin,   error));
-  throws(tryDefineCFn(vm, L"hash-map",  0, false, tryHashMapBuiltin,   error));
-  throws(tryDefineCFn(vm, L"assoc",     3, false, tryPutMapBuiltin,    error));
-  throws(tryDefineCFn(vm, L"get",       2, false, tryGetMapBuiltin,    error));
-
-  return R_SUCCESS;
-  failure:
-  return ret;
+  defineCFn(vm, L"cons", 2, false, tryConsEval);
+  defineCFn(vm, L"first", 1, false, tryFirstEval);
+  defineCFn(vm, L"rest", 1, false, tryRestEval);
+  defineCFn(vm, L"set-macro", 1, false, trySetMacroEval);
+  defineCFn(vm, L"get-macro", 1, false, tryGetMacroEval);
+  defineCFn(vm, L"gc", 0, false, tryGCEval);
+  defineCFn(vm, L"get-type", 1, false, tryGetTypeEval);
+  defineCFn(vm, L"prn", 1, false, tryPrnEval);
+  defineCFn(vm, L"+", 2, false, tryAddEval);
+  defineCFn(vm, L"-", 2, false, trySubEval);
+  defineCFn(vm, L"eq", 2, false, tryCmpEval);
+  defineCFn(vm, L"join", 1, false, tryStrJoinBuiltin);
+  defineCFn(vm, L"pr-str", 1, false, tryPrStrBuiltin);
+  defineCFn(vm, L"print-str", 1, false, tryPrintStrBuiltin);
+  defineCFn(vm, L"symbol", 1, false, trySymbolBuiltin);
+  defineCFn(vm, L"keyword", 1, false, tryKeywordBuiltin);
+  defineCFn(vm, L"hash-map", 0, false, tryHashMapBuiltin);
+  defineCFn(vm, L"assoc", 3, false, tryPutMapBuiltin);
+  defineCFn(vm, L"get", 2, false, tryGetMapBuiltin);
 }
 
 RetVal tryVMInitContents(VM *vm , Error *error) {
@@ -4747,7 +4737,7 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
   vm->valueTypeTable = valueTypeTableCreate();
   GCCreate(&vm->gc, 1024 * 1000);
   throws(tryNamespacesInitContents(&vm->namespaces, error));
-  throws(tryInitCFns(vm, error));
+  initCFns(vm);
   refRegistryInitContents(&vm->refs);
   stackInitContents(&vm->stack, 1024 * 1000);
   vm->current = NULL;
