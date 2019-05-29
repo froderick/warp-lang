@@ -1581,9 +1581,6 @@ RetVal tryPopInvocable(VM *vm, Value pop, Invocable *invocable, Error *error) {
       invocable->fn = deref(&vm->gc, invocable->closure->fn);
       break;
     }
-    case VT_CFN: {
-      invocable->fn = deref(&vm->gc, invocable->fnRef);
-    }
     default:
       // fail: not all values are invocable
       throwRuntimeError(error, "cannot invoke this value type as a function: %s",
@@ -1596,31 +1593,14 @@ RetVal tryPopInvocable(VM *vm, Value pop, Invocable *invocable, Error *error) {
   return ret;
 }
 
-//* - vm honors var-arg flag
-//*   - sees var-arg flag on invocable
-//*   - pops all static arguments into local slot
-//*   - pops number indicating number of extra arguments
-//*   - we *aways* pass the number of arguments
-//*   - pops number of extra arguments into a list, sets as final argument in local slot
-
 RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarArgs, Error *error) {
 
   RetVal ret;
 
-  /*
-   * if we put numArgsSupplied as the index on the instruction, we could avoid pushing an extra argument for every call
-   * apply would still do the general case, including the extra argument
-   *
-   * for variable args, we still need to know how many args were passed. we'd need to pass this as the first 'var-args' param
-   * however, we could also generate the instructions inside the called fn to handle them appropriately. this way
-   * the VM isn't doing it directly
-   */
-
   Value numArgsSupplied = popOperand(parent);
 
   if (numArgsSupplied.type != VT_UINT) {
-    throwRuntimeError(error, "first op stack value must be number of arguments supplied: %s",
-                      getValueTypeName(vm, numArgsSupplied.type));
+    explode("first op stack value must be number of arguments supplied: %s", getValueTypeName(vm, numArgsSupplied.type));
   }
 
   if (!usesVarArgs) {
@@ -1646,8 +1626,7 @@ RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool use
                         numArgs - 1, numArgsSupplied.value);
     }
 
-    // empty varargs sequence
-//    Ref seqRef = createRef(vm, nil());
+    // TODO: stop using the operand stack as a general purpose stack, since it can overflow this way
 
     // push empty varargs sequence
     pushOperand(parent, nil());
@@ -1670,7 +1649,6 @@ RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool use
   }
 
   return R_SUCCESS;
-
   failure:
   return ret;
 }
@@ -1690,10 +1668,12 @@ RetVal tryInvokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable 
   if (invocable.fn->numCaptures > 0) {
 
     if (!invocable.hasClosure) {
-      throwRuntimeError(error, "cannot invoke this fn without a closure, it captures variables: %u", invocable.fn->numCaptures);
+      explode("cannot invoke this fn without a closure, it captures variables: %u",
+          invocable.fn->numCaptures);
     }
     if (invocable.closure->numCaptures < invocable.fn->numCaptures) {
-      throwRuntimeError(error, "closure does not have enough captured variables: %u", invocable.closure->numCaptures);
+      explode("closure does not have enough captured variables: %u",
+          invocable.closure->numCaptures);
     }
 
     uint16_t nextLocalIdx = invocable.fn->numArgs;
