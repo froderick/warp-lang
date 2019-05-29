@@ -547,7 +547,7 @@ void GCCreate(GC *gc, uint64_t maxHeapSize) {
   gc->allocPtr = gc->currentHeap;
 }
 
-void collect(VM *vm, Frame_t frame);
+void collect(VM *vm);
 
 #define R_OOM 1
 
@@ -578,7 +578,7 @@ int _alloc(GC *gc, uint64_t length, void **ptr, uint64_t *offset) {
 /*
  * Allocates, attempts collection if allocation fails.
  */
-void* alloc(VM *vm, Frame_t frame, uint64_t length, Value *value) {
+void* alloc(VM *vm, uint64_t length, Value *value) {
 
   void *ptr = NULL;
   uint64_t offset = 0;
@@ -586,7 +586,7 @@ void* alloc(VM *vm, Frame_t frame, uint64_t length, Value *value) {
   int success = _alloc(&vm->gc, length, &ptr, &offset);
 
   if (success == R_OOM) {
-    collect(vm, frame);
+    collect(vm);
 
     success = _alloc(&vm->gc, length, &ptr, &offset);
 
@@ -655,7 +655,7 @@ uint64_t now() {
   return millis;
 }
 
-void collect(VM *vm, Frame_t frame) {
+void collect(VM *vm) {
 
   uint64_t oldHeapUsed = vm->gc.allocPtr - vm->gc.currentHeap;
 
@@ -692,7 +692,7 @@ void collect(VM *vm, Frame_t frame) {
   }
 
   // relocate call stack roots
-  Frame_t current = frame;
+  Frame_t current = vm->current;
   while (true) {
 
     // relocate fnRef
@@ -1478,19 +1478,19 @@ RetVal tryNamespacesInitContents(Namespaces *namespaces, Error *error) {
   return ret;
 }
 
-RetVal tryAllocateCons(VM *vm, Frame_t frame, Value value, Value next, Value *ptr, Error *error) {
-  RetVal ret;
+Value allocateCons(VM *vm, Value value, Value next) {
 
   if (next.type != VT_NIL && next.type != VT_LIST) {
-    throwRuntimeError(error, "a Cons next must be nil or a list: %s", getValueTypeName(vm, next.type));
+    explode("a Cons next must be nil or a list: %s", getValueTypeName(vm, next.type));
   }
 
   Cons *cons = NULL;
 
   size_t size = sizeof(Cons);
 
-  ptr->type = VT_LIST;
-  cons = alloc(vm, frame, size, ptr);
+  Value ptr;
+  ptr.type = VT_LIST;
+  cons = alloc(vm, size, &ptr);
 
   consInitContents(cons);
   cons->header.type = VT_LIST;
@@ -1498,9 +1498,7 @@ RetVal tryAllocateCons(VM *vm, Frame_t frame, Value value, Value next, Value *pt
   cons->value = value;
   cons->next = next;
 
-  return R_SUCCESS;
-  failure:
-  return ret;
+  return ptr;
 }
 
 /*
@@ -1609,6 +1607,15 @@ RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool use
 
   RetVal ret;
 
+  /*
+   * if we put numArgsSupplied as the index on the instruction, we could avoid pushing an extra argument for every call
+   * apply would still do the general case, including the extra argument
+   *
+   * for variable args, we still need to know how many args were passed. we'd need to pass this as the first 'var-args' param
+   * however, we could also generate the instructions inside the called fn to handle them appropriately. this way
+   * the VM isn't doing it directly
+   */
+
   Value numArgsSupplied = popOperand(parent);
 
   if (numArgsSupplied.type != VT_UINT) {
@@ -1623,53 +1630,42 @@ RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool use
     }
   }
   else {
+
+    uint16_t numVarArgs;
     if (numArgsSupplied.value > numArgs) {
-
-      // push empty varargs sequence
-      pushOperand(parent, nil());
-
-      // read the extra args into that sequence, push it back on the stack
-      uint16_t numVarArgs = (numArgsSupplied.value - numArgs) + 1;
-      for (uint16_t i = 0; i < numVarArgs; i++) {
-
-        Value seq = nil();
-
-        // may gc, so has to happen before we pop anything off the stack
-        throws(tryAllocateCons(vm, parent, nil(), nil(), &seq, error));
-
-        // gc possibility over, so pop sequence and arg from the stack and set them on cons
-        Cons *cons = deref(&vm->gc, seq);
-
-        cons->next = popOperand(parent);
-        cons->value = popOperand(parent);
-
-        // put the new sequence back on the stack
-        pushOperand(parent, seq);
-      }
+      numVarArgs = (numArgsSupplied.value - numArgs) + 1;
     }
     else if (numArgsSupplied.value == numArgs) {
-      // wrap the last arg in a list
-
-      Value seq = nil();
-
-      //may gc, so has to happen before we pop anything off the stack
-      throws(tryAllocateCons(vm, parent, nil(), nil(), &seq, error));
-
-      // gc possibility over, so pop arg from the stack and it on cons
-      Cons *cons = deref(&vm->gc, seq);
-
-      cons->value = popOperand(parent);
-
-      // put the one-element sequence back on the stack
-      pushOperand(parent, seq);
+      numVarArgs = 1;
     }
     else if (numArgsSupplied.value == numArgs - 1) {
-      // the final argument will be an empty list, make sure the list is present on the op stack
-      pushOperand(parent, nil());
+      numVarArgs = 0;
     }
     else {
       throwRuntimeError(error, "required arguments not supplied, expected %u or more arguments but got %" PRIu64,
-          numArgs - 1, numArgsSupplied.value);
+                        numArgs - 1, numArgsSupplied.value);
+    }
+
+    // empty varargs sequence
+//    Ref seqRef = createRef(vm, nil());
+
+    // push empty varargs sequence
+    pushOperand(parent, nil());
+
+    // read the extra args into that sequence, push it back on the stack
+    for (uint16_t i = 0; i < numVarArgs; i++) {
+
+      // may gc, so has to happen before we pop anything off the stack
+      Value seq = allocateCons(vm, nil(), nil());
+
+      // gc possibility over, so pop sequence and arg from the stack and set them on cons
+      Cons *cons = deref(&vm->gc, seq);
+
+      cons->next = popOperand(parent);
+      cons->value = popOperand(parent);
+
+      // put the new sequence back on the stack
+      pushOperand(parent, seq);
     }
   }
 
@@ -2228,7 +2224,7 @@ RetVal tryLoadClosureEval(VM *vm, Frame_t frame, Error *error) {
   Value closureValue;
   closureValue.type = VT_CLOSURE;
 
-  closure = alloc(vm, frame, clSize, &closureValue);
+  closure = alloc(vm, clSize, &closureValue);
 
   closureInitContents(closure);
   closure->header.type = VT_CLOSURE;
@@ -2319,8 +2315,7 @@ RetVal tryConsEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
   // gc may occur, so allocate the cons first
-  Value result = nil();
-  throws(tryAllocateCons(vm, frame, nil(), nil(), &result, error));
+  Value result = allocateCons(vm, nil(), nil());
 
   Value seq = popOperand(frame);
   Value x = popOperand(frame);
@@ -2485,7 +2480,7 @@ RetVal tryGetMacroEval(VM *vm, Frame_t frame, Error *error) {
 RetVal tryGCEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
-  collect(vm, frame);
+  collect(vm);
 
   pushOperand(frame, nil());
 
@@ -4062,7 +4057,7 @@ RetVal tryStringMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *value, 
   size_t strSize = sizeof(String) + textSize;
 
   value->type = VT_STR;
-  str = alloc(vm, frame, strSize, value);
+  str = alloc(vm, strSize, value);
 
   stringInitContents(str);
   str->header.type = VT_STR;
@@ -4193,7 +4188,7 @@ RetVal trySymbolMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *result,
   size_t size = sizeof(Symbol) + textSize;
 
   result->type = VT_SYMBOL;
-  sym = alloc(vm, frame, size, result);
+  sym = alloc(vm, size, result);
 
   symbolInitContents(sym);
   sym->header.type = VT_SYMBOL;
@@ -4247,7 +4242,7 @@ RetVal tryKeywordMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *result
   size_t size = sizeof(Keyword) + textSize;
 
   result->type = VT_KEYWORD;
-  kw = alloc(vm, frame, size, result);
+  kw = alloc(vm, size, result);
 
   keywordInitContents(kw);
   kw->header.type = VT_KEYWORD;
@@ -4360,7 +4355,7 @@ RetVal tryMakeArray(VM *vm, Frame_t frame, uint64_t length, Value *value, Error 
   size_t size = sizeof(Array) + elementsSize;
 
   value->type = VT_ARRAY;
-  arr = alloc(vm, frame, size, value);
+  arr = alloc(vm, size, value);
 
   arrayInitContents(arr);
   arr->header.type = VT_ARRAY;
@@ -4398,7 +4393,7 @@ RetVal tryMakeMapConf(VM *vm, Frame_t frame, Value *value, Error *error) {
   size_t size = sizeof(Map);
 
   value->type = VT_MAP;
-  map = alloc(vm, frame, size, value);
+  map = alloc(vm, size, value);
 
   _mapInitContents(map);
   map->header.type = VT_MAP;
@@ -4433,7 +4428,7 @@ RetVal tryMakeMap(VM *vm, Frame_t frame, Value *value, Error *error) {
   size_t size = sizeof(Map);
 
   value->type = VT_MAP;
-  map = alloc(vm, frame, size, value);
+  map = alloc(vm, size, value);
 
   _mapInitContents(map);
   map->header.type = VT_MAP;
@@ -4474,7 +4469,7 @@ RetVal tryMakeMapEntry(VM *vm, Frame_t frame, Value *value, Error *error) {
   size_t size = sizeof(MapEntry);
 
   value->type = VT_MAP_ENTRY;
-  entry = alloc(vm, frame, size, value);
+  entry = alloc(vm, size, value);
 
   mapEntryInitContents(entry);
   entry->header.type = VT_MAP_ENTRY;
