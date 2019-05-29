@@ -384,21 +384,33 @@ typedef struct RefRegistry {
  */
 typedef uint64_t Ref;
 
+typedef struct StackSegment StackSegment;
+
+typedef struct StackSegment {
+  void *data;           // the first valid address in the segment
+  void *dataEnd;        // the first address after the end of the segment
+  void *allocPtr;       // the offset to use for allocation
+  StackSegment *prev;        // the previous segment, may be NULL
+  StackSegment *next;        // the subsequent segment, may be NULL
+} StackSegment;
+
+typedef struct Stack {
+  uint64_t segmentSize; // the size of each allocated segment (configuration)
+  StackSegment *root;        // the first segment to be allocated
+  StackSegment *current;     // the most recent segment to be allocated
+} Stack;
+
 typedef struct VM {
   GC gc;
   Namespaces namespaces;
   InstTable instTable;
   ValueTypeTable valueTypeTable;
   RefRegistry refs;
+  Stack stack;
+  ExecFrame_t current;
 } VM;
 
 // frames
-
-typedef struct OpStack {
-  Value *stack;
-  uint64_t maxDepth;
-  uint64_t usedDepth;
-} OpStack;
 
 /*
  * Common value factories
@@ -463,9 +475,9 @@ bool hasException(ExecFrame_t frame);
 void setException(ExecFrame_t frame, VMException e);
 VMException getException(ExecFrame_t frame);
 
-void pushFrame(VM *vm, ExecFrame_t *frame, Value newFn);
-void replaceFrame(VM *vm, ExecFrame_t frame, Value newFn);
-void popFrame(ExecFrame_t frame);
+ExecFrame_t pushFrame(VM *vm, Value newFn);
+ExecFrame_t replaceFrame(VM *vm, Value newFn);
+ExecFrame_t popFrame(VM *vm);
 
 /*
  * value type protocols
@@ -1733,7 +1745,7 @@ RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
     Invocable invocable;
     throws(tryPopInvocable(vm, pop, &invocable, error));
 
-    pushFrame(vm, &frame, invocable.fnRef);
+    frame = pushFrame(vm, invocable.fnRef);
     pushed = true;
 
     ExecFrame_t parent = getParent(frame);
@@ -1745,7 +1757,7 @@ RetVal tryInvokeDynEval(VM *vm, ExecFrame_t frame, Error *error) {
 
   failure:
     if (pushed) {
-      popFrame(frame);
+      popFrame(vm);
     }
     return ret;
 }
@@ -1773,13 +1785,14 @@ RetVal tryInvokeDynTailEval(VM *vm, ExecFrame_t frame, Error *error) {
     Invocable invocable;
     throws(tryPopInvocable(vm, pop, &invocable, error));
 
-    replaceFrame(vm, frame, invocable.fnRef);
+    replaceFrame(vm, invocable.fnRef);
     throws(tryInvokePopulateLocals(vm, frame, frame, invocable, error));
   }
 
   return R_SUCCESS;
   failure:
     return ret;
+
 }
 
 // (8)              | (objectref ->)
@@ -3441,7 +3454,7 @@ RetVal tryExceptionPrintf(VMException *e, Error *error) {
     return ret;
 }
 
-RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Pool_t outputPool, Error *error) {
+RetVal tryFrameEval(VM *vm, Pool_t outputPool, Error *error) {
   RetVal ret;
 
   uint8_t inst;
@@ -3449,33 +3462,33 @@ RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Pool_t outputPool, Error *error) 
 
   while (true) {
 
-    if (hasResult(frame)) {
-      if (!hasParent(frame)) {
+    if (hasResult(vm->current)) {
+      if (!hasParent(vm->current)) {
         break;
       }
       else {
-        Value result = getResult(frame);
-        ExecFrame_t parent = getParent(frame);
+        Value result = getResult(vm->current);
+        ExecFrame_t parent = getParent(vm->current);
         pushOperand(parent, result);
 
-        popFrame(frame);
+        popFrame(vm);
       }
     }
 
-    inst = readInstruction(frame);
+    inst = readInstruction(vm->current);
     tryEval = vm->instTable.instructions[inst].tryEval;
 
     if (tryEval == NULL) {
       explode("instruction unimplemented: %s (%u)", getInstName(&vm->instTable, inst), inst);
     }
 
-    ret = tryEval(vm, frame, error);
+    ret = tryEval(vm, vm->current, error);
 
     if (ret != R_SUCCESS) {
       VMException ex;
       // TODO: exceptions should go on the heap
-      throws(tryExceptionMake(frame, outputPool, &ex, error));
-      setException(frame, ex);
+      throws(tryExceptionMake(vm->current, outputPool, &ex, error));
+      setException(vm->current, ex);
       break;
     }
   }
@@ -3486,80 +3499,142 @@ RetVal tryFrameEval(VM *vm, ExecFrame_t frame, Pool_t outputPool, Error *error) 
   return ret;
 }
 
-  // create an exception
-  // - allocate it
-  // - set its payload with the error message
-  // - initialize its stack trace information
-  // - the entire exception is just lists of lists (payload, trace)
-  // walk up the stack until we find an error handler
-  // if no error handler is found, print the stack trace and goto failure
-  // if an error handler is found
-  // - pop the stack until the frame with the error handler is the current frame
-  // - set the exception as the local index for the handler's exception binding
-  // - jump to the error handler's jump address
-
-  /*
-   * TODO: how exception handling should work, revised
-   * - analyzer defines a try/catch form, where the catch introduces a binding in the binding table + some forms to eval
-   * - compiler computes the jumpAddress for the catch block
-   * - compiler emits I_SET_HANDLER with 2 index parameters (jumpAddress and exceptionLocalIndex)
-   * - vm makes use of error handlers *here* as needed
-   *
-   * this means no need for lambda/closure execution at error handling time
-   */
-
 /*
- * The OpStack
+ * Call Stack Implementation
  */
 
-void opStackInitContents(OpStack *stack) {
-  stack->usedDepth = 0;
-  stack->maxDepth = 0;
-  stack->stack = NULL;
+void stackSegmentInitContents(StackSegment *segment) {
+  segment->data = NULL;
+  segment->dataEnd = NULL;
+  segment->allocPtr = NULL;
+  segment->prev = NULL;
+  segment->next = NULL;
 }
 
-void opStackCreate(OpStack *stack, uint64_t maxDepth) {
-  stack->maxDepth = maxDepth;
-  stack->usedDepth = 0;
+void stackInitContents(Stack *pool, uint64_t segmentSize) {
+  pool->segmentSize = segmentSize;
+  pool->root = NULL;
+  pool->current = NULL;
+}
 
-  stack->stack = malloc(sizeof(Value) * maxDepth);
-  if (stack->stack == NULL) {
-    explode("failed to allocate Value array");
+StackSegment* makeSegment(uint64_t segmentSize) {
+
+  StackSegment *segment = malloc(sizeof(StackSegment));
+  if (segment == NULL) {
+    explode("failed to allocate stack segment memory")
+  }
+
+  stackSegmentInitContents(segment);
+
+  segment->data = malloc(segmentSize);
+  if (segment->data == NULL) {
+    explode("failed to allocate stack segment memory block")
+  }
+
+  segment->allocPtr = segment->data;
+  segment->dataEnd = segment->data + segmentSize;
+  segment->prev = NULL;
+  segment->next = NULL;
+
+  return segment;
+}
+
+void freeSegment(StackSegment *segment) {
+  if (segment != NULL) {
+    free(segment->data);
+    stackSegmentInitContents(segment);
+    free(segment);
   }
 }
 
-void opStackFreeContents(OpStack *stack) {
-  if (stack != NULL) {
-    stack->maxDepth = 0;
-    stack->usedDepth = 0;
-    if (stack->stack != NULL) {
-      free(stack->stack);
-      stack->stack = NULL;
+void* stackAllocate(Stack *stack, size_t size, char *description) {
+
+  if (size == 0) {
+    return NULL;
+  }
+
+  if (size > stack->segmentSize) {
+    explode("cannot allocate a size bigger than %zu: %s", size, description);
+  }
+
+  if (stack->root == NULL) { // create root segment if missing
+    StackSegment *segment = makeSegment(stack->segmentSize);
+    stack->root = segment;
+    stack->current = segment;
+  }
+  else if (stack->current->allocPtr + size >= stack->current->dataEnd) { // add new segment
+    StackSegment *segment = makeSegment(stack->segmentSize);
+    segment->prev = stack->current;
+    stack->current->next = segment;
+    stack->current = segment;
+  }
+
+  void* ret = stack->current->allocPtr;
+  stack->current->allocPtr += size;
+
+  return ret;
+}
+
+/*
+ * unwinds the stack allocation to immediately before the specified address
+ */
+void stackFree(Stack *stack, void *ptr) {
+
+  if (stack->root == NULL) {
+    explode("stack is not initialized");
+  }
+
+  { // bounds check
+    void *start = stack->root->data;
+    void *end = stack->current->dataEnd;
+    if (ptr < start || ptr >= end) {
+      explode("cannot free data, it is outside the stack address range [%" PRIu64 " - %" PRIu64 "]: %" PRIu64,
+              (uint64_t) start, (uint64_t) end, (uint64_t) ptr);
     }
   }
-}
 
-void opStackPush(OpStack *stack, Value v) {
-  if (stack->maxDepth == stack->usedDepth + 1) {
-    explode("cannot allocate op stack greater than max %" PRIu64, stack->maxDepth);
+  // free intermediate segments
+  while (ptr < stack->current->data) {
+    StackSegment *freeMe = stack->current;
+    stack->current = stack->current->prev;
+    freeSegment(freeMe);
   }
-  stack->stack[stack->usedDepth] = v;
-  stack->usedDepth = stack->usedDepth + 1;
+  stack->current->next = NULL;
+
+  // update alloc for current segment
+  stack->current->allocPtr = ptr;
 }
 
-Value opStackPop(OpStack *stack) {
+uint64_t stackSize(Stack *stack) {
 
-  if (stack->usedDepth == 0) {
-    explode("cannot pop from empty op stack")
+  uint64_t result = 0;
+
+  StackSegment *cursor = stack->root;
+  while (cursor != NULL) {
+    result += stack->segmentSize;
+    cursor = cursor->next;
   }
 
-  stack->usedDepth = stack->usedDepth - 1;
-  return stack->stack[stack->usedDepth];
+  return result;
 }
 
-/*
- * ExecFrame Implementation
- */
+void stackClear(Stack *stack) {
+
+  StackSegment *cursor = stack->root;
+  while (cursor != NULL) {
+    free(cursor->data);
+    cursor = cursor->next;
+  }
+
+  stack->root = NULL;
+  stack->current = NULL;
+}
+
+void stackFreeContents(Stack *stack) {
+  if (stack != NULL) {
+    stackClear(stack);
+  }
+}
 
 typedef struct ExecFrame ExecFrame;
 
@@ -3570,7 +3645,11 @@ typedef struct ExecFrame {
   Fn *fn;
 
   Value *locals;
-  OpStack *opStack;
+
+  uint64_t opStackMaxDepth;
+  uint64_t opStackUsedDepth;
+  Value *opStack;
+
   Value result;
   bool resultAvailable;
   uint16_t pc;
@@ -3601,6 +3680,10 @@ void frameInitContents(ExecFrame *frame) {
   frame->handlerSet = false;
   exceptionInitContents(&frame->exception);
   frame->exceptionSet = false;
+
+  frame->opStackUsedDepth = 0;
+  frame->opStackMaxDepth = 0;
+  frame->opStack = NULL;
 }
 
 uint8_t readInstruction(ExecFrame *frame) {
@@ -3668,22 +3751,30 @@ uint16_t numLocals(ExecFrame *frame) {
 }
 
 uint64_t numOperands(ExecFrame *frame) {
-  return frame->opStack->usedDepth;
+  return frame->opStackUsedDepth;
 }
 
 Value* getOperandRef(ExecFrame *frame, uint64_t opIndex) {
-  if (opIndex >= frame->opStack->usedDepth) {
+  if (opIndex >= frame->opStackUsedDepth) {
     explode("no such operand: %" PRIu64, opIndex);
   }
-  return &frame->opStack->stack[opIndex];
+  return &frame->opStack[opIndex];
 }
 
 void pushOperand(ExecFrame *frame, Value value) {
-  opStackPush(frame->opStack, value);
+  if (frame->opStackMaxDepth == frame->opStackUsedDepth + 1) {
+    explode("cannot allocate op stack greater than max %" PRIu64, frame->opStackMaxDepth);
+  }
+  frame->opStack[frame->opStackUsedDepth] = value;
+  frame->opStackUsedDepth++;
 }
 
 Value popOperand(ExecFrame *frame) {
-  return opStackPop(frame->opStack);
+  if (frame->opStackUsedDepth == 0) {
+    explode("cannot pop from empty op stack")
+  }
+  frame->opStackUsedDepth--;
+  return frame->opStack[frame->opStackUsedDepth];
 }
 
 Value getFnRef(ExecFrame *frame) {
@@ -3805,73 +3896,57 @@ VMException getException(ExecFrame_t frame) {
   return frame->exception;
 }
 
-void pushFrame(VM *vm, ExecFrame **framePtr, Value newFn) {
-  RetVal ret;
+ExecFrame_t pushFrame(VM *vm, Value newFn) {
 
   Fn *fn = deref(&vm->gc, newFn);
 
-  // clean up on fail
-  ExecFrame_t parent = NULL;
+  Stack *stack = &vm->stack;
+  ExecFrame *parent = vm->current;
 
-  ExecFrame *frame = *framePtr;
-  if (frame == NULL) {
-    frame = malloc(sizeof(ExecFrame));
-    if (frame == NULL) {
-      explode("failed to allocate ExecFrame");
-    }
-  }
-  else {
-    parent = malloc(sizeof(ExecFrame));
-    if (parent == NULL) {
-      explode("failed to allocate ExecFrame")
-    }
-    memcpy(parent, frame, sizeof(ExecFrame));
-  }
+  ExecFrame *frame = stackAllocate(stack, sizeof(ExecFrame), "ExecFrame");
+  frameInitContents(frame);
 
-  ExecFrame child;
-  frameInitContents(&child);
+  frame->parent = parent;
+  frame->fnRef = newFn;
+  frame->fn = fn;
 
-  child.parent = parent;
-  child.fnRef = newFn;
-  child.fn = fn;
+  frame->locals = stackAllocate(stack, sizeof(Value) * frame->fn->numLocals, "locals");
 
-  child.opStack = malloc(sizeof(OpStack));
-  if (child.opStack == NULL) {
-    explode("failed to allocate OpStack");
-  }
+  frame->opStackMaxDepth = frame->fn->maxOperandStackSize;
+  frame->opStackUsedDepth = 0;
+  frame->opStack = stackAllocate(stack, sizeof(Value) * frame->opStackMaxDepth, "opStack");
 
-  child.locals = malloc(sizeof(Value) * child.fn->numLocals);
-  if (child.locals == NULL) {
-    explode("failed to allocate locals");
-  }
+  vm->current = frame;
 
-  opStackCreate(child.opStack, child.fn->maxOperandStackSize);
-
-  *frame = child;
-  *framePtr = frame;
+  return frame;
 }
 
-void replaceFrame(VM *vm, ExecFrame *frame, Value newFn) {
-  Fn *fn = deref(&vm->gc, newFn);
+ExecFrame* popFrame(VM *vm) {
 
-  // resize locals if needed
-  uint16_t newNumLocals = fn->numLocals + fn->numCaptures;
-  if (newNumLocals > frame->fn->numLocals) {
-    Value *resizedLocals = realloc(frame->locals, newNumLocals * sizeof(Value));
-    if (resizedLocals == NULL) {
-      explode("realloc Value array");
-    }
-    frame->fn->numLocals = newNumLocals;
-    frame->locals = resizedLocals;
+  if (vm->current == NULL) {
+    explode("no frames on stack");
   }
 
-  if (fn->maxOperandStackSize > frame->opStack->maxDepth) {
-    Value *resizedStack = realloc(frame->opStack->stack, fn->maxOperandStackSize * sizeof(Value));
-    if (resizedStack == NULL) {
-      explode("realloc Value array");
-    }
-    frame->opStack->maxDepth = fn->maxOperandStackSize;
-    frame->opStack->stack = resizedStack;
+  ExecFrame *popped = vm->current;
+  vm->current = vm->current->parent;
+  stackFree(&vm->stack, popped);
+
+  return vm->current;
+}
+
+ExecFrame* replaceFrame(VM *vm, Value newFn) {
+  Fn *fn = deref(&vm->gc, newFn);
+
+  Stack *stack = &vm->stack;
+  ExecFrame *frame = vm->current;
+
+  if (fn->numLocals > frame->fn->numLocals) {
+    frame->locals = stackAllocate(stack, sizeof(Value) * fn->numLocals, "locals");
+  }
+
+  if (fn->maxOperandStackSize > frame->opStackMaxDepth) {
+    frame->opStackMaxDepth = fn->maxOperandStackSize;
+    frame->opStack = stackAllocate(stack, sizeof(Value) * frame->opStackMaxDepth, "opStack");
   }
 
   frame->fnRef = newFn;
@@ -3879,20 +3954,6 @@ void replaceFrame(VM *vm, ExecFrame *frame, Value newFn) {
   frame->result = nil();
   frame->resultAvailable = false;
   frame->pc = 0;
-}
-
-void popFrame(ExecFrame *frame) {
-
-  ExecFrame *child = frame;
-  ExecFrame *parent = frame->parent;
-
-  opStackFreeContents(child->opStack);
-  free(child->locals);
-
-  if (parent != NULL) {
-    *frame = *parent;
-    free(parent);
-  }
 }
 
 /*
@@ -3919,11 +3980,10 @@ RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, Value *result, 
   Value fnRef = nil();
   throws(tryFnHydrate(vm, &c, &fnRef, error));
 
-  ExecFrame_t frame = NULL;
-  pushFrame(vm, &frame, fnRef);
+  ExecFrame_t frame = pushFrame(vm, fnRef);
   pushed = true;
 
-  throws(tryFrameEval(vm, frame, outputPool, error));
+  throws(tryFrameEval(vm, outputPool, error));
 
   if (frame->exceptionSet) {
     *exceptionThrown = true;
@@ -3933,13 +3993,13 @@ RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, Value *result, 
     *result = frame->result;
   }
 
-  popFrame(frame);
+  popFrame(vm);
 
   return R_SUCCESS;
 
   failure:
     if (pushed) {
-      popFrame(frame);
+      popFrame(vm);
     }
     return ret;
 }
@@ -4687,6 +4747,8 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
   throws(tryNamespacesInitContents(&vm->namespaces, error));
   throws(tryInitCFns(vm, error));
   refRegistryInitContents(&vm->refs);
+  stackInitContents(&vm->stack, 1024 * 1000);
+  vm->current = NULL;
 
   ret = R_SUCCESS;
   return ret;
