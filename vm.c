@@ -556,12 +556,12 @@ void collect(VM *vm);
  */
 int _alloc(GC *gc, uint64_t length, void **ptr, uint64_t *offset) {
 
-  /*
-   * each object must be at least the size of a pointer, so we can replace it with a
-   * forwarding pointer during gc
-   */
   if (length < 8) {
-    length = 8;
+    explode("oops, allocation size must be >= 8 bytes%" PRIu64, length);
+  }
+
+  if ((length & (uint64_t)0x7) != 0) {
+    explode("oops, allocation was not 8-byte padded %" PRIu64, length);
   }
 
   if (gc->allocPtr + length < gc->currentHeapEnd) {
@@ -600,6 +600,25 @@ void* alloc(VM *vm, uint64_t length, Value *value) {
   return ptr;
 }
 
+uint64_t padAllocSize(uint64_t length) {
+  /*
+   * each object must be at least the size of a pointer, so we can replace it with a
+   * forwarding pointer during gc
+   */
+  if (length < 8) {
+    return 8;
+  }
+  else {
+    uint16_t rem = length % 8;
+    if (rem != 0) {
+      return length + (8 - rem);
+    }
+    else {
+      return length;
+    }
+  }
+}
+
 void* deref(GC *gc, Value value) {
   uint64_t offset = value.value;
   if (value.value > gc->heapSize) {
@@ -632,13 +651,13 @@ void relocate(VM *vm, void *oldHeap, Value *value) {
     value->value = *forwardPtr - gc->currentHeap;
   }
   else {
-    size_t size = ((ObjectHeader*)ptr)->size;
+    uint64_t size = ((ObjectHeader*)ptr)->size;
 
     void *newPtr = NULL;
     uint64_t offset = 0;
 
     if (_alloc(gc, size, &newPtr, &offset) == R_OOM) {
-      explode("out of memory, cannot allocate %lu bytes mid-gc", size);
+      explode("out of memory, cannot allocate %" PRIu64 " bytes mid-gc", size);
     }
 
     memcpy(newPtr, ptr, size);
@@ -892,13 +911,13 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   // cleanup on failure
   Fn *fn = NULL;
 
-  size_t nameSize = (fnConst->name.length + 1) * sizeof(wchar_t);
-  size_t constantsSize = fnConst->numConstants * sizeof(Value);
-  size_t codeSize = fnConst->code.codeLength * sizeof(uint8_t);
-  size_t sourceFileNameSize = (fnConst->code.sourceTable.fileName.length + 1) * sizeof(wchar_t);
-  size_t lineNumbersSize = fnConst->code.sourceTable.numLineNumbers * sizeof(LineNumber);
+  uint64_t nameSize = (fnConst->name.length + 1) * sizeof(wchar_t);
+  uint64_t constantsSize = fnConst->numConstants * sizeof(Value);
+  uint64_t codeSize = fnConst->code.codeLength * sizeof(uint8_t);
+  uint64_t sourceFileNameSize = (fnConst->code.sourceTable.fileName.length + 1) * sizeof(wchar_t);
+  uint64_t lineNumbersSize = fnConst->code.sourceTable.numLineNumbers * sizeof(LineNumber);
 
-  size_t fnSize = sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize + lineNumbersSize;
+  uint64_t fnSize = padAllocSize(sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize + lineNumbersSize);
 
   uint64_t offset = 0;
   if (_alloc(&vm->gc, fnSize, (void*)&fn, &offset) == R_OOM) {
@@ -976,8 +995,8 @@ RetVal _tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value, E
 
   String *str = NULL;
 
-  size_t textSize = (length + 1) * sizeof(wchar_t);
-  size_t strSize = sizeof(String) + textSize;
+  uint64_t textSize = (length + 1) * sizeof(wchar_t);
+  uint64_t strSize = padAllocSize(sizeof(String) + textSize);
 
   uint64_t offset = 0;
 
@@ -1035,8 +1054,8 @@ RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *er
 
   Symbol *sym = NULL;
 
-  size_t textSize = (symConst.length + 1) * sizeof(wchar_t);
-  size_t size = sizeof(Symbol) + textSize;
+  uint64_t textSize = (symConst.length + 1) * sizeof(wchar_t);
+  uint64_t size = padAllocSize(sizeof(Symbol) + textSize);
 
   uint64_t offset = 0;
   if (_alloc(&vm->gc, size, (void*)&sym, &offset) == R_OOM) {
@@ -1073,8 +1092,8 @@ RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *e
 
   Keyword *kw = NULL;
 
-  size_t textSize = (kwConst.length + 1) * sizeof(wchar_t);
-  size_t size = sizeof(Keyword) + textSize;
+  uint64_t textSize = (kwConst.length + 1) * sizeof(wchar_t);
+  uint64_t size = padAllocSize(sizeof(Keyword) + textSize);
 
   uint64_t offset = 0;
   if (_alloc(&vm->gc, size, (void*)&kw, &offset) == R_OOM) {
@@ -1114,7 +1133,7 @@ RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value meta, Value *ptr,
 
   Cons *cons = NULL;
 
-  size_t size = sizeof(Cons);
+  uint64_t size = padAllocSize(sizeof(Cons));
 
   uint64_t offset = 0;
   if (_alloc(&vm->gc, size, (void*)&cons, &offset) == R_OOM) {
@@ -1486,7 +1505,7 @@ Value allocateCons(VM *vm, Value value, Value next) {
 
   Cons *cons = NULL;
 
-  size_t size = sizeof(Cons);
+  uint64_t size = padAllocSize(sizeof(Cons));
 
   Value ptr;
   ptr.type = VT_LIST;
@@ -2198,8 +2217,8 @@ RetVal tryLoadClosureEval(VM *vm, Frame_t frame, Error *error) {
 
   Closure *closure = NULL;
 
-  size_t capturesSize = fn->numCaptures * sizeof(Value);
-  size_t clSize = sizeof(Closure) + capturesSize;
+  uint64_t capturesSize = fn->numCaptures * sizeof(Value);
+  uint64_t clSize = padAllocSize(sizeof(Closure) + capturesSize);
 
   Value closureValue;
   closureValue.type = VT_CLOSURE;
@@ -4029,12 +4048,11 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, VMEvalResult *re
 }
 
 RetVal tryStringMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *value, Error *error) {
-  RetVal ret;
 
   String *str = NULL;
 
-  size_t textSize = (length + 1) * sizeof(wchar_t);
-  size_t strSize = sizeof(String) + textSize;
+  uint64_t textSize = (length + 1) * sizeof(wchar_t);
+  uint64_t strSize = padAllocSize(sizeof(String) + textSize);
 
   value->type = VT_STR;
   str = alloc(vm, strSize, value);
@@ -4160,12 +4178,10 @@ RetVal tryPrintStrBuiltin(VM *vm, Frame_t frame, Error *error) {
 }
 
 RetVal trySymbolMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *result, Error *error) {
-  RetVal ret;
-
   Symbol *sym = NULL;
 
-  size_t textSize = (length + 1) * sizeof(wchar_t);
-  size_t size = sizeof(Symbol) + textSize;
+  uint64_t textSize = (length + 1) * sizeof(wchar_t);
+  uint64_t size = padAllocSize(sizeof(Symbol) + textSize);
 
   result->type = VT_SYMBOL;
   sym = alloc(vm, size, result);
@@ -4218,8 +4234,8 @@ RetVal trySymbolBuiltin(VM *vm, Frame_t frame, Error *error) {
 RetVal tryKeywordMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *result, Error *error) {
   Keyword *kw = NULL;
 
-  size_t textSize = (length + 1) * sizeof(wchar_t);
-  size_t size = sizeof(Keyword) + textSize;
+  uint64_t textSize = (length + 1) * sizeof(wchar_t);
+  uint64_t size = padAllocSize(sizeof(Keyword) + textSize);
 
   result->type = VT_KEYWORD;
   kw = alloc(vm, size, result);
@@ -4281,9 +4297,9 @@ void cFnInitContents(CFn *fn) {
 Value makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
   CFn *fn = NULL;
 
-  size_t nameLength = wcslen(name);
-  size_t nameSize = (nameLength + 1) * sizeof(wchar_t);
-  size_t fnSize = sizeof(CFn) + nameSize;
+  uint64_t nameLength = wcslen(name);
+  uint64_t nameSize = (nameLength + 1) * sizeof(wchar_t);
+  uint64_t fnSize = padAllocSize(sizeof(CFn) + nameSize);
 
   uint64_t offset = 0;
 
@@ -4331,8 +4347,8 @@ void arrayInitContents(Array *a) {
 RetVal tryMakeArray(VM *vm, Frame_t frame, uint64_t length, Value *value, Error *error) {
   Array *arr = NULL;
 
-  size_t elementsSize = length * sizeof(Value);
-  size_t size = sizeof(Array) + elementsSize;
+  uint64_t elementsSize = length * sizeof(Value);
+  uint64_t size = padAllocSize(sizeof(Array) + elementsSize);
 
   value->type = VT_ARRAY;
   arr = alloc(vm, size, value);
@@ -4370,7 +4386,7 @@ RetVal tryMakeMapConf(VM *vm, Frame_t frame, Value *value, Error *error) {
 
   Map *map = NULL;
 
-  size_t size = sizeof(Map);
+  uint64_t size = padAllocSize(sizeof(Map));
 
   value->type = VT_MAP;
   map = alloc(vm, size, value);
@@ -4405,7 +4421,7 @@ RetVal tryMakeMap(VM *vm, Frame_t frame, Value *value, Error *error) {
 
   Map *map = NULL;
 
-  size_t size = sizeof(Map);
+  uint64_t size = padAllocSize(sizeof(Map));
 
   value->type = VT_MAP;
   map = alloc(vm, size, value);
@@ -4446,7 +4462,7 @@ void mapEntryInitContents(MapEntry *e) {
 RetVal tryMakeMapEntry(VM *vm, Frame_t frame, Value *value, Error *error) {
   MapEntry *entry = NULL;
 
-  size_t size = sizeof(MapEntry);
+  uint64_t size = padAllocSize(sizeof(MapEntry));
 
   value->type = VT_MAP_ENTRY;
   entry = alloc(vm, size, value);
