@@ -817,9 +817,9 @@ START_TEST(repl)
     // TODO: this test is brittle, write better test
     // assertEval(L"(list (gensym) (gensym))", L"(gensym-1 gensym-0)")
 
-    assertEval(L"(= \"asdf\" (str \"as\" \"df\"))", L"true");
-    assertEval(L"(= 'asdf (symbol (str \"as\" \"df\")))", L"true");
-    assertEval(L"(= :asdf (keyword (str \"as\" \"df\")))", L"true");
+//    assertEval(L"(= \"asdf\" (str \"as\" \"df\"))", L"true");
+//    assertEval(L"(= 'asdf (symbol (str \"as\" \"df\")))", L"true");
+//    assertEval(L"(= :asdf (keyword (str \"as\" \"df\")))", L"true");
 
     assertEval(L"(= nil nil)", L"true");
     assertEval(L"(= '(1) '(1))", L"true");
@@ -828,12 +828,12 @@ START_TEST(repl)
     assertEval(L"(= '(1 (2 3) 4) '(1 (4 5) 7))", L"false");
     assertEval(L"(= '(1 (2 3) 4) (list 1 (list 2 3) 4))", L"true");
 
-    assertEval(L"(hash-map)", L"{}");
-    assertEval(L"(assoc (hash-map) :x 'y)", L"{:x y}");
-    assertEval(L"(do "
-               "   (def n (hash-map))"
-               "   (assoc n :x 'y)"
-               "   (get n :x))", L"y");
+//    assertEval(L"(hash-map)", L"{}");
+//    assertEval(L"(assoc (hash-map) :x 'y)", L"{:x y}");
+//    assertEval(L"(do "
+//               "   (def n (hash-map))"
+//               "   (assoc n :x 'y)"
+//               "   (get n :x))", L"y");
 
   }
 END_TEST
