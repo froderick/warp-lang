@@ -6,6 +6,22 @@
 #include "vm.h"
 #include "utils.h"
 
+/*
+ * VM Data Structures
+ */
+
+typedef uint64_t Value;
+
+#define W_UINT_MASK      0x01u
+#define W_UINT_BITS      0x01u
+#define W_PTR_MASK       0x03u
+#define W_IMMEDIATE_MASK 0x0fu
+#define W_BOOLEAN_BITS   0x06u
+#define W_SPECIAL_MASK   0xf0u
+#define W_NIL_BITS       0x00u
+#define W_SPECIAL_BITS   0x0eu // 1110
+#define W_NIL_VALUE      0x0eu
+
 typedef enum ValueType {
   VT_NIL,
   VT_UINT,
@@ -19,62 +35,6 @@ typedef enum ValueType {
   VT_CFN,
 } ValueType;
 
-//#define W_HEADER_BITS_MASK       0xff00000000000000L
-//
-//#define W_IMMEDIATE_BITS (uint8_t)0x3
-//#define W_IMMEDIATE_BITS_PTR (uint8_t)0x0
-//#define W_IMMEDIATE_BITS_UINT (uint8_t)0x1
-//
-//#define W_IM2_BITS (uint8_t)0xf
-//#define W_IM2_BITS_BOOL (uint8_t)0x6
-//#define W_IM2_BITS_CHAR (uint8_t)0xa
-//
-//#define W_NIL 0xe
-
-
-/*
- * VM Data Structures
- */
-
-typedef struct Value {
-  ValueType type : 4;
-  uint64_t value : 60;
-} Value;
-
-
-ValueType valueType(Value v) {
-  return v.type;
-}
-
-Value nil() {
-  Value v;
-  v.type = VT_NIL;
-  v.value = 0;
-  return v;
-}
-
-Value wrapBool(bool b) {
-  Value v;
-  v.type = VT_BOOL;
-  v.value = b;
-  return v;
-}
-
-bool unwrapBool(Value v) {
-  return v.value;
-}
-
-Value wrapUint(uint64_t i) {
-  Value v;
-  v.type = VT_UINT;
-  v.value = i;
-  return v;
-}
-
-uint64_t unwrapUint(Value v) {
-  return v.value;
-}
-
 /*
  * This is the first field inside all heap objects. It must come first so that the GC can
  * scan through the heap, for which it needs to determine object sizes and object types.
@@ -84,6 +44,52 @@ typedef struct ObjectHeader {
   size_t size : 60;
   Value metadata;
 } ObjectHeader;
+
+
+ValueType valueType(Value v) {
+
+  if ((v & W_UINT_MASK) == 1) {
+    return VT_UINT;
+  }
+
+  if ((v & W_PTR_MASK) == 0) {
+    ObjectHeader *h = (void*)v;
+    return h->type;
+  }
+
+  uint8_t imm = v & W_IMMEDIATE_MASK;
+  if (imm == W_BOOLEAN_BITS) {
+    return VT_BOOL;
+  }
+  else {
+    uint8_t special = v & W_SPECIAL_MASK;
+    if (special == W_NIL_BITS) {
+      return VT_NIL;
+    }
+  }
+
+  explode("unknown type: %" PRIu64, v);
+}
+
+Value nil() {
+  return W_NIL_VALUE;
+}
+
+Value wrapBool(bool b) {
+  return (((uint8_t)b & 1u) << 4u) | W_BOOLEAN_BITS;
+}
+
+bool unwrapBool(Value v) {
+  return v >> 4u;
+}
+
+Value wrapUint(uint64_t i) {
+  return (i << 1u) | W_UINT_BITS;
+}
+
+uint64_t unwrapUint(Value v) {
+  return v >> 1u;
+}
 
 typedef struct Frame *Frame_t;
 typedef RetVal (*CFnInvoke) (VM_t vm, Frame_t frame, Error *error);
@@ -252,7 +258,7 @@ typedef struct Invocable {
   Closure *closure;
 } Invocable;
 
-typedef void (*RelocateChildren)(VM_t vm, void *oldHeap, void *obj);
+typedef void (*RelocateChildren)(VM_t vm, void *obj);
 typedef RetVal (*TryPrn)(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error);
 typedef RetVal (*TryHashCode)(VM_t vm, Value value, uint32_t *hash, Error *error);
 typedef bool (*Equals)(VM_t vm, Value this, Value that);
@@ -417,10 +423,10 @@ bool isTruthy(VM *vm, Value value) {
   return vm->valueTypeTable.valueTypes[t].isTruthy(value);
 }
 
-void relocateChildren(VM *vm, ValueType type, void *oldHeap, void *obj) {
+void relocateChildren(VM *vm, ValueType type, void *obj) {
   RelocateChildren relocate = vm->valueTypeTable.valueTypes[type].relocateChildren;
   if (relocate != NULL) {
-    relocate(vm, oldHeap, obj);
+    relocate(vm, obj);
   }
 }
 
@@ -476,7 +482,7 @@ void collect(VM *vm);
 /*
  * Allocates, returns R_OOM if allocation fails. Doesn't attempt collection.
  */
-int _alloc(GC *gc, uint64_t length, void **ptr, uint64_t *offset) {
+int _alloc(GC *gc, uint64_t length, void **ptr) {
 
   if (length < 8) {
     explode("oops, allocation size must be >= 8 bytes%" PRIu64, length);
@@ -488,7 +494,6 @@ int _alloc(GC *gc, uint64_t length, void **ptr, uint64_t *offset) {
 
   if (gc->allocPtr + length < gc->currentHeapEnd) {
     *ptr = gc->allocPtr;
-    *offset = gc->allocPtr - gc->currentHeap;
     gc->allocPtr += length;
     return R_SUCCESS;
   }
@@ -500,24 +505,21 @@ int _alloc(GC *gc, uint64_t length, void **ptr, uint64_t *offset) {
 /*
  * Allocates, attempts collection if allocation fails.
  */
-void* alloc(VM *vm, uint64_t length, Value *value) {
+void* alloc(VM *vm, uint64_t length) {
 
   void *ptr = NULL;
-  uint64_t offset = 0;
 
-  int success = _alloc(&vm->gc, length, &ptr, &offset);
+  int success = _alloc(&vm->gc, length, &ptr);
 
   if (success == R_OOM) {
     collect(vm);
 
-    success = _alloc(&vm->gc, length, &ptr, &offset);
+    success = _alloc(&vm->gc, length, &ptr);
 
     if (success == R_OOM) {
       explode("out of memory, failed to allocate %" PRIu64 " bytes", length);
     }
   }
-
-  value->value = offset;
 
   return ptr;
 }
@@ -541,19 +543,20 @@ uint64_t padAllocSize(uint64_t length) {
   }
 }
 
+// keeping this *for now*, it makes things slower but safer
 void* deref(GC *gc, Value value) {
-  uint64_t offset = value.value;
-  if (value.value > gc->heapSize) {
-    explode("invalid memory address");
+  void *ptr = (void*)value;
+  if (ptr < gc->currentHeap || ptr >= gc->allocPtr) {
+    explode("invalid memory address: %p", ptr);
   }
-  return gc->currentHeap + offset;
+  return ptr;
 }
 
 bool inCurrentHeap(GC *gc, void *ptr) {
   return gc->currentHeap <= ptr && ptr < gc->currentHeapEnd;
 }
 
-void relocate(VM *vm, void *oldHeap, Value *value) {
+void relocate(VM *vm, Value *value) {
 
   if (!isHeapObject(vm, *value)) {
     // only relocate heap objects
@@ -562,28 +565,22 @@ void relocate(VM *vm, void *oldHeap, Value *value) {
 
   GC *gc = &vm->gc;
 
-  void *ptr = NULL;
-  if (value->value > gc->heapSize) {
-    explode("invalid memory address");
-  }
-  ptr = oldHeap + value->value;
+  void *ptr = (void*)*value;
 
   void **forwardPtr = ptr;
   if (inCurrentHeap(gc, *forwardPtr)) {
-    value->value = *forwardPtr - gc->currentHeap;
+    *value = (Value)*forwardPtr;
   }
   else {
     uint64_t size = ((ObjectHeader*)ptr)->size;
 
     void *newPtr = NULL;
-    uint64_t offset = 0;
-
-    if (_alloc(gc, size, &newPtr, &offset) == R_OOM) {
+    if (_alloc(gc, size, &newPtr) == R_OOM) {
       explode("out of memory, cannot allocate %" PRIu64 " bytes mid-gc", size);
     }
 
     memcpy(newPtr, ptr, size);
-    value->value = newPtr - gc->currentHeap;
+    *value = (Value)newPtr;
 
     *forwardPtr = newPtr;
   }
@@ -619,7 +616,7 @@ void collect(VM *vm) {
   // relocate refs
   RefElem *refElem = vm->refs.used;
   while (refElem != NULL) {
-    relocate(vm, oldHeap, &refElem->heapObject);
+    relocate(vm, &refElem->heapObject);
     refElem = refElem->next;
   }
 
@@ -628,7 +625,7 @@ void collect(VM *vm) {
     Namespace *ns = &vm->namespaces.namespaces[i];
     for (uint64_t j=0; j<ns->localVars.length; j++) {
       Var *var = &ns->localVars.vars[j];
-      relocate(vm, oldHeap, &var->value);
+      relocate(vm, &var->value);
     }
   }
 
@@ -640,20 +637,20 @@ void collect(VM *vm) {
     {
       Value oldFnRef = getFnRef(current);
       Value newFnRef = oldFnRef;
-      relocate(vm, oldHeap, &newFnRef);
+      relocate(vm, &newFnRef);
       setFnRef(vm, current, newFnRef);
     }
 
     uint16_t locals = numLocals(current);
     for (uint16_t i=0; i<locals; i++) {
       Value *val = getLocalRef(current, i);
-      relocate(vm, oldHeap, val);
+      relocate(vm, val);
     }
 
     uint64_t operands = numOperands(current);
     for (uint64_t i=0; i<operands; i++) {
       Value *val = getOperandRef(current, i);
-      relocate(vm, oldHeap, val);
+      relocate(vm, val);
     }
 
     if (!hasParent(current)) {
@@ -669,7 +666,7 @@ void collect(VM *vm) {
   // relocate all the objects this object references
   while (scanptr < vm->gc.allocPtr) {
     ObjectHeader *header = scanptr;
-    relocateChildren(vm, header->type, oldHeap, scanptr);
+    relocateChildren(vm, header->type, scanptr);
     scanptr += header->size;
   }
 
@@ -838,8 +835,8 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 
   uint64_t fnSize = padAllocSize(sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize + lineNumbersSize);
 
-  fn = alloc(vm, fnSize, value);
-  value->type = VT_FN;
+  fn = alloc(vm, fnSize);
+  *value = (Value)fn;
 
   fnInitContents(fn);
 
@@ -910,8 +907,8 @@ void tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value) {
   uint64_t textSize = (length + 1) * sizeof(wchar_t);
   uint64_t strSize = padAllocSize(sizeof(String) + textSize);
 
-  str = alloc(vm, strSize, value);
-  value->type = VT_STR;
+  str = alloc(vm, strSize);
+  *value = (Value)str;
 
   stringInitContents(str);
   str->header.type = VT_STR;
@@ -936,8 +933,8 @@ void trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value) {
   uint64_t textSize = (symConst.length + 1) * sizeof(wchar_t);
   uint64_t size = padAllocSize(sizeof(Symbol) + textSize);
 
-  sym = alloc(vm, size, value);
-  value->type = VT_SYMBOL;
+  sym = alloc(vm, size);
+  *value = (Value)sym;
 
   symbolInitContents(sym);
   sym->header.type = VT_SYMBOL;
@@ -962,8 +959,8 @@ void tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value) {
   uint64_t textSize = (kwConst.length + 1) * sizeof(wchar_t);
   uint64_t size = padAllocSize(sizeof(Keyword) + textSize);
 
-  kw = alloc(vm, size, value);
-  value->type = VT_KEYWORD;
+  kw = alloc(vm, size);
+  *value = (Value)kw;
 
   keywordInitContents(kw);
   kw->header.type = VT_KEYWORD;
@@ -992,8 +989,8 @@ RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value meta, Value *ptr,
   Cons *cons = NULL;
 
   uint64_t size = padAllocSize(sizeof(Cons));
-  cons = alloc(vm, size, ptr);
-  ptr->type = VT_LIST;
+  cons = alloc(vm, size);
+  *ptr = (Value)cons;
 
   consInitContents(cons);
   cons->header.type = VT_LIST;
@@ -1323,9 +1320,7 @@ Value allocateCons(VM *vm, Value value, Value next) {
 
   uint64_t size = padAllocSize(sizeof(Cons));
 
-  Value ptr;
-  ptr.type = VT_LIST;
-  cons = alloc(vm, size, &ptr);
+  cons = alloc(vm, size);
 
   consInitContents(cons);
   cons->header.type = VT_LIST;
@@ -1333,7 +1328,7 @@ Value allocateCons(VM *vm, Value value, Value next) {
   cons->value = value;
   cons->next = next;
 
-  return ptr;
+  return (Value)cons;
 }
 
 /*
@@ -1622,7 +1617,7 @@ RetVal tryCmpEval(VM *vm, Frame_t frame, Error *error) {
   Value a = popOperand(frame);
   Value b = popOperand(frame);
 
-  Value c = wrapBool(valueType(a) == valueType(b) && a.value == b.value);
+  Value c = wrapBool(a == b);
   pushOperand(frame, c);
 
   return R_SUCCESS;
@@ -1791,10 +1786,8 @@ RetVal tryLoadClosureEval(VM *vm, Frame_t frame, Error *error) {
   uint64_t capturesSize = fn->numCaptures * sizeof(Value);
   uint64_t clSize = padAllocSize(sizeof(Closure) + capturesSize);
 
-  Value closureValue;
-  closureValue.type = VT_CLOSURE;
-
-  closure = alloc(vm, clSize, &closureValue);
+  closure = alloc(vm, clSize);
+  Value closureValue = (Value)closure;
 
   closureInitContents(closure);
   closure->header.type = VT_CLOSURE;
@@ -2227,24 +2220,24 @@ bool isTruthyYes(Value v) { return true; }
 bool isTruthyNo(Value v) { return false; }
 bool isTruthyBool(Value v) { return unwrapBool(v); }
 
-void relocateChildrenFn(VM_t vm, void *oldHeap, void *obj) {
+void relocateChildrenFn(VM_t vm, void *obj) {
   Fn *fn = obj;
   for (uint16_t i=0; i<fn->numConstants; i++) {
-    relocate(vm, oldHeap, &fnConstants(fn)[i]);
+    relocate(vm, &fnConstants(fn)[i]);
   }
 }
 
-void relocateChildrenList(VM_t vm, void *oldHeap, void *obj) {
+void relocateChildrenList(VM_t vm, void *obj) {
   Cons *cons = obj;
-  relocate(vm, oldHeap, &cons->value);
-  relocate(vm, oldHeap, &cons->next);
+  relocate(vm, &cons->value);
+  relocate(vm, &cons->next);
 }
 
-void relocateChildrenClosure(VM_t vm, void *oldHeap, void *obj) {
+void relocateChildrenClosure(VM_t vm, void *obj) {
   Closure *closure = obj;
-  relocate(vm, oldHeap, &closure->fn);
+  relocate(vm, &closure->fn);
   for (uint16_t i=0; i<closure->numCaptures; i++) {
-    relocate(vm, oldHeap, &closureCaptures(closure)[i]);
+    relocate(vm, &closureCaptures(closure)[i]);
   }
 }
 
@@ -2547,7 +2540,7 @@ bool equals(VM_t vm, Value this, Value that) {
   Equals equals = vm->valueTypeTable.valueTypes[thisType].equals;
   if (equals == NULL) {
     // assume immediate value
-    return valueType(this) == valueType(that) && this.value == that.value;
+    return this == that;
   }
   else {
     return equals(vm, this, that);
@@ -3407,8 +3400,8 @@ RetVal tryStringMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *value, 
   uint64_t textSize = (length + 1) * sizeof(wchar_t);
   uint64_t strSize = padAllocSize(sizeof(String) + textSize);
 
-  value->type = VT_STR;
-  str = alloc(vm, strSize, value);
+  str = alloc(vm, strSize);
+  *value = (Value)str;
 
   stringInitContents(str);
   str->header.type = VT_STR;
@@ -3536,8 +3529,8 @@ RetVal trySymbolMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *result,
   uint64_t textSize = (length + 1) * sizeof(wchar_t);
   uint64_t size = padAllocSize(sizeof(Symbol) + textSize);
 
-  result->type = VT_SYMBOL;
-  sym = alloc(vm, size, result);
+  sym = alloc(vm, size);
+  *result = (Value)sym;
 
   symbolInitContents(sym);
   sym->header.type = VT_SYMBOL;
@@ -3590,8 +3583,8 @@ RetVal tryKeywordMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *result
   uint64_t textSize = (length + 1) * sizeof(wchar_t);
   uint64_t size = padAllocSize(sizeof(Keyword) + textSize);
 
-  result->type = VT_KEYWORD;
-  kw = alloc(vm, size, result);
+  kw = alloc(vm, size);
+  *result = (Value)kw;
 
   keywordInitContents(kw);
   kw->header.type = VT_KEYWORD;
@@ -3654,9 +3647,8 @@ Value makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnIn
   uint64_t nameSize = (nameLength + 1) * sizeof(wchar_t);
   uint64_t fnSize = padAllocSize(sizeof(CFn) + nameSize);
 
-  Value value;
-  value.type = VT_CFN;
-  fn = alloc(vm, fnSize, &value);
+  fn = alloc(vm, fnSize);
+  Value value = (Value)fn;
 
   cFnInitContents(fn);
   fn->header.type = VT_CFN;
