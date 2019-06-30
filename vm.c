@@ -6,39 +6,66 @@
 #include "vm.h"
 #include "utils.h"
 
+typedef enum ValueType {
+  VT_NIL,
+  VT_UINT,
+  VT_BOOL,
+  VT_FN,
+  VT_STR,
+  VT_SYMBOL,
+  VT_KEYWORD,
+  VT_LIST,
+  VT_CLOSURE,
+  VT_CFN,
+} ValueType;
+
+//#define W_HEADER_BITS_MASK       0xff00000000000000L
+//
+//#define W_IMMEDIATE_BITS (uint8_t)0x3
+//#define W_IMMEDIATE_BITS_PTR (uint8_t)0x0
+//#define W_IMMEDIATE_BITS_UINT (uint8_t)0x1
+//
+//#define W_IM2_BITS (uint8_t)0xf
+//#define W_IM2_BITS_BOOL (uint8_t)0x6
+//#define W_IM2_BITS_CHAR (uint8_t)0xa
+//
+//#define W_NIL 0xe
+
 
 /*
  * VM Data Structures
  */
 
-/*
- * In this machine, all values are represented by a 64-bit word.
- * The leftmost 4 bits are used to encode the following types. The remaining 60
- * bits are interpreted on a per-type basis.
- * :unsigned-int - an overflowable unsigned integer
- * :bool         - 0 for false, 1 for true
- * :nil          - constant, always 0
- * :char         - the lowest 32 bits represent a UTF-16 character
- * :object       - interpreted as an unsigned integer, the value is a pointer
- *                 offset to dynamically-allocated memory on the heap.
- */
- typedef enum ValueType {
-   VT_NIL,
-   VT_UINT,
-   VT_BOOL,
-   VT_FN,
-   VT_STR,
-   VT_SYMBOL,
-   VT_KEYWORD,
-   VT_LIST,
-   VT_CLOSURE,
-   VT_CFN,
-} ValueType;
-
 typedef struct Value {
   ValueType type : 4;
   uint64_t value : 60;
 } Value;
+
+
+ValueType valueType(Value v) {
+  return v.type;
+}
+
+Value nil() {
+  Value v;
+  v.type = VT_NIL;
+  v.value = 0;
+  return v;
+}
+
+Value boolValue(bool b) {
+  Value v;
+  v.type = VT_BOOL;
+  v.value = b;
+  return v;
+}
+
+Value uintValue(uint64_t i) {
+  Value v;
+  v.type = VT_UINT;
+  v.value = i;
+  return v;
+}
 
 /*
  * This is the first field inside all heap objects. It must come first so that the GC can
@@ -308,13 +335,6 @@ typedef struct VM {
  * Common value factories
  */
 
-Value nil() {
-  Value v;
-  v.type = VT_NIL;
-  v.value = 0;
-  return v;
-}
-
 void objectHeaderInitContents(ObjectHeader *h) {
   h->type = VT_NIL;
   h->size = 0;
@@ -380,11 +400,13 @@ const char* getValueTypeName(VM *vm, uint8_t type) {
 }
 
 bool isHeapObject(VM *vm, Value value) {
-  return vm->valueTypeTable.valueTypes[value.type].isHeapObject;
+  ValueType t = valueType(value);
+  return vm->valueTypeTable.valueTypes[t].isHeapObject;
 }
 
 bool isTruthy(VM *vm, Value value) {
-  return vm->valueTypeTable.valueTypes[value.type].isTruthy(value);
+  ValueType t = valueType(value);
+  return vm->valueTypeTable.valueTypes[t].isTruthy(value);
 }
 
 void relocateChildren(VM *vm, ValueType type, void *oldHeap, void *obj) {
@@ -734,9 +756,9 @@ Value refDeref(Ref ref) {
   return elem->heapObject;
 }
 
-Ref getRefType(Ref ref) {
+ValueType getRefType(Ref ref) {
   RefElem *elem = (RefElem*)ref;
-  return elem->heapObject.type;
+  return valueType(elem->heapObject);
 }
 
 void destroyRef(VM *vm, Ref ref) {
@@ -1019,8 +1041,9 @@ void consInitContents(Cons *c) {
 RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value meta, Value *ptr, Error *error) {
   RetVal ret;
 
-  if (next.type != VT_NIL && next.type != VT_LIST) {
-    throwRuntimeError(error, "a Cons next must be nil or a list: %u", next.type);
+  ValueType nextType = valueType(next);
+  if (nextType != VT_NIL && nextType != VT_LIST) {
+    throwRuntimeError(error, "a Cons next must be nil or a list: %u", nextType);
   }
 
   Cons *cons = NULL;
@@ -1124,16 +1147,13 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
 
   switch (c.type) {
     case CT_BOOL:
-      v.type = VT_BOOL;
-      v.value = c.boolean;
+      v = boolValue(c.boolean);
       break;
     case CT_INT:
-      v.type = VT_UINT;
-      v.value = c.integer;
+      v = uintValue(c.integer);
       break;
     case CT_NIL:
-      v.type = VT_NIL;
-      v.value = 0;
+      v = nil();
       break;
     case CT_FN:
       throws(tryFnHydrate(vm, &c.function, &v, error));
@@ -1193,7 +1213,9 @@ RetVal tryVMPrn(VM *vm, Value result, Pool_t pool, Expr *expr, Error *error) {
 
   exprInitContents(expr);
 
-  TryPrn prn = vm->valueTypeTable.valueTypes[result.type].tryPrn;
+  ValueType resultType = valueType(result);
+
+  TryPrn prn = vm->valueTypeTable.valueTypes[resultType].tryPrn;
   throws(prn(vm, result, pool, expr, error));
 
   return R_SUCCESS;
@@ -1211,8 +1233,7 @@ void varFree(Var *var);
 void varInitContents(Var *var) {
   var->namespace = NULL;
   var->name = NULL;
-  var->value.type = VT_NIL;
-  var->value.value = 0;
+  var->value = nil();
   var->isMacro = false;
 }
 
@@ -1391,8 +1412,9 @@ RetVal tryNamespacesInitContents(Namespaces *namespaces, Error *error) {
 
 Value allocateCons(VM *vm, Value value, Value next) {
 
-  if (next.type != VT_NIL && next.type != VT_LIST) {
-    explode("a Cons next must be nil or a list: %s", getValueTypeName(vm, next.type));
+  ValueType nextType = valueType(next);
+  if (nextType != VT_NIL && nextType != VT_LIST) {
+    explode("a Cons next must be nil or a list: %s", getValueTypeName(vm, nextType));
   }
 
   Cons *cons = NULL;
@@ -1474,7 +1496,8 @@ RetVal tryPopInvocable(VM *vm, Value pop, Invocable *invocable, Error *error) {
   invocable->ref = pop;
   invocable->fnRef = pop;
 
-  switch (invocable->fnRef.type) {
+  ValueType fnRefType = valueType(invocable->fnRef);
+  switch (fnRefType) {
     case VT_FN: {
 
       invocable->fn = deref(&vm->gc, invocable->fnRef);
@@ -1495,7 +1518,7 @@ RetVal tryPopInvocable(VM *vm, Value pop, Invocable *invocable, Error *error) {
     default:
       // fail: not all values are invocable
       throwRuntimeError(error, "cannot invoke this value type as a function: %s",
-          getValueTypeName(vm, invocable->fnRef.type));
+          getValueTypeName(vm, fnRefType));
   }
 
   return R_SUCCESS;
@@ -1509,9 +1532,10 @@ RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool use
   RetVal ret;
 
   Value numArgsSupplied = popOperand(parent);
+  ValueType numArgsSuppliedType = valueType(numArgsSupplied);
 
-  if (numArgsSupplied.type != VT_UINT) {
-    explode("first op stack value must be number of arguments supplied: %s", getValueTypeName(vm, numArgsSupplied.type));
+  if (numArgsSuppliedType != VT_UINT) {
+    explode("first op stack value must be number of arguments supplied: %s", getValueTypeName(vm, numArgsSuppliedType));
   }
 
   if (!usesVarArgs) {
@@ -1625,7 +1649,7 @@ RetVal tryInvokeDynEval(VM *vm, Frame_t frame, Error *error) {
 
   Value pop = popOperand(frame);
 
-  if (pop.type == VT_CFN) {
+  if (valueType(pop) == VT_CFN) {
     throws(tryInvokeCFn(vm, frame, pop, error));
   }
   else {
@@ -1665,7 +1689,7 @@ RetVal tryInvokeDynTailEval(VM *vm, Frame_t frame, Error *error) {
 
   Value pop = popOperand(frame);
 
-  if (pop.type == VT_CFN) {
+  if (valueType(pop) == VT_CFN) {
     throws(tryInvokeCFn(vm, frame, pop, error));
   }
   else {
@@ -1696,12 +1720,10 @@ RetVal tryCmpEval(VM *vm, Frame_t frame, Error *error) {
   Value a = popOperand(frame);
   Value b = popOperand(frame);
 
-  Value c;
-  c.type = VT_BOOL;
-  c.value = false;
+  Value c = boolValue(false);
 
-  if (a.type == b.type) {
-    switch (a.type) {
+  if (valueType(a) == valueType(b)) {
+    switch (valueType(a)) {
       case VT_NIL:
       case VT_UINT:
       case VT_BOOL:
@@ -1712,7 +1734,7 @@ RetVal tryCmpEval(VM *vm, Frame_t frame, Error *error) {
       case VT_STR:
       case VT_SYMBOL:
       case VT_KEYWORD: {
-        c.value = a.value == b.value;
+        c = boolValue(a.value == b.value);
         break;
       }
       default:
@@ -1767,11 +1789,11 @@ RetVal tryAddEval(VM *vm, Frame_t frame, Error *error) {
   Value b = popOperand(frame);
   Value a = popOperand(frame);
 
-  if (a.type != VT_UINT) {
-    throwRuntimeError(error, "can only add integers: %s", getValueTypeName(vm, a.type));
+  if (valueType(a) != VT_UINT) {
+    throwRuntimeError(error, "can only add integers: %s", getValueTypeName(vm, valueType(a)));
   }
-  if (b.type != VT_UINT) {
-    throwRuntimeError(error, "can only add integers: %s", getValueTypeName(vm, b.type));
+  if (valueType(b) != VT_UINT) {
+    throwRuntimeError(error, "can only add integers: %s", getValueTypeName(vm, valueType(b)));
   }
 
   Value c;
@@ -1793,17 +1815,14 @@ RetVal trySubEval(VM *vm, Frame_t frame, Error *error) {
   Value b = popOperand(frame);
   Value a = popOperand(frame);
 
-  if (a.type != VT_UINT) {
-    throwRuntimeError(error, "can only subtract integers: %s", getValueTypeName(vm, a.type));
+  if (valueType(a) != VT_UINT) {
+    throwRuntimeError(error, "can only subtract integers: %s", getValueTypeName(vm, valueType(a)));
   }
-  if (b.type != VT_UINT) {
-    throwRuntimeError(error, "can only subtract integers: %s", getValueTypeName(vm, b.type));
+  if (valueType(b) != VT_UINT) {
+    throwRuntimeError(error, "can only subtract integers: %s", getValueTypeName(vm, valueType(b)));
   }
 
-  Value c;
-  c.type = VT_UINT;
-  c.value = a.value - b.value;
-
+  Value c = uintValue(a.value - b.value);
   pushOperand(frame, c);
 
   return R_SUCCESS;
@@ -1840,9 +1859,10 @@ RetVal tryLoadVarEval(VM *vm, Frame_t frame, Error *error) {
 
   uint16_t constantIndex = readIndex(frame);
   Value varName = getConst(frame, constantIndex);
+  ValueType varNameType = valueType(varName);
 
-  if (varName.type != VT_STR) {
-    throwRuntimeError(error, "expected a string: %s", getValueTypeName(vm, varName.type));
+  if (varNameType != VT_STR) {
+    throwRuntimeError(error, "expected a string: %s", getValueTypeName(vm, varNameType));
   }
 
   String *str = deref(&vm->gc, varName);
@@ -1880,9 +1900,10 @@ RetVal tryLoadClosureEval(VM *vm, Frame_t frame, Error *error) {
   uint16_t constantIndex = readIndex(frame);
   Value fnValue = getConst(frame, constantIndex);
 
-  if (fnValue.type != VT_FN) {
+  ValueType fnValueType = valueType(fnValue);
+  if (fnValueType != VT_FN) {
     throwRuntimeError(error, "cannot create a closure from this value type: %s",
-        getValueTypeName(vm, fnValue.type));
+        getValueTypeName(vm, fnValueType));
   }
 
   Fn *fn = deref(&vm->gc, fnValue);
@@ -1991,8 +2012,9 @@ RetVal tryConsEval(VM *vm, Frame_t frame, Error *error) {
   Value seq = popOperand(frame);
   Value x = popOperand(frame);
 
-  if (seq.type != VT_NIL && seq.type != VT_LIST) {
-    throwRuntimeError(error, "cannot cons onto a value of type %s", getValueTypeName(vm, seq.type));
+  ValueType seqType = valueType(seq);
+  if (seqType != VT_NIL && seqType != VT_LIST) {
+    throwRuntimeError(error, "cannot cons onto a value of type %s", getValueTypeName(vm, seqType));
   }
 
   Cons *cons = deref(&vm->gc, result);
@@ -2012,18 +2034,19 @@ RetVal tryFirstEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
   Value seq = popOperand(frame);
+  ValueType seqType = valueType(seq);
 
   Value result;
 
-  if (seq.type == VT_NIL) {
+  if (seqType == VT_NIL) {
     result = nil();
   }
-  else if (seq.type == VT_LIST) {
+  else if (seqType == VT_LIST) {
     Cons *cons = deref(&vm->gc, seq);
     result = cons->value;
   }
   else {
-    throwRuntimeError(error, "cannot get first from a value of type %s", getValueTypeName(vm, seq.type));
+    throwRuntimeError(error, "cannot get first from a value of type %s", getValueTypeName(vm, seqType));
   }
 
   pushOperand(frame, result);
@@ -2039,18 +2062,19 @@ RetVal tryRestEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
   Value seq = popOperand(frame);
+  ValueType seqType = valueType(seq);
 
   Value result;
 
-  if (seq.type == VT_NIL) {
+  if (seqType == VT_NIL) {
     result = nil();
   }
-  else if (seq.type == VT_LIST) {
+  else if (seqType == VT_LIST) {
     Cons *cons = deref(&vm->gc, seq);
     result = cons->next;
   }
   else {
-    throwRuntimeError(error, "cannot get rest from a value of type %s", getValueTypeName(vm, seq.type));
+    throwRuntimeError(error, "cannot get rest from a value of type %s", getValueTypeName(vm, seqType));
   }
 
   pushOperand(frame, result);
@@ -2066,22 +2090,23 @@ RetVal trySetMacroEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
   Value strValue = popOperand(frame);
+  ValueType strValueType = valueType(strValue);
 
   wchar_t *sym = NULL;
   uint64_t symLength = 0;
 
-  if (strValue.type == VT_STR) {
+  if (strValueType == VT_STR) {
     String *str = deref(&vm->gc, strValue);
     sym = stringValue(str);
     symLength = str->length;
   }
-  else if (strValue.type == VT_SYMBOL) {
+  else if (strValueType == VT_SYMBOL) {
     Symbol *s = deref(&vm->gc, strValue);
     sym = symbolValue(s);
     symLength = s->length;
   }
   else {
-    throwRuntimeError(error, "only strings or symbols can identify vars: %s", getValueTypeName(vm, strValue.type));
+    throwRuntimeError(error, "only strings or symbols can identify vars: %s", getValueTypeName(vm, strValueType));
   }
 
   Var *var;
@@ -2090,9 +2115,9 @@ RetVal trySetMacroEval(VM *vm, Frame_t frame, Error *error) {
   }
 
   if (!var->isMacro) {
-    if (var->value.type != VT_FN) {
+    if (valueType(var->value) != VT_FN) {
       throwRuntimeError(error, "only vars referring to functions can be macros: %ls -> %s",
-          sym,  getValueTypeName(vm, var->value.type));
+          sym, getValueTypeName(vm, valueType(var->value)));
     }
     var->isMacro = true;
   }
@@ -2110,33 +2135,30 @@ RetVal tryGetMacroEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
   Value strValue = popOperand(frame);
+  ValueType type = valueType(strValue);
 
   wchar_t *sym = NULL;
   uint64_t symLength = 0;
 
-  if (strValue.type == VT_STR) {
+  if (type == VT_STR) {
     String *str = deref(&vm->gc, strValue);
     sym = stringValue(str);
     symLength = str->length;
   }
-  else if (strValue.type == VT_SYMBOL) {
+  else if (type == VT_SYMBOL) {
     Symbol *s = deref(&vm->gc, strValue);
     sym = symbolValue(s);
     symLength = s->length;
   }
   else {
-    throwRuntimeError(error, "only strings or symbols can identify vars: %s", getValueTypeName(vm, strValue.type));
+    throwRuntimeError(error, "only strings or symbols can identify vars: %s", getValueTypeName(vm, type));
   }
 
-  String *str = deref(&vm->gc, strValue);
-
-  Value result;
-  result.type = VT_BOOL;
-  result.value = false;
+  Value result = boolValue(false);
 
   Var *var;
   if (resolveVar(&vm->namespaces, sym, symLength, &var)) {
-    result.value = var->isMacro;
+    result = boolValue(var->isMacro);
   }
 
   pushOperand(frame, result);
@@ -2166,17 +2188,10 @@ RetVal tryGetTypeEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
   Value value = popOperand(frame);
-
-  Value typeId;
-  typeId.type = VT_UINT;
-  typeId.value = value.type;
-
+  Value typeId = uintValue(valueType(value));
   pushOperand(frame, typeId);
 
   return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 RetVal tryVMPrn(VM *vm, Value result, Pool_t pool, Expr *expr, Error *error);
@@ -2397,7 +2412,7 @@ RetVal equalsString(VM *vm, Value value, wchar_t *cmpStr, bool *equals, Error *e
   RetVal ret;
 
   *equals = false;
-  if (value.type == VT_STR) {
+  if (valueType(value) == VT_STR) {
 
     String *str = deref(&vm->gc, value);
 
@@ -2407,8 +2422,6 @@ RetVal equalsString(VM *vm, Value value, wchar_t *cmpStr, bool *equals, Error *e
   }
 
   return R_SUCCESS;
-  failure:
-  return ret;
 }
 
 RetVal tryPrnStr(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
@@ -2455,7 +2468,7 @@ RetVal tryPrnKeyword(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *erro
 }
 
 bool isEmpty(Value value) {
-  return value.type == VT_NIL;
+  return valueType(value) == VT_NIL;
 }
 
 typedef struct Property {
@@ -2466,16 +2479,16 @@ typedef struct Property {
 RetVal tryReadProperty(VM *vm, Value *ptr, Property *p, Error *error) {
   RetVal ret;
 
-  if (ptr->type != VT_LIST) {
+  if (valueType(*ptr) != VT_LIST) {
     throwRuntimeError(error, "expected property list: %s",
-                      getValueTypeName(vm, ptr->type));
+                      getValueTypeName(vm, valueType(*ptr)));
   }
 
   Cons *properties = deref(&vm->gc, *ptr);
 
-  if (properties->value.type != VT_KEYWORD) {
+  if (valueType(properties->value) != VT_KEYWORD) {
     throwRuntimeError(error, "expected keyword for property key: %s",
-                      getValueTypeName(vm, properties->value.type));
+                      getValueTypeName(vm, valueType(properties->value)));
   }
 
   p->key = deref(&vm->gc, properties->value);
@@ -2504,9 +2517,9 @@ RetVal tryPrnMetadata(VM_t vm, Value metadata, Expr *expr, Error *error) {
 
     if (wcscmp(L"line-number", keywordValue(p.key)) == 0) {
 
-      if (p.value.type != VT_UINT) {
+      if (valueType(p.value) != VT_UINT) {
         throwRuntimeError(error, "expected line-number property value to be an int: %s",
-                          getValueTypeName(vm, p.value.type));
+                          getValueTypeName(vm, valueType(p.value)));
       }
 
       expr->source.isSet = true;
@@ -2540,11 +2553,11 @@ RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) 
   throws(tryVMPrn(vm, cons->value, pool, elem, error));
   throws(tryListAppend(pool, &expr->list, elem, error));
 
-  while (cons->next.type != VT_NIL) {
+  while (valueType(cons->next) != VT_NIL) {
 
-    if (cons->next.type != VT_LIST) {
+    if (valueType(cons->next) != VT_LIST) {
       throwRuntimeError(error, "this should always be a type of VT_LIST: %s",
-                        getValueTypeName(vm, cons->next.type));
+                        getValueTypeName(vm, valueType(cons->next)));
     }
 
     cons = deref(&vm->gc, cons->next);
@@ -2562,29 +2575,29 @@ RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) 
 }
 
 RetVal tryEqualsNil(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  *equal = that.type == T_NIL;
+  *equal = valueType(that) == T_NIL;
   return R_SUCCESS;
 }
 
 RetVal tryEqualsUInt(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  *equal = this.type == that.type && this.value == that.value;
+  *equal = valueType(this) == valueType(that) && this.value == that.value;
   return R_SUCCESS;
 }
 
 RetVal tryEqualsBool(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  *equal = this.type == that.type && this.value == that.value;
+  *equal = valueType(this) == valueType(that) && this.value == that.value;
   return R_SUCCESS;
 }
 
 RetVal tryEqualsFn(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  *equal = this.type == that.type && this.value == that.value;
+  *equal = valueType(this) == valueType(that) && this.value == that.value;
   return R_SUCCESS;
 }
 
 RetVal tryEqualsStr(VM_t vm, Value this, Value that, bool *equal, Error *error) {
   RetVal ret;
 
-  if (this.type != that.type) {
+  if (valueType(this) == valueType(that)) {
     *equal = false;
   }
   else if (this.value == that.value) {
@@ -2611,7 +2624,7 @@ RetVal tryEqualsStr(VM_t vm, Value this, Value that, bool *equal, Error *error) 
 RetVal tryEqualsSymbol(VM_t vm, Value this, Value that, bool *equal, Error *error) {
   RetVal ret;
 
-  if (this.type != that.type) {
+  if (valueType(this) == valueType(that)) {
     *equal = false;
   }
   else if (this.value == that.value) {
@@ -2638,7 +2651,7 @@ RetVal tryEqualsSymbol(VM_t vm, Value this, Value that, bool *equal, Error *erro
 RetVal tryEqualsKeyword(VM_t vm, Value this, Value that, bool *equal, Error *error) {
   RetVal ret;
 
-  if (this.type != that.type) {
+  if (valueType(this) == valueType(that)) {
     *equal = false;
   }
   else if (this.value == that.value) {
@@ -2665,9 +2678,10 @@ RetVal tryEqualsKeyword(VM_t vm, Value this, Value that, bool *equal, Error *err
 RetVal tryEquals(VM_t vm, Value this, Value that, bool *equal, Error *error) {
   RetVal ret;
 
-  TryEquals tryEquals = vm->valueTypeTable.valueTypes[this.type].tryEquals;
+  ValueType thisType = valueType(this);
+  TryEquals tryEquals = vm->valueTypeTable.valueTypes[thisType].tryEquals;
   if (tryEquals == NULL) {
-    throwRuntimeError(error, "equals not supported for type: %s", getValueTypeName(vm, this.type));
+    throwRuntimeError(error, "equals not supported for type: %s", getValueTypeName(vm, thisType));
   }
   else {
     throws(tryEquals(vm, this, that, equal, error));
@@ -2682,7 +2696,7 @@ RetVal tryEquals(VM_t vm, Value this, Value that, bool *equal, Error *error) {
 RetVal tryEqualsList(VM_t vm, Value this, Value that, bool *equal, Error *error) {
   RetVal ret;
 
-  if (this.type != that.type) {
+  if (valueType(this) == valueType(that)) {
     *equal = false;
   }
   else if (this.value == that.value) {
@@ -2692,7 +2706,7 @@ RetVal tryEqualsList(VM_t vm, Value this, Value that, bool *equal, Error *error)
 
     bool e = true;
 
-    while (this.type != T_NIL) {
+    while (valueType(this) != T_NIL) {
 
       Cons *a = deref(&vm->gc, this);
       Cons *b = deref(&vm->gc, that);
@@ -2704,7 +2718,7 @@ RetVal tryEqualsList(VM_t vm, Value this, Value that, bool *equal, Error *error)
         break;
       }
 
-      bool nextTypesMismatched = a->next.type != b->next.type;
+      bool nextTypesMismatched = valueType(a->next) != valueType(b->next);
       if (nextTypesMismatched) {
         e = false;
         break;
@@ -2723,12 +2737,12 @@ RetVal tryEqualsList(VM_t vm, Value this, Value that, bool *equal, Error *error)
 }
 
 RetVal tryEqualsClosure(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  *equal = this.type == that.type && this.value == that.value;
+  *equal = valueType(this) == valueType(that) && this.value == that.value;
   return R_SUCCESS;
 }
 
 RetVal tryEqualsCFn(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  *equal = this.type == that.type && this.value == that.value;
+  *equal = valueType(this) == valueType(that) && this.value == that.value;
   return R_SUCCESS;
 }
 
@@ -3205,8 +3219,7 @@ void frameInitContents(Frame *frame) {
   frame->locals = NULL;
   frame->opStack = NULL;
   frame->resultAvailable = 0;
-  frame->result.type = VT_NIL;
-  frame->result.value = 0;
+  frame->result = nil();
   frame->pc = 0;
   handlerInitContents(&frame->handler);
   frame->handlerSet = false;
@@ -3568,20 +3581,14 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, VMEvalResult *re
  */
 
 #define ASSERT_SEQ(value, ...) {\
-  if (value.type != VT_LIST && value.type != VT_NIL) { \
-    throwRuntimeError(error, "expected a list type: %s", getValueTypeName(vm, value.type)); \
+  if (valueType(value) != VT_LIST && valueType(value) != VT_NIL) { \
+    throwRuntimeError(error, "expected a list type: %s", getValueTypeName(vm, valueType(value))); \
   } \
 }
 
 #define ASSERT_STR(value, ...) {\
-  if (value.type != VT_STR) { \
-    throwRuntimeError(error, "expected a string type: %s", getValueTypeName(vm, value.type)); \
-  } \
-}
-
-#define ASSERT_SYM(value, ...) {\
-  if (value.type != VT_SYMBOL) { \
-    throwRuntimeError(error, "expected a symbol type: %s", getValueTypeName(vm, value.type)); \
+  if (valueType(value) != VT_STR) { \
+    throwRuntimeError(error, "expected a string type: %s", getValueTypeName(vm, valueType(value))); \
   } \
 }
 
@@ -3625,7 +3632,7 @@ RetVal tryStrJoinBuiltin(VM *vm, Frame_t frame, Error *error) {
   uint64_t totalLength = 0;
 
   Value cursor = strings;
-  while (cursor.type != VT_NIL) {
+  while (valueType(cursor) != VT_NIL) {
 
     Cons *seq = deref(&vm->gc, cursor);
 
@@ -3650,7 +3657,7 @@ RetVal tryStrJoinBuiltin(VM *vm, Frame_t frame, Error *error) {
   uint64_t totalSizeWritten = 0;
 
   cursor = strings;
-  while (cursor.type != VT_NIL) {
+  while (valueType(cursor) != VT_NIL) {
     Cons *seq = deref(&vm->gc, cursor);
 
     String *string = deref(&vm->gc, seq->value);
