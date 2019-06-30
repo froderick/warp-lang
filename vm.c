@@ -256,7 +256,7 @@ typedef struct ValueTypeInfo {
   RelocateChildren relocateChildren;
   TryPrn tryPrn;
   TryHashCode tryHashCode;
-  Equals tryEquals;
+  Equals equals;
 } ValueTypeInfo;
 
 typedef struct ValueTypeTable {
@@ -633,10 +633,7 @@ void collect(VM *vm) {
       Value oldFnRef = getFnRef(current);
       Value newFnRef = oldFnRef;
       relocate(vm, oldHeap, &newFnRef);
-
-      if (oldFnRef.value != newFnRef.value) {
-        setFnRef(vm, current, newFnRef);
-      }
+      setFnRef(vm, current, newFnRef);
     }
 
     uint16_t locals = numLocals(current);
@@ -2470,34 +2467,19 @@ RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) 
 
 bool equals(VM_t vm, Value this, Value that);
 
-bool equalsNil(VM_t vm, Value this, Value that) {
-  return valueType(that) == T_NIL;
-}
-
-bool equalsUInt(VM_t vm, Value this, Value that) {
-  return valueType(this) == valueType(that) && this.value == that.value;
-}
-
-bool equalsBool(VM_t vm, Value this, Value that) {
-  return valueType(this) == valueType(that) && this.value == that.value;
-}
-
-bool equalsFn(VM_t vm, Value this, Value that) {
-  return valueType(this) == valueType(that) && this.value == that.value;
-}
-
 bool equalsStr(VM_t vm, Value this, Value that) {
 
   if (valueType(this) == valueType(that)) {
     return false;
   }
-  else if (this.value == that.value) {
-    return true;
-  }
   else {
 
     String *a = deref(&vm->gc, this);
     String *b = deref(&vm->gc, that);
+
+    if (a == b) {
+      return true;
+    }
 
     if (a->length != b->length) {
       return false;
@@ -2513,13 +2495,14 @@ bool equalsSymbol(VM_t vm, Value this, Value that) {
   if (valueType(this) == valueType(that)) {
     return false;
   }
-  else if (this.value == that.value) {
-    return true;
-  }
   else {
 
     Symbol *a = deref(&vm->gc, this);
     Symbol *b = deref(&vm->gc, that);
+
+    if (a == b) {
+      return true;
+    }
 
     if (a->length != b->length) {
       return false;
@@ -2535,13 +2518,14 @@ bool equalsKeyword(VM_t vm, Value this, Value that) {
   if (valueType(this) == valueType(that)) {
     return false;
   }
-  else if (this.value == that.value) {
-    return true;
-  }
   else {
 
     Keyword *a = deref(&vm->gc, this);
     Keyword *b = deref(&vm->gc, that);
+
+    if (a == b) {
+      return true;
+    }
 
     if (a->length != b->length) {
       return false;
@@ -2557,15 +2541,16 @@ bool equalsList(VM_t vm, Value this, Value that) {
   if (valueType(this) == valueType(that)) {
     return false;
   }
-  else if (this.value == that.value) {
-    return true;
-  }
   else {
     bool e = true;
     while (valueType(this) != T_NIL) {
 
       Cons *a = deref(&vm->gc, this);
       Cons *b = deref(&vm->gc, that);
+
+      if (a == b) {
+        return true;
+      }
 
       if (!equals(vm, a->value, b->value)) {
         e = false;
@@ -2586,19 +2571,12 @@ bool equalsList(VM_t vm, Value this, Value that) {
   }
 }
 
-bool equalsClosure(VM_t vm, Value this, Value that) {
-  return valueType(this) == valueType(that) && this.value == that.value;
-}
-
-bool equalsCFn(VM_t vm, Value this, Value that) {
-  return valueType(this) == valueType(that) && this.value == that.value;
-}
-
 bool equals(VM_t vm, Value this, Value that) {
   ValueType thisType = valueType(this);
-  Equals equals = vm->valueTypeTable.valueTypes[thisType].tryEquals;
+  Equals equals = vm->valueTypeTable.valueTypes[thisType].equals;
   if (equals == NULL) {
-    explode("equals not supported for type: %s", getValueTypeName(vm, thisType));
+    // assume immediate value
+    return valueType(this) == valueType(that) && this.value == that.value;
   }
   else {
     return equals(vm, this, that);
@@ -2625,61 +2603,61 @@ ValueTypeTable valueTypeTableCreate() {
                         .isTruthy = &isTruthyNo,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnNil,
-                        .tryEquals = &equalsNil},
+                        .equals = NULL},
       [VT_UINT]      = {.name = "uint",
                         .isHeapObject = false,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnInt,
-                        .tryEquals = &equalsUInt},
+                        .equals = NULL},
       [VT_BOOL]      = {.name = "bool",
                         .isHeapObject = false,
                         .isTruthy = &isTruthyBool,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnBool,
-                        .tryEquals = &equalsBool},
+                        .equals = NULL},
       [VT_FN]        = {.name = "fn",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenFn,
                         .tryPrn = &tryPrnFn,
-                        .tryEquals = &equalsFn},
+                        .equals = NULL},
       [VT_STR]       = {.name = "str",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnStr,
-                        .tryEquals = &equalsStr},
+                        .equals = &equalsStr},
       [VT_SYMBOL]    = {.name = "symbol",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnSymbol,
-                        .tryEquals = &equalsSymbol},
+                        .equals = &equalsSymbol},
       [VT_KEYWORD]   = {.name = "keyword",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnKeyword,
-                        .tryEquals = &equalsKeyword},
+                        .equals = &equalsKeyword},
       [VT_LIST]      = {.name = "list",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenList,
                         .tryPrn = &tryPrnList,
-                        .tryEquals = &equalsList},
+                        .equals = &equalsList},
       [VT_CLOSURE]   = {.name = "closure",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenClosure,
                         .tryPrn = &tryPrnClosure,
-                        .tryEquals = &equalsClosure},
+                        .equals = NULL},
       [VT_CFN]       = {.name = "cfn",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnCFn,
-                        .tryEquals = &equalsCFn}
+                        .equals = NULL}
   };
   memcpy(table.valueTypes, valueTypes, sizeof(valueTypes));
   table.numValueTypes = sizeof(valueTypes) / sizeof(valueTypes[0]);
