@@ -247,7 +247,7 @@ typedef struct Invocable {
 typedef void (*RelocateChildren)(VM_t vm, void *oldHeap, void *obj);
 typedef RetVal (*TryPrn)(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error);
 typedef RetVal (*TryHashCode)(VM_t vm, Value value, uint32_t *hash, Error *error);
-typedef RetVal (*TryEquals)(VM_t vm, Value this, Value that, bool *equal, Error *error);
+typedef bool (*Equals)(VM_t vm, Value this, Value that);
 
 typedef struct ValueTypeInfo {
   const char *name;
@@ -256,7 +256,7 @@ typedef struct ValueTypeInfo {
   RelocateChildren relocateChildren;
   TryPrn tryPrn;
   TryHashCode tryHashCode;
-  TryEquals tryEquals;
+  Equals tryEquals;
 } ValueTypeInfo;
 
 typedef struct ValueTypeTable {
@@ -2468,34 +2468,31 @@ RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) 
   return ret;
 }
 
-RetVal tryEqualsNil(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  *equal = valueType(that) == T_NIL;
-  return R_SUCCESS;
+bool equals(VM_t vm, Value this, Value that);
+
+bool equalsNil(VM_t vm, Value this, Value that) {
+  return valueType(that) == T_NIL;
 }
 
-RetVal tryEqualsUInt(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  *equal = valueType(this) == valueType(that) && this.value == that.value;
-  return R_SUCCESS;
+bool equalsUInt(VM_t vm, Value this, Value that) {
+  return valueType(this) == valueType(that) && this.value == that.value;
 }
 
-RetVal tryEqualsBool(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  *equal = valueType(this) == valueType(that) && this.value == that.value;
-  return R_SUCCESS;
+bool equalsBool(VM_t vm, Value this, Value that) {
+  return valueType(this) == valueType(that) && this.value == that.value;
 }
 
-RetVal tryEqualsFn(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  *equal = valueType(this) == valueType(that) && this.value == that.value;
-  return R_SUCCESS;
+bool equalsFn(VM_t vm, Value this, Value that) {
+  return valueType(this) == valueType(that) && this.value == that.value;
 }
 
-RetVal tryEqualsStr(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  RetVal ret;
+bool equalsStr(VM_t vm, Value this, Value that) {
 
   if (valueType(this) == valueType(that)) {
-    *equal = false;
+    return false;
   }
   else if (this.value == that.value) {
-    *equal = true;
+    return true;
   }
   else {
 
@@ -2503,26 +2500,21 @@ RetVal tryEqualsStr(VM_t vm, Value this, Value that, bool *equal, Error *error) 
     String *b = deref(&vm->gc, that);
 
     if (a->length != b->length) {
-      *equal = false;
+      return false;
     }
     else {
-      *equal = wcscmp(stringValue(a), stringValue(b)) == 0;
+      return wcscmp(stringValue(a), stringValue(b)) == 0;
     }
   }
-
-  return R_SUCCESS;
-  failure:
-    return ret;
 }
 
-RetVal tryEqualsSymbol(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  RetVal ret;
+bool equalsSymbol(VM_t vm, Value this, Value that) {
 
   if (valueType(this) == valueType(that)) {
-    *equal = false;
+    return false;
   }
   else if (this.value == that.value) {
-    *equal = true;
+    return true;
   }
   else {
 
@@ -2530,26 +2522,21 @@ RetVal tryEqualsSymbol(VM_t vm, Value this, Value that, bool *equal, Error *erro
     Symbol *b = deref(&vm->gc, that);
 
     if (a->length != b->length) {
-      *equal = false;
+      return false;
     }
     else {
-      *equal = wcscmp(symbolValue(a), symbolValue(b)) == 0;
+      return wcscmp(symbolValue(a), symbolValue(b)) == 0;
     }
   }
-
-  return R_SUCCESS;
-  failure:
-  return ret;
 }
 
-RetVal tryEqualsKeyword(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  RetVal ret;
+bool equalsKeyword(VM_t vm, Value this, Value that) {
 
   if (valueType(this) == valueType(that)) {
-    *equal = false;
+    return false;
   }
   else if (this.value == that.value) {
-    *equal = true;
+    return true;
   }
   else {
 
@@ -2557,57 +2544,30 @@ RetVal tryEqualsKeyword(VM_t vm, Value this, Value that, bool *equal, Error *err
     Keyword *b = deref(&vm->gc, that);
 
     if (a->length != b->length) {
-      *equal = false;
+      return false;
     }
     else {
-      *equal = wcscmp(keywordValue(a), keywordValue(b)) == 0;
+      return wcscmp(keywordValue(a), keywordValue(b)) == 0;
     }
   }
-
-  return R_SUCCESS;
-  failure:
-  return ret;
 }
 
-RetVal tryEquals(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  RetVal ret;
-
-  ValueType thisType = valueType(this);
-  TryEquals tryEquals = vm->valueTypeTable.valueTypes[thisType].tryEquals;
-  if (tryEquals == NULL) {
-    throwRuntimeError(error, "equals not supported for type: %s", getValueTypeName(vm, thisType));
-  }
-  else {
-    throws(tryEquals(vm, this, that, equal, error));
-  }
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryEqualsList(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  RetVal ret;
+bool equalsList(VM_t vm, Value this, Value that) {
 
   if (valueType(this) == valueType(that)) {
-    *equal = false;
+    return false;
   }
   else if (this.value == that.value) {
-    *equal = true;
+    return true;
   }
   else {
-
     bool e = true;
-
     while (valueType(this) != T_NIL) {
 
       Cons *a = deref(&vm->gc, this);
       Cons *b = deref(&vm->gc, that);
 
-      bool elementEqual = false;
-      throws(tryEquals(vm, a->value, b->value, &elementEqual, error));
-      if (!elementEqual) {
+      if (!equals(vm, a->value, b->value)) {
         e = false;
         break;
       }
@@ -2622,22 +2582,27 @@ RetVal tryEqualsList(VM_t vm, Value this, Value that, bool *equal, Error *error)
       that = b->next;
     }
 
-    *equal = e;
+    return e;
   }
-
-  return R_SUCCESS;
-  failure:
-  return ret;
 }
 
-RetVal tryEqualsClosure(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  *equal = valueType(this) == valueType(that) && this.value == that.value;
-  return R_SUCCESS;
+bool equalsClosure(VM_t vm, Value this, Value that) {
+  return valueType(this) == valueType(that) && this.value == that.value;
 }
 
-RetVal tryEqualsCFn(VM_t vm, Value this, Value that, bool *equal, Error *error) {
-  *equal = valueType(this) == valueType(that) && this.value == that.value;
-  return R_SUCCESS;
+bool equalsCFn(VM_t vm, Value this, Value that) {
+  return valueType(this) == valueType(that) && this.value == that.value;
+}
+
+bool equals(VM_t vm, Value this, Value that) {
+  ValueType thisType = valueType(this);
+  Equals equals = vm->valueTypeTable.valueTypes[thisType].tryEquals;
+  if (equals == NULL) {
+    explode("equals not supported for type: %s", getValueTypeName(vm, thisType));
+  }
+  else {
+    return equals(vm, this, that);
+  }
 }
 
 ValueTypeTable valueTypeTableCreate() {
@@ -2660,61 +2625,61 @@ ValueTypeTable valueTypeTableCreate() {
                         .isTruthy = &isTruthyNo,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnNil,
-                        .tryEquals = &tryEqualsNil,},
+                        .tryEquals = &equalsNil},
       [VT_UINT]      = {.name = "uint",
                         .isHeapObject = false,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnInt,
-                        .tryEquals = &tryEqualsUInt},
+                        .tryEquals = &equalsUInt},
       [VT_BOOL]      = {.name = "bool",
                         .isHeapObject = false,
                         .isTruthy = &isTruthyBool,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnBool,
-                        .tryEquals = &tryEqualsBool},
+                        .tryEquals = &equalsBool},
       [VT_FN]        = {.name = "fn",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenFn,
                         .tryPrn = &tryPrnFn,
-                        .tryEquals = &tryEqualsFn},
+                        .tryEquals = &equalsFn},
       [VT_STR]       = {.name = "str",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnStr,
-                        .tryEquals = &tryEqualsStr},
+                        .tryEquals = &equalsStr},
       [VT_SYMBOL]    = {.name = "symbol",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnSymbol,
-                        .tryEquals = &tryEqualsSymbol},
+                        .tryEquals = &equalsSymbol},
       [VT_KEYWORD]   = {.name = "keyword",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnKeyword,
-                        .tryEquals = &tryEqualsKeyword},
+                        .tryEquals = &equalsKeyword},
       [VT_LIST]      = {.name = "list",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenList,
                         .tryPrn = &tryPrnList,
-                        .tryEquals = &tryEqualsList},
+                        .tryEquals = &equalsList},
       [VT_CLOSURE]   = {.name = "closure",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenClosure,
                         .tryPrn = &tryPrnClosure,
-                        .tryEquals = &tryEqualsClosure},
+                        .tryEquals = &equalsClosure},
       [VT_CFN]       = {.name = "cfn",
                         .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnCFn,
-                        .tryEquals = &tryEqualsCFn}
+                        .tryEquals = &equalsCFn}
   };
   memcpy(table.valueTypes, valueTypes, sizeof(valueTypes));
   table.numValueTypes = sizeof(valueTypes) / sizeof(valueTypes[0]);
