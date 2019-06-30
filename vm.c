@@ -833,13 +833,8 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 
   uint64_t fnSize = padAllocSize(sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize + lineNumbersSize);
 
-  uint64_t offset = 0;
-  if (_alloc(&vm->gc, fnSize, (void*)&fn, &offset) == R_OOM) {
-    throwRuntimeError(error, "out of memory, failed to allocate fn constant");
-  }
-
+  fn = alloc(vm, fnSize, value);
   value->type = VT_FN;
-  value->value = offset;
 
   fnInitContents(fn);
 
@@ -904,22 +899,14 @@ void stringInitContents(String *s) {
   s->hash = 0;
 }
 
-RetVal _tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value, Error *error) {
-  RetVal ret;
-
+void tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value) {
   String *str = NULL;
 
   uint64_t textSize = (length + 1) * sizeof(wchar_t);
   uint64_t strSize = padAllocSize(sizeof(String) + textSize);
 
-  uint64_t offset = 0;
-
-  if (_alloc(&vm->gc, strSize, (void*)&str, &offset) == R_OOM) {
-    throwRuntimeError(error, "out of memory, failed to allocate string constant: %ls", text);
-  }
-
+  str = alloc(vm, strSize, value);
   value->type = VT_STR;
-  value->value = offset;
 
   stringInitContents(str);
   str->header.type = VT_STR;
@@ -929,31 +916,6 @@ RetVal _tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value, E
   str->valueOffset = sizeof(String);
   memcpy(stringValue(str), text, length * sizeof(wchar_t));
   stringValue(str)[length] = L'\0';
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryStringHydrate(VM *vm, StringConstant strConst, Value *value, Error *error) {
-  RetVal ret;
-
-  throws(_tryStringHydrate(vm, strConst.value, strConst.length, value, error));
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryVarRefHydrate(VM *vm, VarRefConstant varRefConst, Value *value, Error *error) {
-  RetVal ret;
-
-  throws(_tryStringHydrate(vm, varRefConst.name, varRefConst.nameLength, value, error));
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 void symbolInitContents(Symbol *s) {
@@ -963,21 +925,14 @@ void symbolInitContents(Symbol *s) {
   s->hash = 0;
 }
 
-RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *error) {
-  RetVal ret;
-
+void trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value) {
   Symbol *sym = NULL;
 
   uint64_t textSize = (symConst.length + 1) * sizeof(wchar_t);
   uint64_t size = padAllocSize(sizeof(Symbol) + textSize);
 
-  uint64_t offset = 0;
-  if (_alloc(&vm->gc, size, (void*)&sym, &offset) == R_OOM) {
-    throwRuntimeError(error, "out of memory, failed to allocate symbol: %ls", symConst.value);
-  }
-
+  sym = alloc(vm, size, value);
   value->type = VT_SYMBOL;
-  value->value = offset;
 
   symbolInitContents(sym);
   sym->header.type = VT_SYMBOL;
@@ -987,11 +942,6 @@ RetVal trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value, Error *er
   sym->valueOffset = sizeof(Symbol);
   memcpy(symbolValue(sym), symConst.value, sym->length * sizeof(wchar_t));
   symbolValue(sym)[sym->length] = L'\0';
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 void keywordInitContents(Keyword *k) {
@@ -1001,21 +951,14 @@ void keywordInitContents(Keyword *k) {
   k->hash = 0;
 }
 
-RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *error) {
-  RetVal ret;
-
+void tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value) {
   Keyword *kw = NULL;
 
   uint64_t textSize = (kwConst.length + 1) * sizeof(wchar_t);
   uint64_t size = padAllocSize(sizeof(Keyword) + textSize);
 
-  uint64_t offset = 0;
-  if (_alloc(&vm->gc, size, (void*)&kw, &offset) == R_OOM) {
-    throwRuntimeError(error, "out of memory, failed to allocate keyword: %ls", kwConst.value);
-  }
-
+  kw = alloc(vm, size, value);
   value->type = VT_KEYWORD;
-  value->value = offset;
 
   keywordInitContents(kw);
   kw->header.type = VT_KEYWORD;
@@ -1025,11 +968,6 @@ RetVal tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value, Error *e
   kw->valueOffset = sizeof(Keyword);
   memcpy(keywordValue(kw), kwConst.value, kw->length * sizeof(wchar_t));
   keywordValue(kw)[kw->length] = L'\0';
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 void consInitContents(Cons *c) {
@@ -1049,14 +987,8 @@ RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value meta, Value *ptr,
   Cons *cons = NULL;
 
   uint64_t size = padAllocSize(sizeof(Cons));
-
-  uint64_t offset = 0;
-  if (_alloc(&vm->gc, size, (void*)&cons, &offset) == R_OOM) {
-    throwRuntimeError(error, "out of memory, failed to allocate cons");
-  }
-
+  cons = alloc(vm, size, ptr);
   ptr->type = VT_LIST;
-  ptr->value = offset;
 
   consInitContents(cons);
   cons->header.type = VT_LIST;
@@ -1076,38 +1008,6 @@ RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value meta, Value *ptr,
  */
 RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant listConst, Value *value, Error *error) {
   RetVal ret;
-
-  // build up meta property list with conses
-  Value meta = nil();
-
-  for (uint64_t i=0; i<listConst.meta.numProperties; i++) {
-    ConstantMetaProperty *p = &listConst.meta.properties[i];
-    throws(_tryAllocateCons(vm, alreadyHydratedConstants[p->valueIndex], meta, nil(), &meta, error));
-    throws(_tryAllocateCons(vm, alreadyHydratedConstants[p->keyIndex], meta, nil(), &meta, error));
-  }
-
-  // build up list with conses, each cons gets the same meta
-  Value seq = nil();
-
-  for (uint16_t i = 0; i < listConst.length; i++) {
-
-    uint16_t listConstEnd = listConst.length - 1;
-    uint16_t valueIndex = listConst.constants[listConstEnd - i];
-
-    throws(_tryAllocateCons(vm, alreadyHydratedConstants[valueIndex], seq, meta, &seq, error));
-  }
-
-  *value = seq;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryMapHydrate(VM *vm, Value *alreadyHydratedConstants, MapConstant listConst, Value *value, Error *error) {
-  RetVal ret;
-
-  explode("not implemented");
 
   // build up meta property list with conses
   Value meta = nil();
@@ -1159,19 +1059,16 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
       throws(tryFnHydrate(vm, &c.function, &v, error));
       break;
     case CT_STR:
-      throws(tryStringHydrate(vm, c.string, &v, error));
+      tryStringHydrate(vm, c.string.value, c.string.length, &v);
       break;
     case CT_SYMBOL:
-      throws(trySymbolHydrate(vm, c.symbol, &v, error));
+      trySymbolHydrate(vm, c.symbol, &v);
       break;
     case CT_KEYWORD:
-      throws(tryKeywordHydrate(vm, c.keyword, &v, error));
+      tryKeywordHydrate(vm, c.keyword, &v);
       break;
     case CT_LIST:
       throws(tryListHydrate(vm, alreadyHydratedConstants, c.list, &v, error));
-      break;
-    case CT_MAP:
-      throws(tryMapHydrate(vm, alreadyHydratedConstants, c.map, &v, error));
       break;
     case CT_NONE:
     default:
@@ -1796,10 +1693,7 @@ RetVal tryAddEval(VM *vm, Frame_t frame, Error *error) {
     throwRuntimeError(error, "can only add integers: %s", getValueTypeName(vm, valueType(b)));
   }
 
-  Value c;
-  c.type = VT_UINT;
-  c.value = a.value + b.value;
-
+  Value c = uintValue(a.value + b.value);
   pushOperand(frame, c);
 
   return R_SUCCESS;
@@ -3846,15 +3740,9 @@ Value makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnIn
   uint64_t nameSize = (nameLength + 1) * sizeof(wchar_t);
   uint64_t fnSize = padAllocSize(sizeof(CFn) + nameSize);
 
-  uint64_t offset = 0;
-
-  if (_alloc(&vm->gc, fnSize, (void*)&fn, &offset) == R_OOM) {
-    explode("out of memory, failed to allocate CFn: %ls", name);
-  }
-
   Value value;
   value.type = VT_CFN;
-  value.value = offset;
+  fn = alloc(vm, fnSize, &value);
 
   cFnInitContents(fn);
   fn->header.type = VT_CFN;
