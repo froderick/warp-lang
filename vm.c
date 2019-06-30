@@ -53,18 +53,26 @@ Value nil() {
   return v;
 }
 
-Value boolValue(bool b) {
+Value wrapBool(bool b) {
   Value v;
   v.type = VT_BOOL;
   v.value = b;
   return v;
 }
 
-Value uintValue(uint64_t i) {
+bool unwrapBool(Value v) {
+  return v.value;
+}
+
+Value wrapUint(uint64_t i) {
   Value v;
   v.type = VT_UINT;
   v.value = i;
   return v;
+}
+
+uint64_t unwrapUint(Value v) {
+  return v.value;
 }
 
 /*
@@ -1044,10 +1052,10 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
 
   switch (c.type) {
     case CT_BOOL:
-      v = boolValue(c.boolean);
+      v = wrapBool(c.boolean);
       break;
     case CT_INT:
-      v = uintValue(c.integer);
+      v = wrapUint(c.integer);
       break;
     case CT_NIL:
       v = nil();
@@ -1425,34 +1433,35 @@ RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool use
 
   RetVal ret;
 
-  Value numArgsSupplied = popOperand(parent);
-  ValueType numArgsSuppliedType = valueType(numArgsSupplied);
-
-  if (numArgsSuppliedType != VT_UINT) {
-    explode("first op stack value must be number of arguments supplied: %s", getValueTypeName(vm, numArgsSuppliedType));
+  Value numArgsSuppliedValue = popOperand(parent);
+  if (valueType(numArgsSuppliedValue) != VT_UINT) {
+    explode("first op stack value must be number of arguments supplied: %s",
+        getValueTypeName(vm, valueType(numArgsSuppliedValue)));
   }
 
+  uint64_t numArgsSupplied = unwrapUint(numArgsSuppliedValue);
+
   if (!usesVarArgs) {
-    if (numArgsSupplied.value != numArgs) {
+    if (numArgsSupplied != numArgs) {
       throwRuntimeError(error, "required arguments not supplied, expected %u but got %" PRIu64, numArgs,
-          numArgsSupplied.value);
+          numArgsSupplied);
     }
   }
   else {
 
     uint16_t numVarArgs;
-    if (numArgsSupplied.value > numArgs) {
-      numVarArgs = (numArgsSupplied.value - numArgs) + 1;
+    if (numArgsSupplied > numArgs) {
+      numVarArgs = (numArgsSupplied - numArgs) + 1;
     }
-    else if (numArgsSupplied.value == numArgs) {
+    else if (numArgsSupplied == numArgs) {
       numVarArgs = 1;
     }
-    else if (numArgsSupplied.value == numArgs - 1) {
+    else if (numArgsSupplied == numArgs - 1) {
       numVarArgs = 0;
     }
     else {
       throwRuntimeError(error, "required arguments not supplied, expected %u or more arguments but got %" PRIu64,
-                        numArgs - 1, numArgsSupplied.value);
+                        numArgs - 1, numArgsSupplied);
     }
 
     // TODO: stop using the operand stack as a general purpose stack, since it can overflow this way
@@ -1609,33 +1618,11 @@ RetVal tryRetEval(VM *vm, Frame_t frame, Error *error) {
 
 // (8)              | (a, b -> 0 | 1)
 RetVal tryCmpEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
 
   Value a = popOperand(frame);
   Value b = popOperand(frame);
 
-  Value c = boolValue(false);
-
-  if (valueType(a) == valueType(b)) {
-    switch (valueType(a)) {
-      case VT_NIL:
-      case VT_UINT:
-      case VT_BOOL:
-      case VT_FN:
-      case VT_CLOSURE:
-      case VT_CFN:
-      case VT_LIST:
-      case VT_STR:
-      case VT_SYMBOL:
-      case VT_KEYWORD: {
-        c = boolValue(a.value == b.value);
-        break;
-      }
-      default:
-        explode("Unhandled");
-    }
-  }
-
+  Value c = wrapBool(valueType(a) == valueType(b) && a.value == b.value);
   pushOperand(frame, c);
 
   return R_SUCCESS;
@@ -1690,7 +1677,7 @@ RetVal tryAddEval(VM *vm, Frame_t frame, Error *error) {
     throwRuntimeError(error, "can only add integers: %s", getValueTypeName(vm, valueType(b)));
   }
 
-  Value c = uintValue(a.value + b.value);
+  Value c = wrapUint(unwrapUint(a) + unwrapUint(b));
   pushOperand(frame, c);
 
   return R_SUCCESS;
@@ -1713,7 +1700,7 @@ RetVal trySubEval(VM *vm, Frame_t frame, Error *error) {
     throwRuntimeError(error, "can only subtract integers: %s", getValueTypeName(vm, valueType(b)));
   }
 
-  Value c = uintValue(a.value - b.value);
+  Value c = wrapUint(unwrapUint(a) - unwrapUint(b));
   pushOperand(frame, c);
 
   return R_SUCCESS;
@@ -2045,11 +2032,11 @@ RetVal tryGetMacroEval(VM *vm, Frame_t frame, Error *error) {
     throwRuntimeError(error, "only strings or symbols can identify vars: %s", getValueTypeName(vm, type));
   }
 
-  Value result = boolValue(false);
+  Value result = wrapBool(false);
 
   Var *var;
   if (resolveVar(&vm->namespaces, sym, symLength, &var)) {
-    result = boolValue(var->isMacro);
+    result = wrapBool(var->isMacro);
   }
 
   pushOperand(frame, result);
@@ -2079,7 +2066,7 @@ RetVal tryGetTypeEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
   Value value = popOperand(frame);
-  Value typeId = uintValue(valueType(value));
+  Value typeId = wrapUint(valueType(value));
   pushOperand(frame, typeId);
 
   return R_SUCCESS;
@@ -2238,7 +2225,7 @@ void _printCodeUnit(InstTable *table, CodeUnit *unit) {
 
 bool isTruthyYes(Value v) { return true; }
 bool isTruthyNo(Value v) { return false; }
-bool isTruthyBool(Value v) { return v.value; }
+bool isTruthyBool(Value v) { return unwrapBool(v); }
 
 void relocateChildrenFn(VM_t vm, void *oldHeap, void *obj) {
   Fn *fn = obj;
@@ -2268,13 +2255,13 @@ RetVal tryPrnNil(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
 
 RetVal tryPrnInt(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   expr->type = N_NUMBER;
-  expr->number.value = result.value;
+  expr->number.value = unwrapUint(result);
   return R_SUCCESS;
 }
 
 RetVal tryPrnBool(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
   expr->type = N_BOOLEAN;
-  expr->boolean.value = result.value;
+  expr->boolean.value = unwrapBool(result);
   return R_SUCCESS;
 }
 
@@ -2297,22 +2284,6 @@ RetVal tryPrnClosure(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *erro
   wchar_t function[] = L"<closure>";
   expr->string.length = wcslen(function);
   return tryCopyText(pool, function, &expr->string.value, expr->string.length, error);
-}
-
-RetVal equalsString(VM *vm, Value value, wchar_t *cmpStr, bool *equals, Error *error) {
-  RetVal ret;
-
-  *equals = false;
-  if (valueType(value) == VT_STR) {
-
-    String *str = deref(&vm->gc, value);
-
-    if (wcscmp(stringValue(str), cmpStr) == 0) {
-      *equals = true;
-    }
-  }
-
-  return R_SUCCESS;
 }
 
 RetVal tryPrnStr(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
@@ -2414,7 +2385,7 @@ RetVal tryPrnMetadata(VM_t vm, Value metadata, Expr *expr, Error *error) {
       }
 
       expr->source.isSet = true;
-      expr->source.lineNumber = p.value.value;
+      expr->source.lineNumber = unwrapUint(p.value);
     }
     else {
       // ignore property
