@@ -35,15 +35,58 @@ typedef enum ValueType {
   VT_CFN,
 } ValueType;
 
+#define W_GC_FORWARDING_BIT      0x8000000000000000L   /* header contains forwarding pointer */
+#define W_BYTEBLOCK_BIT          0x4000000000000000L   /* block contains bytes instead of slots */
+#define W_SPECIALBLOCK_BIT       0x2000000000000000L   /* 1st item is a non-value */
+#define W_8ALIGN_BIT             0x1000000000000000L   /* data is aligned to 8-byte boundary */
+#define W_HEADER_TYPE_BITS       0x0f00000000000000L
+#define W_HEADER_SIZE_MASK       0x00ffffffffffffffL
+
+#define W_FN_TYPE      0x0u
+#define W_STR_TYPE     0x1u
+#define W_SYMBOL_TYPE  0x2u
+#define W_KEYWORD_TYPE 0x3u
+#define W_LIST_TYPE    0x4u
+#define W_CLOSURE_TYPE 0x5u
+#define W_CFN_TYPE     0x6u
+
 /*
  * This is the first field inside all heap objects. It must come first so that the GC can
  * scan through the heap, for which it needs to determine object sizes and object types.
  */
-typedef struct ObjectHeader {
-  ValueType type : 4;
-  size_t size : 60;
-} ObjectHeader;
+typedef uint64_t ObjectHeader;
 
+ObjectHeader makeObjectHeader(uint8_t objectType, uint64_t size) {
+  if (objectType > 0xf) {
+    explode("too large: %u", objectType);
+  }
+  if (size > W_HEADER_SIZE_MASK) {
+    explode("too large: %" PRIu64, size);
+  }
+  return (((uint64_t)objectType) << 56u) | size;
+}
+
+uint8_t objectHeaderType(ObjectHeader h) {
+  return ((h & W_HEADER_TYPE_BITS) >> 56u) & 0xfu;
+}
+
+uint64_t objectHeaderSize(ObjectHeader h) {
+  return h & W_HEADER_SIZE_MASK;
+}
+
+ValueType objectHeaderValueType(ObjectHeader header) {
+  switch (objectHeaderType(header)) {
+    case W_FN_TYPE: return VT_FN;
+    case W_STR_TYPE: return VT_STR;
+    case W_SYMBOL_TYPE: return VT_SYMBOL;
+    case W_KEYWORD_TYPE: return VT_KEYWORD;
+    case W_LIST_TYPE: return VT_LIST;
+    case W_CLOSURE_TYPE: return VT_CLOSURE;
+    case W_CFN_TYPE: return VT_CFN;
+    default:
+    explode("unknown type: %u", objectHeaderType(header));
+  }
+}
 
 ValueType valueType(Value v) {
 
@@ -53,7 +96,7 @@ ValueType valueType(Value v) {
 
   if ((v & W_PTR_MASK) == 0) {
     ObjectHeader *h = (void*)v;
-    return h->type;
+    return objectHeaderValueType(*h);
   }
 
   uint8_t imm = v & W_IMMEDIATE_MASK;
@@ -346,15 +389,6 @@ typedef struct VM {
 // frames
 
 /*
- * Common value factories
- */
-
-void objectHeaderInitContents(ObjectHeader *h) {
-  h->type = VT_NIL;
-  h->size = 0;
-}
-
-/*
  * The ExecFrame and operations it supports
  */
 
@@ -571,7 +605,7 @@ void relocate(VM *vm, Value *value) {
     *value = (Value)*forwardPtr;
   }
   else {
-    uint64_t size = ((ObjectHeader*)ptr)->size;
+    uint64_t size = objectHeaderSize(*(ObjectHeader*)ptr);
 
     void *newPtr = NULL;
     if (_alloc(gc, size, &newPtr) == R_OOM) {
@@ -665,8 +699,8 @@ void collect(VM *vm) {
   // relocate all the objects this object references
   while (scanptr < vm->gc.allocPtr) {
     ObjectHeader *header = scanptr;
-    relocateChildren(vm, header->type, scanptr);
-    scanptr += header->size;
+    relocateChildren(vm, objectHeaderValueType(*header), scanptr);
+    scanptr += objectHeaderSize(*header);
   }
 
   uint64_t newHeapUsed = vm->gc.allocPtr - vm->gc.currentHeap;
@@ -795,7 +829,7 @@ RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, 
 
 void fnInitContents(Fn *fn) {
 
-  objectHeaderInitContents(&fn->header);
+  fn->header = 0;
 
   fn->hasName = false;
   fn->nameLength = 0;
@@ -839,8 +873,7 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 
   fnInitContents(fn);
 
-  fn->header.type = VT_FN;
-  fn->header.size = fnSize;
+  fn->header = makeObjectHeader(W_FN_TYPE, fnSize);
 
   fn->nameOffset           = sizeof(Fn);
   fn->constantsOffset      = sizeof(Fn) + nameSize;
@@ -894,7 +927,7 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
 }
 
 void stringInitContents(String *s) {
-  objectHeaderInitContents(&s->header);
+  s->header = 0;
   s->length = 0;
   s->valueOffset = 0;
   s->hash = 0;
@@ -910,8 +943,8 @@ void tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value) {
   *value = (Value)str;
 
   stringInitContents(str);
-  str->header.type = VT_STR;
-  str->header.size = strSize;
+
+  str->header = makeObjectHeader(W_STR_TYPE, strSize);
   str->length = length;
 
   str->valueOffset = sizeof(String);
@@ -920,7 +953,7 @@ void tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value) {
 }
 
 void symbolInitContents(Symbol *s) {
-  objectHeaderInitContents(&s->header);
+  s->header = 0;
   s->length = 0;
   s->valueOffset = 0;
   s->hash = 0;
@@ -936,8 +969,7 @@ void trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value) {
   *value = (Value)sym;
 
   symbolInitContents(sym);
-  sym->header.type = VT_SYMBOL;
-  sym->header.size = size;
+  sym->header = makeObjectHeader(W_SYMBOL_TYPE, size);
   sym->length = symConst.length;
 
   sym->valueOffset = sizeof(Symbol);
@@ -946,7 +978,7 @@ void trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value) {
 }
 
 void keywordInitContents(Keyword *k) {
-  objectHeaderInitContents(&k->header);
+  k->header = 0;
   k->length = 0;
   k->valueOffset = 0;
   k->hash = 0;
@@ -962,8 +994,7 @@ void tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value) {
   *value = (Value)kw;
 
   keywordInitContents(kw);
-  kw->header.type = VT_KEYWORD;
-  kw->header.size = size;
+  kw->header = makeObjectHeader(W_KEYWORD_TYPE, size);
   kw->length = kwConst.length;
 
   kw->valueOffset = sizeof(Keyword);
@@ -972,7 +1003,7 @@ void tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value) {
 }
 
 void consInitContents(Cons *c) {
-  objectHeaderInitContents(&c->header);
+  c->header = 0;
   c->metadata = nil();
   c->value = nil();
   c->next = nil();
@@ -993,8 +1024,7 @@ RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value meta, Value *ptr,
   *ptr = (Value)cons;
 
   consInitContents(cons);
-  cons->header.type = VT_LIST;
-  cons->header.size = size;
+  cons->header = makeObjectHeader(W_LIST_TYPE, size);
   cons->metadata = meta;
   cons->value = value;
   cons->next = next;
@@ -1323,8 +1353,7 @@ Value allocateCons(VM *vm, Value value, Value next) {
   cons = alloc(vm, size);
 
   consInitContents(cons);
-  cons->header.type = VT_LIST;
-  cons->header.size = size;
+  cons->header = makeObjectHeader(W_LIST_TYPE, size);
   cons->value = value;
   cons->next = next;
 
@@ -1760,7 +1789,7 @@ RetVal tryLoadVarEval(VM *vm, Frame_t frame, Error *error) {
 }
 
 void closureInitContents(Closure *cl) {
-  objectHeaderInitContents(&cl->header);
+  cl->header = 0;
   cl->fn = nil();
   cl->numCaptures = 0;
   cl->capturesOffset = 0;
@@ -1790,8 +1819,7 @@ RetVal tryLoadClosureEval(VM *vm, Frame_t frame, Error *error) {
   Value closureValue = (Value)closure;
 
   closureInitContents(closure);
-  closure->header.type = VT_CLOSURE;
-  closure->header.size = clSize;
+  closure->header = makeObjectHeader(W_CLOSURE_TYPE, clSize);
   closure->fn = fnValue;
   closure->numCaptures = fn->numCaptures;
 
@@ -3404,8 +3432,7 @@ RetVal tryStringMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *value, 
   *value = (Value)str;
 
   stringInitContents(str);
-  str->header.type = VT_STR;
-  str->header.size = strSize;
+  str->header = makeObjectHeader(W_STR_TYPE, strSize);
   str->length = length;
 
   str->valueOffset = sizeof(String);
@@ -3533,8 +3560,7 @@ RetVal trySymbolMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *result,
   *result = (Value)sym;
 
   symbolInitContents(sym);
-  sym->header.type = VT_SYMBOL;
-  sym->header.size = size;
+  sym->header = makeObjectHeader(W_SYMBOL_TYPE, size);
   sym->length = length;
 
   sym->valueOffset = sizeof(Symbol);
@@ -3587,8 +3613,7 @@ RetVal tryKeywordMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *result
   *result = (Value)kw;
 
   keywordInitContents(kw);
-  kw->header.type = VT_KEYWORD;
-  kw->header.size = size;
+  kw->header = makeObjectHeader(W_KEYWORD_TYPE, size);
   kw->length = length;
 
   kw->valueOffset = sizeof(Symbol);
@@ -3632,7 +3657,7 @@ RetVal tryKeywordBuiltin(VM *vm, Frame_t frame, Error *error) {
 }
 
 void cFnInitContents(CFn *fn) {
-  objectHeaderInitContents(&fn->header);
+  fn->header = 0;
   fn->nameLength = 0;
   fn->nameOffset = 0;
   fn->numArgs = 0;
@@ -3651,8 +3676,7 @@ Value makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnIn
   Value value = (Value)fn;
 
   cFnInitContents(fn);
-  fn->header.type = VT_CFN;
-  fn->header.size = fnSize;
+  fn->header = makeObjectHeader(W_CFN_TYPE, fnSize);
   fn->nameLength = nameLength;
   fn->numArgs = numArgs;
   fn->ptr = ptr;
