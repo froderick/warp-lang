@@ -308,7 +308,6 @@ typedef bool (*Equals)(VM_t vm, Value this, Value that);
 
 typedef struct ValueTypeInfo {
   const char *name;
-  bool isHeapObject;
   bool (*isTruthy)(Value value);
   RelocateChildren relocateChildren;
   TryPrn tryPrn;
@@ -446,11 +445,6 @@ const char* getValueTypeName(VM *vm, uint8_t type) {
   return vm->valueTypeTable.valueTypes[type].name;
 }
 
-bool isHeapObject(VM *vm, Value value) {
-  ValueType t = valueType(value);
-  return vm->valueTypeTable.valueTypes[t].isHeapObject;
-}
-
 bool isTruthy(VM *vm, Value value) {
   ValueType t = valueType(value);
   return vm->valueTypeTable.valueTypes[t].isTruthy(value);
@@ -517,12 +511,8 @@ void collect(VM *vm);
  */
 int _alloc(GC *gc, uint64_t length, void **ptr) {
 
-  if (length < 8) {
-    explode("oops, allocation size must be >= 8 bytes%" PRIu64, length);
-  }
-
-  if ((length & (uint64_t)0x7) != 0) {
-    explode("oops, allocation was not 8-byte padded %" PRIu64, length);
+  if ((length & W_PTR_MASK) != 0) {
+    explode("oops, allocation was not 4-byte padded %" PRIu64, length);
   }
 
   if (gc->allocPtr + length < gc->currentHeapEnd) {
@@ -585,37 +575,30 @@ void* deref(GC *gc, Value value) {
   return ptr;
 }
 
-bool inCurrentHeap(GC *gc, void *ptr) {
-  return gc->currentHeap <= ptr && ptr < gc->currentHeapEnd;
-}
+void relocate(VM *vm, Value *valuePtr) {
 
-void relocate(VM *vm, Value *value) {
+  Value value = *valuePtr;
 
-  if (!isHeapObject(vm, *value)) {
+  if ((value & W_PTR_MASK) != 0) {
     // only relocate heap objects
     return;
   }
 
-  GC *gc = &vm->gc;
-
-  void *ptr = (void*)*value;
-
-  void **forwardPtr = ptr;
-  if (inCurrentHeap(gc, *forwardPtr)) {
-    *value = (Value)*forwardPtr;
+  ObjectHeader *header = (ObjectHeader*)value;
+  if (*header & W_GC_FORWARDING_BIT) {
+    *valuePtr = (*header << 1u);
   }
   else {
-    uint64_t size = objectHeaderSize(*(ObjectHeader*)ptr);
+    uint64_t size = objectHeaderSize(*header);
 
     void *newPtr = NULL;
-    if (_alloc(gc, size, &newPtr) == R_OOM) {
+    if (_alloc(&vm->gc, size, &newPtr) == R_OOM) {
       explode("out of memory, cannot allocate %" PRIu64 " bytes mid-gc", size);
     }
+    memcpy(newPtr, (void*)value, size);
 
-    memcpy(newPtr, ptr, size);
-    *value = (Value)newPtr;
-
-    *forwardPtr = newPtr;
+    *valuePtr = (Value)newPtr;
+    *header = W_GC_FORWARDING_BIT | ((Value)newPtr >> 1u);
   }
 }
 
@@ -2582,7 +2565,6 @@ ValueTypeTable valueTypeTableCreate() {
   uint16_t valueTypesAllocated = sizeof(table.valueTypes) / sizeof(table.valueTypes[0]);
   for (int i=0; i<valueTypesAllocated; i++) {
     table.valueTypes[i].name = NULL;
-    table.valueTypes[i].isHeapObject = false;
     table.valueTypes[i].isTruthy = NULL;
     table.valueTypes[i].relocateChildren = NULL;
     table.valueTypes[i].tryPrn = NULL;
@@ -2591,61 +2573,51 @@ ValueTypeTable valueTypeTableCreate() {
   // init with known value types
   ValueTypeInfo valueTypes [] = {
       [VT_NIL]       = {.name = "nil",
-                        .isHeapObject = false,
                         .isTruthy = &isTruthyNo,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnNil,
                         .equals = NULL},
       [VT_UINT]      = {.name = "uint",
-                        .isHeapObject = false,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnInt,
                         .equals = NULL},
       [VT_BOOL]      = {.name = "bool",
-                        .isHeapObject = false,
                         .isTruthy = &isTruthyBool,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnBool,
                         .equals = NULL},
       [VT_FN]        = {.name = "fn",
-                        .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenFn,
                         .tryPrn = &tryPrnFn,
                         .equals = NULL},
       [VT_STR]       = {.name = "str",
-                        .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnStr,
                         .equals = &equalsStr},
       [VT_SYMBOL]    = {.name = "symbol",
-                        .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnSymbol,
                         .equals = &equalsSymbol},
       [VT_KEYWORD]   = {.name = "keyword",
-                        .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnKeyword,
                         .equals = &equalsKeyword},
       [VT_LIST]      = {.name = "list",
-                        .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenList,
                         .tryPrn = &tryPrnList,
                         .equals = &equalsList},
       [VT_CLOSURE]   = {.name = "closure",
-                        .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenClosure,
                         .tryPrn = &tryPrnClosure,
                         .equals = NULL},
       [VT_CFN]       = {.name = "cfn",
-                        .isHeapObject = true,
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .tryPrn = &tryPrnCFn,
