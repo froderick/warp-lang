@@ -42,7 +42,6 @@ typedef enum ValueType {
 typedef struct ObjectHeader {
   ValueType type : 4;
   size_t size : 60;
-  Value metadata;
 } ObjectHeader;
 
 
@@ -183,6 +182,7 @@ wchar_t* keywordValue(Keyword *x) { return (void*)x + x->valueOffset; }
 typedef struct Cons {
   ObjectHeader header;
 
+  Value metadata;
   Value value;
   Value next; // this must be a Cons, or Nil
 } Cons;
@@ -352,7 +352,6 @@ typedef struct VM {
 void objectHeaderInitContents(ObjectHeader *h) {
   h->type = VT_NIL;
   h->size = 0;
-  h->metadata = nil();
 }
 
 /*
@@ -974,6 +973,7 @@ void tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value) {
 
 void consInitContents(Cons *c) {
   objectHeaderInitContents(&c->header);
+  c->metadata = nil();
   c->value = nil();
   c->next = nil();
 }
@@ -995,7 +995,7 @@ RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value meta, Value *ptr,
   consInitContents(cons);
   cons->header.type = VT_LIST;
   cons->header.size = size;
-  cons->header.metadata = meta;
+  cons->metadata = meta;
   cons->value = value;
   cons->next = next;
 
@@ -2397,7 +2397,7 @@ RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) 
 
   expr->type = N_LIST;
 
-  throws(tryPrnMetadata(vm, cons->header.metadata, expr, error));
+  throws(tryPrnMetadata(vm, cons->metadata, expr, error));
 
   listInitContents(&expr->list);
   Expr *elem;
