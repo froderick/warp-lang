@@ -882,6 +882,15 @@ void collect(VM *vm) {
     }
   }
 
+  // relocate symbol table
+  SymbolTable *table = &vm->symbolTable;
+  for (uint64_t i=0; i<table->numAllocatedEntries; i++) {
+    SymbolEntry *entry = &table->entries[i];
+    if (entry->used) {
+      relocate(vm, &entry->symbol);
+    }
+  }
+
   // relocate call stack roots
   Frame_t current = vm->current;
   while (true) {
