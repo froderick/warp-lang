@@ -373,6 +373,19 @@ typedef struct Stack {
   StackSegment *current;     // the most recent segment to be allocated
 } Stack;
 
+typedef struct SymbolEntry {
+  bool used;
+  uint32_t nameHash;
+  Value symbol;
+} SymbolEntry;
+
+typedef struct SymbolTable {
+  uint64_t size;
+  uint64_t numAllocatedEntries;
+  SymbolEntry *entries;
+  // load
+} SymbolTable;
+
 typedef struct VM {
   GC gc;
   Namespaces namespaces;
@@ -381,7 +394,227 @@ typedef struct VM {
   RefRegistry refs;
   Stack stack;
   Frame_t current;
+  SymbolTable symbolTable;
 } VM;
+
+/*
+ * SymbolTable
+ */
+
+#define SYMBOL_TABLE_MIN_ENTRIES 16
+#define SYMBOL_TABLE_MIN_LOAD .40
+#define SYMBOL_TABLE_MAX_LOAD .70
+
+// TODO: understand why this algorithm works
+// http://hg.openjdk.java.net/jdk7u/jdk7u6/jdk/file/8c2c5d63a17e/src/share/classes/java/lang/String.java
+uint32_t stringHash(String *s) {
+  uint32_t h = s->hash;
+  if (h == 0 && s->length > 0) {
+    wchar_t *val = stringValue(s);
+    for (uint64_t i=0; i<s->length; i++) {
+      h = 31 * h + val[i];
+    }
+    s->hash = h;
+  }
+  return h;
+}
+
+void* deref(GC *gc, Value value);
+uint64_t padAllocSize(uint64_t length);
+void* alloc(VM *vm, uint64_t length);
+void symbolInitContents(Symbol *s);
+
+void symbolEntryInitContents(SymbolEntry *e) {
+  e->used = false;
+  e->symbol = nil();
+  e->nameHash = 0;
+}
+
+void symbolTableInitContents(SymbolTable *t) {
+  t->numAllocatedEntries = 0;
+  t->entries = NULL;
+  t->size = 0;
+}
+
+void symbolTableFreeContents(SymbolTable *t) {
+  if (t != NULL) {
+    free(t->entries);
+    t->numAllocatedEntries = 0;
+    t->entries = NULL;
+    t->size = 0;
+  }
+}
+
+void symbolTableInit(SymbolTable *table) {
+
+  symbolTableInitContents(table);
+
+  table->numAllocatedEntries = SYMBOL_TABLE_MIN_ENTRIES;
+  table->entries = malloc(sizeof(SymbolEntry) * table->numAllocatedEntries);
+  if (table->entries == NULL) {
+    explode("failed to allocate SymbolEntries array");
+  }
+  for (uint64_t i=0; i<table->numAllocatedEntries; i++) {
+    symbolEntryInitContents(&table->entries[i]);
+  }
+}
+
+Value getSymbol(VM *vm, Value name) {
+
+  if (valueType(name) != VT_STR) {
+    explode("symbol names must be strings");
+  }
+
+  String *s = deref(&vm->gc, name);
+  uint32_t hash = stringHash(s);
+
+  SymbolTable *table = &vm->symbolTable;
+  uint64_t index = hash % table->numAllocatedEntries;
+
+  Value found = nil();
+  for (uint64_t i = index; i < table->numAllocatedEntries; i++) {
+    SymbolEntry *entry = &table->entries[i];
+
+    if (!entry->used) {
+      break;
+    } else {
+
+      Symbol *sym = deref(&vm->gc, entry->symbol);
+      String *string = deref(&vm->gc, sym->name);
+
+      if (wcscmp(stringValue(s), stringValue(string)) == 0) {
+        found = (Value)sym;
+        break;
+      }
+    }
+  }
+
+  return found;
+}
+
+void _putSymbolWithHash(VM *vm, SymbolTable *table, Value insertMe, String* name, uint32_t hash) {
+
+  uint64_t index = hash % table->numAllocatedEntries;
+
+  bool putHappened = false;
+
+  for (uint64_t i = index; i < table->numAllocatedEntries; i++) {
+    SymbolEntry *entry = &table->entries[i];
+
+    if (!entry->used) {
+      entry->used = true;
+      entry->nameHash = hash;
+      entry->symbol = insertMe;
+      table->size++;
+      putHappened = true;
+      break;
+
+    } else {
+
+      Symbol *thisSym = deref(&vm->gc, entry->symbol);
+      String *thisName = deref(&vm->gc, thisSym->name);
+
+      if (wcscmp(stringValue(name), stringValue(thisName)) == 0) {
+        entry->nameHash = hash;
+        entry->symbol = insertMe;
+        putHappened = true;
+        break;
+      }
+    }
+  }
+
+  if (!putHappened) {
+    for (uint64_t i = 0; i < index; i++) {
+      SymbolEntry *entry = &table->entries[i];
+
+      if (!entry->used) {
+        entry->used = true;
+        entry->nameHash = hash;
+        entry->symbol = insertMe;
+        table->size++;
+        putHappened = true;
+        break;
+
+      } else {
+
+        Symbol *thisSym = deref(&vm->gc, entry->symbol);
+        String *thisName = deref(&vm->gc, thisSym->name);
+
+        if (wcscmp(stringValue(name), stringValue(thisName)) == 0) {
+          entry->nameHash = hash;
+          entry->symbol = insertMe;
+          putHappened = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!putHappened) {
+    explode("why did we not put?");
+  }
+}
+
+void _putSymbol(VM *vm, SymbolTable *table, Value insertMe) {
+
+  if (valueType(insertMe) != VT_SYMBOL) {
+    explode("can only insert symbols");
+  }
+
+  Symbol *sym = deref(&vm->gc, insertMe);
+  String *name = deref(&vm->gc, sym->name);
+  uint32_t hash = stringHash(name);
+
+  _putSymbolWithHash(vm, table, insertMe, name, hash);
+}
+
+void putSymbol(VM *vm, Value insertMe) {
+
+  SymbolTable *table = &vm->symbolTable;
+
+  _putSymbol(vm, table, insertMe);
+
+  float load = (float)table->size / (float)table->numAllocatedEntries;
+
+  // resize
+  if (load > SYMBOL_TABLE_MAX_LOAD || (load > SYMBOL_TABLE_MIN_ENTRIES && load < SYMBOL_TABLE_MIN_LOAD)) {
+
+    uint64_t newAllocatedEntries;
+    if (load > SYMBOL_TABLE_MAX_LOAD) {
+      newAllocatedEntries = table->numAllocatedEntries * 2;
+    }
+    else {
+      newAllocatedEntries = table->numAllocatedEntries / 2;
+      if (newAllocatedEntries < SYMBOL_TABLE_MIN_ENTRIES) {
+        newAllocatedEntries = SYMBOL_TABLE_MIN_ENTRIES;
+      }
+    }
+
+    uint64_t numOldEntries = table->numAllocatedEntries;
+    SymbolEntry *oldEntries = table->entries;
+
+    table->size = 0;
+    table->numAllocatedEntries = newAllocatedEntries;
+    table->entries = malloc(sizeof(SymbolEntry) * newAllocatedEntries);
+    if (table->entries == NULL) {
+      explode("failed to allocate SymbolEntries array");
+    }
+    for (uint64_t i=0; i<table->numAllocatedEntries; i++) {
+      symbolEntryInitContents(&table->entries[i]);
+    }
+
+    for (uint64_t i=0; i<numOldEntries; i++) {
+      SymbolEntry *entry = &oldEntries[i];
+      if (entry->used) {
+        Symbol *sym = deref(&vm->gc, entry->symbol);
+        String *name = deref(&vm->gc, sym->name);
+        _putSymbolWithHash(vm, table, entry->symbol, name, entry->nameHash);
+      }
+    }
+
+    free(oldEntries);
+  }
+}
 
 // frames
 
@@ -949,19 +1182,30 @@ void symbolInitContents(Symbol *s) {
 }
 
 Value symbolHydrate(VM *vm, SymbolConstant symConst) {
-  Symbol *sym = NULL;
 
   Value string = stringHydrate(vm, symConst.value, symConst.length);
 
-  uint64_t size = padAllocSize(sizeof(Symbol));
-  sym = alloc(vm, size);
+  Value result = getSymbol(vm, string);
+  if (valueType(result) == VT_NIL) {
 
-  symbolInitContents(sym);
-  sym->header = makeObjectHeader(W_SYMBOL_TYPE, size);
-  sym->topLevelValue = nil();
-  sym->name = string;
+    Symbol *symbol = NULL;
+    uint64_t size = padAllocSize(sizeof(Symbol));
 
-  return (Value)sym;
+    if (_alloc(&vm->gc, size, (void**)&symbol) == R_OOM) {
+      explode("failed to allocate symbol");
+    }
+
+    symbolInitContents(symbol);
+    symbol->header = makeObjectHeader(W_SYMBOL_TYPE, size);
+    symbol->topLevelValue = nil();
+    symbol->name = string;
+
+    putSymbol(vm, (Value)symbol);
+
+    result = (Value)symbol;
+  }
+
+  return result;
 }
 
 void keywordInitContents(Keyword *k) {
@@ -3519,30 +3763,28 @@ RetVal tryPrintStrBuiltin(VM *vm, Frame_t frame, Error *error) {
   return tryPrStrBuiltinConf(vm, frame, false, error);
 }
 
-Value symbolMakeBlank(VM *vm) {
-  Symbol *sym = NULL;
-
-  uint64_t size = padAllocSize(sizeof(Symbol));
-  sym = alloc(vm, size);
-
-  symbolInitContents(sym);
-  sym->header = makeObjectHeader(W_SYMBOL_TYPE, size);
-
-  return (Value)sym;
-}
-
 RetVal trySymbolBuiltin(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
   Value value = popOperand(frame);
+  ASSERT_STR(value);
   pushFrameRoot(vm, &value);
 
-  ASSERT_STR(value);
+  Value result = getSymbol(vm, value);
+  if (valueType(result) == VT_NIL) {
 
-  Value result = symbolMakeBlank(vm);
+    uint64_t size = padAllocSize(sizeof(Symbol));
+    Symbol *symbol = alloc(vm, size);
 
-  Symbol *sym = deref(&vm->gc, result);
-  sym->name = value;
+    symbolInitContents(symbol);
+    symbol->header = makeObjectHeader(W_SYMBOL_TYPE, size);
+    symbol->topLevelValue = nil();
+    symbol->name = value;
+
+    putSymbol(vm, (Value)symbol);
+
+    result = (Value)symbol;
+  }
 
   popFrameRoot(vm);
   pushOperand(frame, result);
@@ -3675,6 +3917,7 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
   refRegistryInitContents(&vm->refs);
   stackInitContents(&vm->stack, 1024 * 1000);
   vm->current = NULL;
+  symbolTableInit(&vm->symbolTable);
 
   ret = R_SUCCESS;
   return ret;
@@ -3687,6 +3930,8 @@ void vmFreeContents(VM *vm) {
   if (vm != NULL) {
     GCFreeContents(&vm->gc);
     refRegistryFreeContents(&vm->refs);
+    // TODO: seems like we're missing a few things here
+    symbolTableFreeContents(&vm->symbolTable);
   }
 }
 
