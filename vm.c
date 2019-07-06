@@ -134,6 +134,7 @@ uint64_t unwrapUint(Value v) {
 }
 
 typedef struct Frame *Frame_t;
+typedef struct FrameRoot *FrameRoot_t;
 typedef RetVal (*CFnInvoke) (VM_t vm, Frame_t frame, Error *error);
 
 typedef struct CFn {
@@ -437,6 +438,11 @@ Frame_t pushFrame(VM *vm, Value newFn);
 Frame_t replaceFrame(VM *vm, Value newFn);
 Frame_t popFrame(VM *vm);
 
+void pushFrameRoot(VM *vm, Value *rootPtr);
+void popFrameRoot(VM *vm);
+FrameRoot_t frameRoots(VM *vm);
+Value* frameRootValue(FrameRoot_t root);
+
 /*
  * value type protocols
  */
@@ -667,6 +673,12 @@ void collect(VM *vm) {
     for (uint64_t i=0; i<operands; i++) {
       Value *val = getOperandRef(current, i);
       relocate(vm, val);
+    }
+
+    FrameRoot_t root = frameRoots(vm);
+    while (root != NULL) {
+      Value *valuePtr = frameRootValue(root);
+      relocate(vm, valuePtr);
     }
 
     if (!hasParent(current)) {
@@ -1471,26 +1483,19 @@ RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool use
                         numArgs - 1, numArgsSupplied);
     }
 
-    // TODO: stop using the operand stack as a general purpose stack, since it can overflow this way
-
-    // push empty varargs sequence
-    pushOperand(parent, nil());
+    Value seq = nil();
+    pushFrameRoot(vm, &seq);
 
     // read the extra args into that sequence, push it back on the stack
     for (uint16_t i = 0; i < numVarArgs; i++) {
-
-      // may gc, so has to happen before we pop anything off the stack
-      Value seq = allocateCons(vm, nil(), nil());
-
-      // gc possibility over, so pop sequence and arg from the stack and set them on cons
-      Cons *cons = deref(&vm->gc, seq);
-
-      cons->next = popOperand(parent);
+      Cons *cons = deref(&vm->gc, allocateCons(vm, nil(), nil()));
       cons->value = popOperand(parent);
-
-      // put the new sequence back on the stack
-      pushOperand(parent, seq);
+      cons->next = seq;
+      seq = (Value)cons;
     }
+
+    popFrameRoot(vm);
+    pushOperand(parent, seq);
   }
 
   return R_SUCCESS;
@@ -2985,6 +2990,18 @@ void stackFreeContents(Stack *stack) {
 
 typedef struct Frame Frame;
 
+typedef struct FrameRoot FrameRoot;
+
+typedef struct FrameRoot {
+  Value* valuePtr;
+  FrameRoot *next;
+} FrameRoot;
+
+void frameRootInitContents(FrameRoot *root) {
+  root->valuePtr = NULL;
+  root->next = NULL;
+}
+
 typedef struct Frame {
   Frame *parent;
 
@@ -2996,6 +3013,8 @@ typedef struct Frame {
   uint64_t opStackMaxDepth;
   uint64_t opStackUsedDepth;
   Value *opStack;
+
+  FrameRoot *roots;
 
   Value result;
   bool resultAvailable;
@@ -3030,6 +3049,8 @@ void frameInitContents(Frame *frame) {
   frame->opStackUsedDepth = 0;
   frame->opStackMaxDepth = 0;
   frame->opStack = NULL;
+
+  frame->roots = NULL;
 }
 
 uint8_t readInstruction(Frame *frame) {
@@ -3304,6 +3325,29 @@ Frame* replaceFrame(VM *vm, Value newFn) {
   return frame;
 }
 
+FrameRoot_t frameRoots(VM *vm) {
+  return vm->current->roots;
+}
+
+Value* frameRootValue(FrameRoot_t root) {
+  return root->valuePtr;
+}
+
+void pushFrameRoot(VM *vm, Value *rootPtr) {
+  Stack *stack = &vm->stack;
+  Frame *frame = vm->current;
+
+  FrameRoot *root = stackAllocate(stack, sizeof(FrameRoot), "FrameRoot");
+  root->valuePtr = rootPtr;
+  root->next = frame->roots;
+  frame->roots = root;
+}
+
+void popFrameRoot(VM *vm) {
+  Frame *frame = vm->current;
+  frame->roots = frame->roots->next;
+}
+
 /*
  * The top level frame could just be a regular frame
  * - that has an extra local, which points to a function
@@ -3393,7 +3437,7 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, VMEvalResult *re
   } \
 }
 
-RetVal tryStringMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *value, Error *error) {
+Value stringMakeBlank(VM *vm, uint64_t length) {
 
   String *str = NULL;
 
@@ -3401,7 +3445,6 @@ RetVal tryStringMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *value, 
   uint64_t strSize = padAllocSize(sizeof(String) + textSize);
 
   str = alloc(vm, strSize);
-  *value = (Value)str;
 
   stringInitContents(str);
   str->header = makeObjectHeader(W_STR_TYPE, strSize);
@@ -3410,7 +3453,7 @@ RetVal tryStringMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *value, 
   str->valueOffset = sizeof(String);
   stringValue(str)[length] = L'\0';
 
-  return R_SUCCESS;
+  return (Value)str;
 }
 
 /*
@@ -3428,6 +3471,7 @@ RetVal tryStrJoinBuiltin(VM *vm, Frame_t frame, Error *error) {
 
   Value strings = popOperand(frame);
   ASSERT_SEQ(strings);
+  pushFrameRoot(vm, &strings);
 
   uint64_t totalLength = 0;
 
@@ -3444,15 +3488,8 @@ RetVal tryStrJoinBuiltin(VM *vm, Frame_t frame, Error *error) {
     cursor = seq->next;
   }
 
-  // store the list on the op stack while we allocate since gc may happen
-  pushOperand(frame, strings);
-
-  Value resultRef = nil();
-  throws(tryStringMakeBlank(vm, frame, totalLength, &resultRef, error));
+  Value resultRef = stringMakeBlank(vm, totalLength);
   String *result = deref(&vm->gc, resultRef);
-
-  // get the list back again after allocation
-  strings = popOperand(frame);
 
   uint64_t totalSizeWritten = 0;
 
@@ -3470,6 +3507,7 @@ RetVal tryStrJoinBuiltin(VM *vm, Frame_t frame, Error *error) {
     cursor = seq->next;
   }
 
+  popFrameRoot(vm);
   pushOperand(frame, resultRef);
 
   return R_SUCCESS;
@@ -3494,8 +3532,7 @@ RetVal tryPrStrBuiltinConf(VM *vm, Frame_t frame, bool readable, Error *error) {
   throws(tryStringBufferMake(pool, &b, error));
   throws(tryExprPrnBufConf(&expr, b, readable, error));
 
-  Value resultRef = nil();
-  throws(tryStringMakeBlank(vm, frame, stringBufferLength(b), &resultRef, error));
+  Value resultRef = stringMakeBlank(vm, stringBufferLength(b));
   String *result = deref(&vm->gc, resultRef);
 
   memcpy(stringValue(result), stringBufferText(b), stringBufferLength(b) * sizeof(wchar_t));
@@ -3522,14 +3559,13 @@ RetVal tryPrintStrBuiltin(VM *vm, Frame_t frame, Error *error) {
   return tryPrStrBuiltinConf(vm, frame, false, error);
 }
 
-RetVal trySymbolMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *result, Error *error) {
+Value symbolMakeBlank(VM *vm, uint64_t length) {
   Symbol *sym = NULL;
 
   uint64_t textSize = (length + 1) * sizeof(wchar_t);
   uint64_t size = padAllocSize(sizeof(Symbol) + textSize);
 
   sym = alloc(vm, size);
-  *result = (Value)sym;
 
   symbolInitContents(sym);
   sym->header = makeObjectHeader(W_SYMBOL_TYPE, size);
@@ -3538,13 +3574,14 @@ RetVal trySymbolMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *result,
   sym->valueOffset = sizeof(Symbol);
   symbolValue(sym)[sym->length] = L'\0';
 
-  return R_SUCCESS;
+  return (Value)sym;
 }
 
 RetVal trySymbolBuiltin(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
   Value value = popOperand(frame);
+  pushFrameRoot(vm, &value);
 
   ASSERT_STR(value);
 
@@ -3554,20 +3591,14 @@ RetVal trySymbolBuiltin(VM *vm, Frame_t frame, Error *error) {
     length = string->length;
   }
 
-  // keep the string safely on the op stack while we allocate
-  pushOperand(frame, value);
-
-  Value result;
-  throws(trySymbolMakeBlank(vm, frame, length, &result, error));
-
-  // pop string back off now we're done allocating
-  value = popOperand(frame);
+  Value result = symbolMakeBlank(vm, length);
 
   // actually copy string into symbol
   String *string = deref(&vm->gc, value);
   Symbol *sym = deref(&vm->gc, result);
   memcpy(symbolValue(sym), stringValue(string), sym->length * sizeof(wchar_t));
 
+  popFrameRoot(vm);
   pushOperand(frame, result);
 
   return R_SUCCESS;
@@ -3575,14 +3606,13 @@ RetVal trySymbolBuiltin(VM *vm, Frame_t frame, Error *error) {
   return ret;
 }
 
-RetVal tryKeywordMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *result, Error *error) {
+Value keywordMakeBlank(VM *vm, uint64_t length) {
   Keyword *kw = NULL;
 
   uint64_t textSize = (length + 1) * sizeof(wchar_t);
   uint64_t size = padAllocSize(sizeof(Keyword) + textSize);
 
   kw = alloc(vm, size);
-  *result = (Value)kw;
 
   keywordInitContents(kw);
   kw->header = makeObjectHeader(W_KEYWORD_TYPE, size);
@@ -3591,15 +3621,15 @@ RetVal tryKeywordMakeBlank(VM *vm, Frame_t frame, uint64_t length, Value *result
   kw->valueOffset = sizeof(Symbol);
   keywordValue(kw)[kw->length] = L'\0';
 
-  return R_SUCCESS;
+  return (Value)kw;
 }
 
 RetVal tryKeywordBuiltin(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
   Value value = popOperand(frame);
-
   ASSERT_STR(value);
+  pushFrameRoot(vm, &value);
 
   uint64_t length = 0;
   {
@@ -3607,14 +3637,7 @@ RetVal tryKeywordBuiltin(VM *vm, Frame_t frame, Error *error) {
     length = string->length;
   }
 
-  // keep the string safely on the op stack while we allocate
-  pushOperand(frame, value);
-
-  Value result;
-  throws(tryKeywordMakeBlank(vm, frame, length, &result, error));
-
-  // pop string back off now we're done allocating
-  value = popOperand(frame);
+  Value result = keywordMakeBlank(vm, length);
 
   // actually copy string into symbol
   String *string = deref(&vm->gc, value);
@@ -3622,6 +3645,7 @@ RetVal tryKeywordBuiltin(VM *vm, Frame_t frame, Error *error) {
   memcpy(keywordValue(kw), stringValue(string), kw->length * sizeof(wchar_t));
 
   pushOperand(frame, result);
+  popFrameRoot(vm);
 
   return R_SUCCESS;
   failure:
