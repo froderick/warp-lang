@@ -206,12 +206,9 @@ wchar_t* stringValue(String *x) { return (void*)x + x->valueOffset; }
 typedef struct Symbol {
   ObjectHeader header;
 
-  uint64_t length;
-  size_t valueOffset;
-  uint32_t hash;
+  Value topLevelValue;
+  Value name;
 } Symbol;
-
-wchar_t* symbolValue(Symbol *x) { return (void*)x + x->valueOffset; }
 
 typedef struct Keyword {
   ObjectHeader header;
@@ -930,14 +927,13 @@ void stringInitContents(String *s) {
   s->hash = 0;
 }
 
-void tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value) {
+Value stringHydrate(VM *vm, wchar_t *text, uint64_t length) {
   String *str = NULL;
 
   uint64_t textSize = (length + 1) * sizeof(wchar_t);
   uint64_t strSize = padAllocSize(sizeof(String) + textSize);
 
   str = alloc(vm, strSize);
-  *value = (Value)str;
 
   stringInitContents(str);
 
@@ -947,31 +943,30 @@ void tryStringHydrate(VM *vm, wchar_t *text, uint64_t length, Value *value) {
   str->valueOffset = sizeof(String);
   memcpy(stringValue(str), text, length * sizeof(wchar_t));
   stringValue(str)[length] = L'\0';
+
+  return (Value)str;
 }
 
 void symbolInitContents(Symbol *s) {
   s->header = 0;
-  s->length = 0;
-  s->valueOffset = 0;
-  s->hash = 0;
+  s->topLevelValue = nil();
+  s->name = nil();
 }
 
-void trySymbolHydrate(VM *vm, SymbolConstant symConst, Value *value) {
+Value symbolHydrate(VM *vm, SymbolConstant symConst) {
   Symbol *sym = NULL;
 
-  uint64_t textSize = (symConst.length + 1) * sizeof(wchar_t);
-  uint64_t size = padAllocSize(sizeof(Symbol) + textSize);
+  Value string = stringHydrate(vm, symConst.value, symConst.length);
 
+  uint64_t size = padAllocSize(sizeof(Symbol));
   sym = alloc(vm, size);
-  *value = (Value)sym;
 
   symbolInitContents(sym);
   sym->header = makeObjectHeader(W_SYMBOL_TYPE, size);
-  sym->length = symConst.length;
+  sym->topLevelValue = nil();
+  sym->name = string;
 
-  sym->valueOffset = sizeof(Symbol);
-  memcpy(symbolValue(sym), symConst.value, sym->length * sizeof(wchar_t));
-  symbolValue(sym)[sym->length] = L'\0';
+  return (Value)sym;
 }
 
 void keywordInitContents(Keyword *k) {
@@ -1088,10 +1083,10 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
       throws(tryFnHydrate(vm, &c.function, &v, error));
       break;
     case CT_STR:
-      tryStringHydrate(vm, c.string.value, c.string.length, &v);
+      v = stringHydrate(vm, c.string.value, c.string.length);
       break;
     case CT_SYMBOL:
-      trySymbolHydrate(vm, c.symbol, &v);
+      v = symbolHydrate(vm, c.symbol);
       break;
     case CT_KEYWORD:
       tryKeywordHydrate(vm, c.keyword, &v);
@@ -1991,8 +1986,9 @@ RetVal trySetMacroEval(VM *vm, Frame_t frame, Error *error) {
   }
   else if (strValueType == VT_SYMBOL) {
     Symbol *s = deref(&vm->gc, strValue);
-    sym = symbolValue(s);
-    symLength = s->length;
+    String *str = deref(&vm->gc, s->name);
+    sym = stringValue(str);
+    symLength = str->length;
   }
   else {
     throwRuntimeError(error, "only strings or symbols can identify vars: %s", getValueTypeName(vm, strValueType));
@@ -2036,8 +2032,9 @@ RetVal tryGetMacroEval(VM *vm, Frame_t frame, Error *error) {
   }
   else if (type == VT_SYMBOL) {
     Symbol *s = deref(&vm->gc, strValue);
-    sym = symbolValue(s);
-    symLength = s->length;
+    String *str = deref(&vm->gc, s->name);
+    sym = stringValue(str);
+    symLength = str->length;
   }
   else {
     throwRuntimeError(error, "only strings or symbols can identify vars: %s", getValueTypeName(vm, type));
@@ -2316,10 +2313,11 @@ RetVal tryPrnSymbol(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error
   RetVal ret;
 
   Symbol *sym = deref(&vm->gc, result);
+  String *str = deref(&vm->gc, sym->name);
 
   expr->type = N_SYMBOL;
-  expr->symbol.length = sym->length;
-  throws(tryCopyText(pool, symbolValue(sym), &expr->symbol.value, expr->string.length, error));
+  expr->symbol.length = str->length;
+  throws(tryCopyText(pool, stringValue(str), &expr->symbol.value, expr->string.length, error));
 
   return R_SUCCESS;
   failure:
@@ -2478,20 +2476,7 @@ bool equalsSymbol(VM_t vm, Value this, Value that) {
     return false;
   }
   else {
-
-    Symbol *a = deref(&vm->gc, this);
-    Symbol *b = deref(&vm->gc, that);
-
-    if (a == b) {
-      return true;
-    }
-
-    if (a->length != b->length) {
-      return false;
-    }
-    else {
-      return wcscmp(symbolValue(a), symbolValue(b)) == 0;
-    }
+    return this == that;
   }
 }
 
@@ -3565,20 +3550,14 @@ RetVal tryPrintStrBuiltin(VM *vm, Frame_t frame, Error *error) {
   return tryPrStrBuiltinConf(vm, frame, false, error);
 }
 
-Value symbolMakeBlank(VM *vm, uint64_t length) {
+Value symbolMakeBlank(VM *vm) {
   Symbol *sym = NULL;
 
-  uint64_t textSize = (length + 1) * sizeof(wchar_t);
-  uint64_t size = padAllocSize(sizeof(Symbol) + textSize);
-
+  uint64_t size = padAllocSize(sizeof(Symbol));
   sym = alloc(vm, size);
 
   symbolInitContents(sym);
   sym->header = makeObjectHeader(W_SYMBOL_TYPE, size);
-  sym->length = length;
-
-  sym->valueOffset = sizeof(Symbol);
-  symbolValue(sym)[sym->length] = L'\0';
 
   return (Value)sym;
 }
@@ -3591,18 +3570,10 @@ RetVal trySymbolBuiltin(VM *vm, Frame_t frame, Error *error) {
 
   ASSERT_STR(value);
 
-  uint64_t length = 0;
-  {
-    String *string = deref(&vm->gc, value);
-    length = string->length;
-  }
+  Value result = symbolMakeBlank(vm);
 
-  Value result = symbolMakeBlank(vm, length);
-
-  // actually copy string into symbol
-  String *string = deref(&vm->gc, value);
   Symbol *sym = deref(&vm->gc, result);
-  memcpy(symbolValue(sym), stringValue(string), sym->length * sizeof(wchar_t));
+  sym->name = value;
 
   popFrameRoot(vm);
   pushOperand(frame, result);
