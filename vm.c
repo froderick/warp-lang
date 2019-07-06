@@ -442,6 +442,7 @@ void pushFrameRoot(VM *vm, Value *rootPtr);
 void popFrameRoot(VM *vm);
 FrameRoot_t frameRoots(VM *vm);
 Value* frameRootValue(FrameRoot_t root);
+FrameRoot_t frameRootNext(FrameRoot_t root);
 
 /*
  * value type protocols
@@ -679,6 +680,7 @@ void collect(VM *vm) {
     while (root != NULL) {
       Value *valuePtr = frameRootValue(root);
       relocate(vm, valuePtr);
+      root = frameRootNext(root);
     }
 
     if (!hasParent(current)) {
@@ -3331,6 +3333,10 @@ FrameRoot_t frameRoots(VM *vm) {
 
 Value* frameRootValue(FrameRoot_t root) {
   return root->valuePtr;
+}
+
+FrameRoot_t frameRootNext(FrameRoot_t root) {
+  return root->next;
 }
 
 void pushFrameRoot(VM *vm, Value *rootPtr) {
