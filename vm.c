@@ -819,7 +819,7 @@ void destroyRef(VM *vm, Ref ref) {
 
 RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, uint16_t constantIndex, Error *error);
 
-RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values, Error *error);
+void hydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values);
 
 void fnInitContents(Fn *fn) {
 
@@ -848,8 +848,7 @@ void fnInitContents(Fn *fn) {
   fn->lineNumbersOffset = 0;
 }
 
-RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
-  RetVal ret;
+Value fnHydrate(VM *vm, FnConstant *fnConst) {
 
   // cleanup on failure
   Fn *fn = NULL;
@@ -863,7 +862,6 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   uint64_t fnSize = padAllocSize(sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize + lineNumbersSize);
 
   fn = alloc(vm, fnSize);
-  *value = (Value)fn;
 
   fnInitContents(fn);
 
@@ -891,7 +889,7 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
   fn->usesVarArgs = fnConst->usesVarArgs;
 
   fn->numConstants = fnConst->numConstants;
-  throws(_tryHydrateConstants(vm, fn->numConstants, fnConst->constants, fnConstants(fn), error));
+  hydrateConstants(vm, fn->numConstants, fnConst->constants, fnConstants(fn));
 
   fn->numLocals = fnConst->code.numLocals;
   fn->maxOperandStackSize = fnConst->code.maxOperandStackSize;
@@ -914,10 +912,7 @@ RetVal tryFnHydrate(VM *vm, FnConstant *fnConst, Value *value, Error *error) {
       memcpy(fnLineNumbers(fn), fnConst->code.sourceTable.lineNumbers, lineNumbersSize);
   }
 
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  return (Value)fn;
 }
 
 void stringInitContents(String *s) {
@@ -976,14 +971,13 @@ void keywordInitContents(Keyword *k) {
   k->hash = 0;
 }
 
-void tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value) {
+Value keywordHydrate(VM *vm, KeywordConstant kwConst) {
   Keyword *kw = NULL;
 
   uint64_t textSize = (kwConst.length + 1) * sizeof(wchar_t);
   uint64_t size = padAllocSize(sizeof(Keyword) + textSize);
 
   kw = alloc(vm, size);
-  *value = (Value)kw;
 
   keywordInitContents(kw);
   kw->header = makeObjectHeader(W_KEYWORD_TYPE, size);
@@ -992,6 +986,8 @@ void tryKeywordHydrate(VM *vm, KeywordConstant kwConst, Value *value) {
   kw->valueOffset = sizeof(Keyword);
   memcpy(keywordValue(kw), kwConst.value, kw->length * sizeof(wchar_t));
   keywordValue(kw)[kw->length] = L'\0';
+
+  return (Value)kw;
 }
 
 void consInitContents(Cons *c) {
@@ -1001,19 +997,17 @@ void consInitContents(Cons *c) {
   c->next = nil();
 }
 
-RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value meta, Value *ptr, Error *error) {
-  RetVal ret;
+Value _allocateCons(VM *vm, Value value, Value next, Value meta) {
 
   ValueType nextType = valueType(next);
   if (nextType != VT_NIL && nextType != VT_LIST) {
-    throwRuntimeError(error, "a Cons next must be nil or a list: %u", nextType);
+    explode("a Cons next must be nil or a list: %u", nextType);
   }
 
   Cons *cons = NULL;
 
   uint64_t size = padAllocSize(sizeof(Cons));
   cons = alloc(vm, size);
-  *ptr = (Value)cons;
 
   consInitContents(cons);
   cons->header = makeObjectHeader(W_LIST_TYPE, size);
@@ -1021,25 +1015,22 @@ RetVal _tryAllocateCons(VM *vm, Value value, Value next, Value meta, Value *ptr,
   cons->value = value;
   cons->next = next;
 
-  return R_SUCCESS;
-  failure:
-  return ret;
+  return (Value)cons;
 }
 
 /*
  * alreadyHydratedConstants is a pointer to the array of all values materialized for the current fn or codeunit, so far.
  * it is included so that references to already-hydrated values can be resolved by constant index.
  */
-RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant listConst, Value *value, Error *error) {
-  RetVal ret;
+Value listHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant listConst) {
 
   // build up meta property list with conses
   Value meta = nil();
 
   for (uint64_t i=0; i<listConst.meta.numProperties; i++) {
     ConstantMetaProperty *p = &listConst.meta.properties[i];
-    throws(_tryAllocateCons(vm, alreadyHydratedConstants[p->valueIndex], meta, nil(), &meta, error));
-    throws(_tryAllocateCons(vm, alreadyHydratedConstants[p->keyIndex], meta, nil(), &meta, error));
+    meta = _allocateCons(vm, alreadyHydratedConstants[p->valueIndex], meta, nil());
+    meta = _allocateCons(vm, alreadyHydratedConstants[p->keyIndex], meta, nil());
   }
 
   // build up list with conses, each cons gets the same meta
@@ -1050,22 +1041,16 @@ RetVal tryListHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant list
     uint16_t listConstEnd = listConst.length - 1;
     uint16_t valueIndex = listConst.constants[listConstEnd - i];
 
-    throws(_tryAllocateCons(vm, alreadyHydratedConstants[valueIndex], seq, meta, &seq, error));
+    seq = _allocateCons(vm, alreadyHydratedConstants[valueIndex], seq, meta);
   }
 
-  *value = seq;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  return seq;
 }
 
 // TODO: I had a thought, can we get rid of CodeUnit entirely and just replace it with FnConstant?
 // TODO: I had another thought, can we get rid of the nested graph of constants and flatten it entirely?
 
-RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, uint16_t constantIndex,
-    Error *error) {
-  RetVal ret;
+Value hydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c) {
 
   Value v;
 
@@ -1080,7 +1065,7 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
       v = nil();
       break;
     case CT_FN:
-      throws(tryFnHydrate(vm, &c.function, &v, error));
+      v = fnHydrate(vm, &c.function);
       break;
     case CT_STR:
       v = stringHydrate(vm, c.string.value, c.string.length);
@@ -1089,39 +1074,24 @@ RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, V
       v = symbolHydrate(vm, c.symbol);
       break;
     case CT_KEYWORD:
-      tryKeywordHydrate(vm, c.keyword, &v);
+      v = keywordHydrate(vm, c.keyword);
       break;
     case CT_LIST:
-      throws(tryListHydrate(vm, alreadyHydratedConstants, c.list, &v, error));
+      v = listHydrate(vm, alreadyHydratedConstants, c.list);
       break;
     case CT_NONE:
     default:
-      throwInternalError(error, "invalid constant: %u", c.type);
+      explode("invalid constant: %u", c.type);
   }
 
-  *ptr = v;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  return v;
 }
 
-RetVal _tryHydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values, Error *error) {
-  RetVal ret;
-
+void hydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values) {
   for (uint16_t i=0; i<numConstants; i++) {
-
     Constant c = constants[i];
-    Value v;
-
-    throws(tryHydrateConstant(vm, values, c, &v, i, error));
-
-    values[i] = v;
+    values[i] = hydrateConstant(vm, values, c);
   }
-
-  return R_SUCCESS;
-  failure:
-    return ret;
 }
 
 /*
@@ -3360,8 +3330,7 @@ RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, Value *result, 
   c.constants = codeUnit->constants;
   c.code = codeUnit->code;
 
-  Value fnRef = nil();
-  throws(tryFnHydrate(vm, &c, &fnRef, error));
+  Value fnRef = fnHydrate(vm, &c);
 
   Frame_t frame = pushFrame(vm, fnRef);
   pushed = true;
