@@ -207,7 +207,9 @@ typedef struct Symbol {
   ObjectHeader header;
 
   Value topLevelValue;
+  bool valueDefined;
   Value name;
+  bool isMacro;
 } Symbol;
 
 typedef struct Keyword {
@@ -245,34 +247,6 @@ typedef struct GC {
   void *allocPtr;    // the offset within the heap to use for allocation
 
 } GC;
-
-// namespaces
-
-typedef struct Var {
-  wchar_t *namespace;
-  wchar_t *name;
-  Value value;
-  bool isMacro;
-} Var;
-
-typedef struct VarList {
-  uint64_t allocatedLength;
-  uint64_t length;
-  Var *vars;
-} VarList;
-
-typedef struct Namespace {
-  wchar_t *name;
-  VarList localVars;
-  Var *importedVars;
-  uint64_t numImportedVars;
-} Namespace;
-
-typedef struct Namespaces {
-  Namespace *namespaces;
-  uint64_t numNamespaces;
-  Namespace *currentNamespace;
-} Namespaces;
 
 // instruction definitions
 
@@ -388,7 +362,6 @@ typedef struct SymbolTable {
 
 typedef struct VM {
   GC gc;
-  Namespaces namespaces;
   InstTable instTable;
   ValueTypeTable valueTypeTable;
   RefRegistry refs;
@@ -459,6 +432,41 @@ void symbolTableInit(SymbolTable *table) {
   }
 }
 
+SymbolEntry* findEntry(VM *vm, SymbolTable *table, String* name, uint32_t hash) {
+
+  uint64_t index = hash % table->numAllocatedEntries;
+
+  for (uint64_t i = index; i < table->numAllocatedEntries; i++) {
+    SymbolEntry *entry = &table->entries[i];
+
+    if (!entry->used) {
+      return entry;
+    } else {
+      Symbol *thisSym = deref(&vm->gc, entry->symbol);
+      String *thisName = deref(&vm->gc, thisSym->name);
+      if (wcscmp(stringValue(name), stringValue(thisName)) == 0) {
+        return entry;
+      }
+    }
+  }
+
+  for (uint64_t i = 0; i < index; i++) {
+    SymbolEntry *entry = &table->entries[i];
+
+    if (!entry->used) {
+      return entry;
+    } else {
+      Symbol *thisSym = deref(&vm->gc, entry->symbol);
+      String *thisName = deref(&vm->gc, thisSym->name);
+      if (wcscmp(stringValue(name), stringValue(thisName)) == 0) {
+        return entry;
+      }
+    }
+  }
+
+  explode("could not find an available SymbolEntry");
+}
+
 Value getSymbol(VM *vm, Value name) {
 
   if (valueType(name) != VT_STR) {
@@ -469,90 +477,24 @@ Value getSymbol(VM *vm, Value name) {
   uint32_t hash = stringHash(s);
 
   SymbolTable *table = &vm->symbolTable;
-  uint64_t index = hash % table->numAllocatedEntries;
+  SymbolEntry *found = findEntry(vm, table, s, hash);
 
-  Value found = nil();
-  for (uint64_t i = index; i < table->numAllocatedEntries; i++) {
-    SymbolEntry *entry = &table->entries[i];
-
-    if (!entry->used) {
-      break;
-    } else {
-
-      Symbol *sym = deref(&vm->gc, entry->symbol);
-      String *string = deref(&vm->gc, sym->name);
-
-      if (wcscmp(stringValue(s), stringValue(string)) == 0) {
-        found = (Value)sym;
-        break;
-      }
-    }
+  if (found->used) {
+    return found->symbol;
   }
-
-  return found;
+  else {
+    return nil();
+  }
 }
 
 void _putSymbolWithHash(VM *vm, SymbolTable *table, Value insertMe, String* name, uint32_t hash) {
-
-  uint64_t index = hash % table->numAllocatedEntries;
-
-  bool putHappened = false;
-
-  for (uint64_t i = index; i < table->numAllocatedEntries; i++) {
-    SymbolEntry *entry = &table->entries[i];
-
-    if (!entry->used) {
-      entry->used = true;
-      entry->nameHash = hash;
-      entry->symbol = insertMe;
-      table->size++;
-      putHappened = true;
-      break;
-
-    } else {
-
-      Symbol *thisSym = deref(&vm->gc, entry->symbol);
-      String *thisName = deref(&vm->gc, thisSym->name);
-
-      if (wcscmp(stringValue(name), stringValue(thisName)) == 0) {
-        entry->nameHash = hash;
-        entry->symbol = insertMe;
-        putHappened = true;
-        break;
-      }
-    }
+  SymbolEntry *found = findEntry(vm, table, name, hash);
+  if (!found ->used) {
+    table->size++;
+    found->used = true;
   }
-
-  if (!putHappened) {
-    for (uint64_t i = 0; i < index; i++) {
-      SymbolEntry *entry = &table->entries[i];
-
-      if (!entry->used) {
-        entry->used = true;
-        entry->nameHash = hash;
-        entry->symbol = insertMe;
-        table->size++;
-        putHappened = true;
-        break;
-
-      } else {
-
-        Symbol *thisSym = deref(&vm->gc, entry->symbol);
-        String *thisName = deref(&vm->gc, thisSym->name);
-
-        if (wcscmp(stringValue(name), stringValue(thisName)) == 0) {
-          entry->nameHash = hash;
-          entry->symbol = insertMe;
-          putHappened = true;
-          break;
-        }
-      }
-    }
-  }
-
-  if (!putHappened) {
-    explode("why did we not put?");
-  }
+  found->nameHash = hash;
+  found->symbol = insertMe;
 }
 
 void _putSymbol(VM *vm, SymbolTable *table, Value insertMe) {
@@ -604,11 +546,12 @@ void putSymbol(VM *vm, Value insertMe) {
     }
 
     for (uint64_t i=0; i<numOldEntries; i++) {
-      SymbolEntry *entry = &oldEntries[i];
-      if (entry->used) {
-        Symbol *sym = deref(&vm->gc, entry->symbol);
+      SymbolEntry *oldEntry = &oldEntries[i];
+
+      if (oldEntry->used) {
+        Symbol *sym = deref(&vm->gc, oldEntry->symbol);
         String *name = deref(&vm->gc, sym->name);
-        _putSymbolWithHash(vm, table, entry->symbol, name, entry->nameHash);
+        _putSymbolWithHash(vm, table, oldEntry->symbol, name, oldEntry->nameHash);
       }
     }
 
@@ -871,15 +814,6 @@ void collect(VM *vm) {
   while (refElem != NULL) {
     relocate(vm, &refElem->heapObject);
     refElem = refElem->next;
-  }
-
-  // relocate var roots
-  for (uint64_t i=0; i<vm->namespaces.numNamespaces; i++) {
-    Namespace *ns = &vm->namespaces.namespaces[i];
-    for (uint64_t j=0; j<ns->localVars.length; j++) {
-      Var *var = &ns->localVars.vars[j];
-      relocate(vm, &var->value);
-    }
   }
 
   // relocate symbol table
@@ -1187,7 +1121,9 @@ Value stringHydrate(VM *vm, wchar_t *text, uint64_t length) {
 void symbolInitContents(Symbol *s) {
   s->header = 0;
   s->topLevelValue = nil();
+  s->valueDefined = false;
   s->name = nil();
+  s->isMacro = false;
 }
 
 Value symbolHydrate(VM *vm, SymbolConstant symConst) {
@@ -1372,187 +1308,50 @@ RetVal tryVMPrn(VM *vm, Value result, Pool_t pool, Expr *expr, Error *error) {
  * Managing namespaces of vars
  */
 
-void varFree(Var *var);
-
-void varInitContents(Var *var) {
-  var->namespace = NULL;
-  var->name = NULL;
-  var->value = nil();
-  var->isMacro = false;
-}
-
 #define ONE_KB 1024
 
-RetVal tryVarInit(wchar_t *namespace, wchar_t *name, uint64_t symbolNameLength, Value value, Var *var, Error *error) {
-  RetVal ret;
-
-  // TODO: vars should be heap values, fix this leak!
-
-  Pool_t pool = NULL;
-  throws(tryPoolCreate(&pool, ONE_KB, error));
-
-  varInitContents(var);
-
-  throws(tryCopyText(pool, namespace, &var->namespace, wcslen(namespace), error));
-  throws(tryCopyText(pool, name, &var->name, symbolNameLength, error));
-  var->value = value;
-
-  ret = R_SUCCESS;
-  goto done;
-
-  failure:
-  done:
-    // TODO: vars should be heap values, fix this leak!
-    // poolFree(pool);
-    return ret;
-}
-
-bool resolveVar(Namespaces *analyzer, wchar_t *symbolName, uint64_t symbolNameLength, Var **var) {
-
-  Namespace *ns;
-  wchar_t *searchName;
-  uint64_t searchNameLength;
-
-  // assume unqualified namespace at first
-  ns = analyzer->currentNamespace;
-  searchName = symbolName;
-  searchNameLength = symbolNameLength;
-
-  if (symbolNameLength > 2) { // need at least three characters to qualify a var name with a namespace: ('q/n')
-
-    // attempt to find a qualified namespace
-    wchar_t *slashPtr = wcschr(symbolName, L'/');
-    if (slashPtr != NULL) { // qualified
-      uint64_t nsLen = slashPtr - symbolName;
-
-      for (int i=0; i<analyzer->numNamespaces; i++) {
-
-        Namespace *thisNs = &analyzer->namespaces[i];
-        if (wcsncmp(symbolName, thisNs->name, nsLen) == 0) {
-          ns = thisNs;
-          searchName = slashPtr + 1;
-          searchNameLength = symbolNameLength - (nsLen + 1);
-          break;
-        }
-      }
-    }
-  }
-
-  // find var within namespace
-
-  for (int i=0; i<ns->localVars.length; i++) {
-    if (wcscmp(searchName, ns->localVars.vars[i].name) == 0) {
-      *var = &ns->localVars.vars[i];
-      return true;
-    }
-  }
-
-  return false;
-}
-
-void varListInit(VarList *list) {
-  list->length = 0;
-  list->allocatedLength = 0;
-  list->vars = NULL;
-}
-
-RetVal tryAppendVar(VarList *list, Var var, Error* error) {
-
-  RetVal ret;
-
-  if (list->vars == NULL) {
-    uint64_t len = 16;
-    tryMalloc(list->vars, len * sizeof(Var), "Var array");
-    list->allocatedLength = len;
-  }
-  else if (list->length == list->allocatedLength) {
-    uint64_t newAllocatedLength = list->allocatedLength * 2;
-
-    Var* resizedVars = realloc(list->vars, newAllocatedLength * sizeof(Var));
-    if (resizedVars == NULL) {
-      ret = memoryError(error, "realloc Var array");
-      goto failure;
-    }
-
-    list->allocatedLength = newAllocatedLength;
-    list->vars = resizedVars;
-  }
-
-  list->vars[list->length] = var;
-  list->length = list->length + 1;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryDefVar(Namespaces *namespaces, wchar_t *symbolName, uint64_t symbolNameLength, Value value, Error *error) {
-  RetVal ret;
-
-  // gets cleaned up on failure
-  Var createdVar;
-  varInitContents(&createdVar);
-
-  Var *resolvedVar = NULL;
-  if (!resolveVar(namespaces, symbolName, symbolNameLength, &resolvedVar)) {
-    Namespace *ns = namespaces->currentNamespace;
-    throws(tryVarInit(ns->name, symbolName, symbolNameLength, value, &createdVar, error));
-    throws(tryAppendVar(&ns->localVars, createdVar, error));
-  }
-  else {
-    resolvedVar->value = value;
-  }
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryNamespaceMake(wchar_t *name, uint64_t length, Namespace **ptr , Error *error) {
-
-  RetVal ret;
-
-  Pool_t pool = NULL;
-  throws(tryPoolCreate(&pool, ONE_KB, error));
-
-  Namespace *ns;
-  tryPalloc(pool, ns, sizeof(Namespace), "Namespace");
-
-  // TODO: namespaces should be heap values! fix this leak!
-
-  ns->name = NULL;
-  ns->importedVars = NULL;
-  ns->numImportedVars = 0;
-
-  varListInit(&ns->localVars);
-
-  throws(tryCopyText(pool, name, &ns->name, length, error));
-
-  *ptr = ns;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
-
-RetVal tryNamespacesInitContents(Namespaces *namespaces, Error *error) {
-
-  RetVal ret;
-
-  Namespace *userNs;
-  throws(tryNamespaceMake(L"user", wcslen(L"user"), &userNs, error));
-
-  namespaces->currentNamespace = userNs;
-  namespaces->namespaces = userNs;
-  namespaces->numNamespaces = 1;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
-}
+//bool resolveVar(Namespaces *analyzer, wchar_t *symbolName, uint64_t symbolNameLength, Var **var) {
+//
+//  Namespace *ns;
+//  wchar_t *searchName;
+//  uint64_t searchNameLength;
+//
+//  // assume unqualified namespace at first
+//  ns = analyzer->currentNamespace;
+//  searchName = symbolName;
+//  searchNameLength = symbolNameLength;
+//
+//  if (symbolNameLength > 2) { // need at least three characters to qualify a var name with a namespace: ('q/n')
+//
+//    // attempt to find a qualified namespace
+//    wchar_t *slashPtr = wcschr(symbolName, L'/');
+//    if (slashPtr != NULL) { // qualified
+//      uint64_t nsLen = slashPtr - symbolName;
+//
+//      for (int i=0; i<analyzer->numNamespaces; i++) {
+//
+//        Namespace *thisNs = &analyzer->namespaces[i];
+//        if (wcsncmp(symbolName, thisNs->name, nsLen) == 0) {
+//          ns = thisNs;
+//          searchName = slashPtr + 1;
+//          searchNameLength = symbolNameLength - (nsLen + 1);
+//          break;
+//        }
+//      }
+//    }
+//  }
+//
+//  // find var within namespace
+//
+//  for (int i=0; i<ns->localVars.length; i++) {
+//    if (wcscmp(searchName, ns->localVars.vars[i].name) == 0) {
+//      *var = &ns->localVars.vars[i];
+//      return true;
+//    }
+//  }
+//
+//  return false;
+//}
 
 Value allocateCons(VM *vm, Value value, Value next) {
 
@@ -1943,24 +1742,21 @@ RetVal trySubEval(VM *vm, Frame_t frame, Error *error) {
 
 // (8), offset (16)  | (value ->)
 RetVal tryDefVarEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
 
   Value value = popOperand(frame);
   uint16_t constantIndex = readIndex(frame);
   Value varName = getConst(frame, constantIndex);
 
-  String *str = deref(&vm->gc, varName);
+  Symbol *symbol = deref(&vm->gc, varName);
 
-  throws(tryDefVar(&vm->namespaces, stringValue(str), str->length, value, error));
+  String *name = deref(&vm->gc, symbol->name);
+  printf("defining %ls\n", stringValue(name));
 
-  // define always returns nil
-  Value result = nil();
-  pushOperand(frame, result);
+  symbol->valueDefined = true;
+  symbol->topLevelValue = value;
 
+  pushOperand(frame, nil());
   return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 // (8), offset 16  | (-> value)
@@ -1968,27 +1764,31 @@ RetVal tryLoadVarEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
   uint16_t constantIndex = readIndex(frame);
-  Value varName = getConst(frame, constantIndex);
-  ValueType varNameType = valueType(varName);
+  Value value = getConst(frame, constantIndex);
+  ValueType varNameType = valueType(value);
 
-  if (varNameType != VT_STR) {
-    throwRuntimeError(error, "expected a string: %s", getValueTypeName(vm, varNameType));
+  if (varNameType != VT_SYMBOL) {
+    explode("expected a symbol: %s", getValueTypeName(vm, varNameType));
   }
 
-  String *str = deref(&vm->gc, varName);
+  Symbol *symbol = deref(&vm->gc, value);
 
-  Var *var = NULL;
-  if (!resolveVar(&vm->namespaces, stringValue(str), str->length, &var)) {
-    // fail: not all vars exist
-    throwRuntimeError(error, "no such var found: '%ls'", stringValue(str));
+  if (!symbol->valueDefined) {
+
+    for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
+      SymbolEntry *e = &vm->symbolTable.entries[i];
+      if (e->used) {
+        Symbol *s = deref(&vm->gc, e->symbol);
+        String *name = deref(&vm->gc, s->name);
+        printf("symbol-table: %ls (defined=%u)\n", stringValue(name), s->valueDefined);
+      }
+    }
+
+    String *name = deref(&vm->gc, symbol->name);
+    throwRuntimeError(error, "no value defined for : '%ls'", stringValue(name));
   }
-  // TODO: don't let users take the value of a macro, per clojure? could do this by making a special macro invoke instruction/builtin
-//  else if (var->isMacro) {
-//    throwRuntimeError(error, "cannot take the value of a macro: '%ls/%ls'", var->namespace, var->name);
-//  }
-  else {
-    pushOperand(frame, var->value);
-  }
+
+  pushOperand(frame, symbol->topLevelValue);
 
   return R_SUCCESS;
 
@@ -2196,38 +1996,36 @@ RetVal tryRestEval(VM *vm, Frame_t frame, Error *error) {
 RetVal trySetMacroEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
-  Value strValue = popOperand(frame);
-  ValueType strValueType = valueType(strValue);
+  Value value = popOperand(frame);
+  ValueType type = valueType(value);
 
-  wchar_t *sym = NULL;
-  uint64_t symLength = 0;
-
-  if (strValueType == VT_STR) {
-    String *str = deref(&vm->gc, strValue);
-    sym = stringValue(str);
-    symLength = str->length;
-  }
-  else if (strValueType == VT_SYMBOL) {
-    Symbol *s = deref(&vm->gc, strValue);
-    String *str = deref(&vm->gc, s->name);
-    sym = stringValue(str);
-    symLength = str->length;
-  }
-  else {
-    throwRuntimeError(error, "only strings or symbols can identify vars: %s", getValueTypeName(vm, strValueType));
+  if (type != VT_SYMBOL) {
+    throwRuntimeError(error, "only symbols can identify vars: %s", getValueTypeName(vm, type));
   }
 
-  Var *var;
-  if (!resolveVar(&vm->namespaces, sym, symLength, &var)) {
-    throwRuntimeError(error, "no such var exists: %ls", sym);
-  }
+  Symbol *s = deref(&vm->gc, value);
+  String *name = deref(&vm->gc, s->name);
 
-  if (!var->isMacro) {
-    if (valueType(var->value) != VT_FN) {
-      throwRuntimeError(error, "only vars referring to functions can be macros: %ls -> %s",
-          sym, getValueTypeName(vm, valueType(var->value)));
+  if (!s->valueDefined) {
+
+    for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
+      SymbolEntry *e = &vm->symbolTable.entries[i];
+      if (e->used) {
+        Symbol *sym = deref(&vm->gc, e->symbol);
+        String *symName = deref(&vm->gc, sym->name);
+        printf("symbol-table: %ls (defined=%u)\n", stringValue(symName), s->valueDefined);
+      }
     }
-    var->isMacro = true;
+
+    throwRuntimeError(error, "no value is defined for this var: %ls", stringValue(name));
+  }
+
+  if (!s->isMacro) {
+    if (valueType(s->topLevelValue) != VT_FN) {
+      throwRuntimeError(error, "only vars referring to functions can be macros: %ls -> %s",
+          stringValue(name), getValueTypeName(vm, valueType(s->topLevelValue)));
+    }
+    s->isMacro = true;
   }
 
   pushOperand(frame, nil());
@@ -2242,34 +2040,16 @@ RetVal trySetMacroEval(VM *vm, Frame_t frame, Error *error) {
 RetVal tryGetMacroEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
-  Value strValue = popOperand(frame);
-  ValueType type = valueType(strValue);
+  Value value = popOperand(frame);
+  ValueType type = valueType(value);
 
-  wchar_t *sym = NULL;
-  uint64_t symLength = 0;
-
-  if (type == VT_STR) {
-    String *str = deref(&vm->gc, strValue);
-    sym = stringValue(str);
-    symLength = str->length;
-  }
-  else if (type == VT_SYMBOL) {
-    Symbol *s = deref(&vm->gc, strValue);
-    String *str = deref(&vm->gc, s->name);
-    sym = stringValue(str);
-    symLength = str->length;
-  }
-  else {
-    throwRuntimeError(error, "only strings or symbols can identify vars: %s", getValueTypeName(vm, type));
+  if (type != VT_SYMBOL) {
+    throwRuntimeError(error, "only symbols can identify vars: %s", getValueTypeName(vm, type));
   }
 
-  Value result = wrapBool(false);
+  Symbol *s = deref(&vm->gc, value);
 
-  Var *var;
-  if (resolveVar(&vm->namespaces, sym, symLength, &var)) {
-    result = wrapBool(var->isMacro);
-  }
-
+  Value result = wrapBool(s->isMacro);
   pushOperand(frame, result);
 
   return R_SUCCESS;
@@ -2477,6 +2257,12 @@ void relocateChildrenClosure(VM_t vm, void *obj) {
   for (uint16_t i=0; i<closure->numCaptures; i++) {
     relocate(vm, &closureCaptures(closure)[i]);
   }
+}
+
+void relocateChildrenSymbol(VM_t vm, void *obj) {
+  Symbol *s = obj;
+  relocate(vm, &s->name);
+  relocate(vm, &s->topLevelValue);
 }
 
 RetVal tryPrnNil(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
@@ -2814,7 +2600,7 @@ ValueTypeTable valueTypeTableCreate() {
                         .equals = &equalsStr},
       [VT_SYMBOL]    = {.name = "symbol",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = NULL,
+                        .relocateChildren = &relocateChildrenSymbol,
                         .tryPrn = &tryPrnSymbol,
                         .equals = &equalsSymbol},
       [VT_KEYWORD]   = {.name = "keyword",
@@ -3882,18 +3668,39 @@ Value makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnIn
   return value;
 }
 
-void defineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
+void defVar(VM *vm, wchar_t *name, uint64_t length, Value value) {
 
-  size_t nameLength = wcslen(name);
-  Value value = makeCFn(vm, name, numArgs, varArgs, ptr);
+  Value string = stringHydrate(vm, name, length);
 
-  Error error;
-  errorInitContents(&error);
-  if (tryDefVar(&vm->namespaces, name, nameLength, value, &error) != R_SUCCESS) {
-    explode("failed to define a var");
+  Value result = getSymbol(vm, string);
+  if (valueType(result) == VT_NIL) {
+
+    Symbol *symbol = NULL;
+    uint64_t size = padAllocSize(sizeof(Symbol));
+
+    if (_alloc(&vm->gc, size, (void**)&symbol) == R_OOM) {
+      explode("failed to allocate symbol");
+    }
+
+    symbolInitContents(symbol);
+    symbol->header = makeObjectHeader(W_SYMBOL_TYPE, size);
+    symbol->topLevelValue = nil();
+    symbol->name = string;
+
+    putSymbol(vm, (Value)symbol);
+
+    result = (Value)symbol;
   }
+
+  Symbol *symbol = deref(&vm->gc, result);
+  symbol->valueDefined = true;
+  symbol->topLevelValue = value;
 }
 
+void defineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
+  Value value = makeCFn(vm, name, numArgs, varArgs, ptr);
+  defVar(vm, name, wcslen(name), value);
+}
 
 void initCFns(VM *vm) {
 
@@ -3921,17 +3728,13 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
   vm->instTable = instTableCreate();
   vm->valueTypeTable = valueTypeTableCreate();
   GCCreate(&vm->gc, 1024 * 1000);
-  throws(tryNamespacesInitContents(&vm->namespaces, error));
+  symbolTableInit(&vm->symbolTable);
   initCFns(vm);
   refRegistryInitContents(&vm->refs);
   stackInitContents(&vm->stack, 1024 * 1000);
   vm->current = NULL;
-  symbolTableInit(&vm->symbolTable);
 
   ret = R_SUCCESS;
-  return ret;
-
-  failure:
   return ret;
 }
 

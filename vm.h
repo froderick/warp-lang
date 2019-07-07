@@ -111,11 +111,6 @@ typedef struct FnConstant {
   Code code;
 } FnConstant;
 
-typedef struct VarRefConstant {
-  uint64_t nameLength;
-  wchar_t *name;
-} VarRefConstant;
-
 typedef struct SymbolConstant {
   uint64_t length;
   wchar_t *value;
@@ -145,7 +140,6 @@ typedef struct Constant {
     uint64_t integer;
     StringConstant string;
     FnConstant function;
-    VarRefConstant varRef;
     SymbolConstant symbol;
     KeywordConstant keyword;
     ListConstant list;

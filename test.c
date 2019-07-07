@@ -541,9 +541,9 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.numConstants, 3);
       ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
       ck_assert_int_eq(codeUnit.constants[0].integer, 100);
-      ck_assert_int_eq(codeUnit.constants[1].type, CT_STR);
-      ck_assert_int_eq(codeUnit.constants[1].varRef.nameLength, 1);
-      ck_assert_int_eq(wcscmp(codeUnit.constants[1].varRef.name, L"x"), 0);
+      ck_assert_int_eq(codeUnit.constants[1].type, CT_SYMBOL);
+      ck_assert_int_eq(codeUnit.constants[1].symbol.length, 1);
+      ck_assert_int_eq(wcscmp(codeUnit.constants[1].symbol.value, L"x"), 0);
       ck_assert_int_eq(codeUnit.constants[2].type, CT_INT);
       ck_assert_int_eq(codeUnit.constants[2].integer, 50);
 
@@ -754,9 +754,9 @@ START_TEST(repl)
 
     assertEval(L"(let () "
                "    (def foo (fn (x) x))"
-               "    (set-macro \"foo\"))", L"nil");
+               "    (set-macro 'foo))", L"nil");
 
-    assertEval(L"(let () (def x 100) user/x)", L"100");
+    assertEval(L"(let () (def x 100) x)", L"100");
 
     assertEval(L"(list 1 2)", L"(1 2)");
 
