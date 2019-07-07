@@ -309,28 +309,6 @@ typedef struct ValueTypeTable {
  * Also, Pairs (lists, now) are a good idea to build directly into the VM.
  */
 
-
-/*
- * RefRegistry data structures
- */
-
-typedef struct RefElem RefElem;
-
-typedef struct RefElem {
-  Value heapObject;
-  RefElem *prev, *next;
-} RefElem;
-
-typedef struct RefRegistry {
-  RefElem *used;
-  RefElem *free;
-} RefRegistry;
-
-/*
- * A Ref is really a direct memory pointer to a RefElem struct.
- */
-typedef uint64_t Ref;
-
 typedef struct StackSegment StackSegment;
 
 typedef struct StackSegment {
@@ -364,7 +342,6 @@ typedef struct VM {
   GC gc;
   InstTable instTable;
   ValueTypeTable valueTypeTable;
-  RefRegistry refs;
   Stack stack;
   Frame_t current;
   SymbolTable symbolTable;
@@ -809,13 +786,6 @@ void collect(VM *vm) {
 
   memset(vm->gc.currentHeap, 0, vm->gc.heapSize);
 
-  // relocate refs
-  RefElem *refElem = vm->refs.used;
-  while (refElem != NULL) {
-    relocate(vm, &refElem->heapObject);
-    refElem = refElem->next;
-  }
-
   // relocate symbol table
   SymbolTable *table = &vm->symbolTable;
   for (uint64_t i=0; i<table->numAllocatedEntries; i++) {
@@ -879,114 +849,6 @@ void collect(VM *vm) {
   uint64_t duration = end - start;
 
   printf("gc: completed, %" PRIu64 " bytes recovered, %" PRIu64 " bytes used, took %" PRIu64 "ms\n", sizeRecovered, newHeapUsed, duration);
-}
-
-/* RefRegistry implementation
- *
- * The purpose of a registry is to hold references to heap objects from c
- * code in such a way that the collector can discover them and avoid premature
- * collection. Holding these references directly in c code is a problem
- * because the copying gc needs to be able to rewrite all the references
- * periodically. The c call stack is unavailable to the collector, so a layer
- * of indirection is needed to accomplish this.
- *
- * The VM has a single global registry for now, which is based on a
- * doubly-linked list. This is not good for cache locality, but we can fix this
- * later. Generally we only need refs when writing c code that manipulates
- * refs outside of places managed exclusively by the VM (stack, heap,
- * op-stack, etc).
- */
-
-void refElemInitContents(RefElem *e) {
-  e->heapObject = nil();
-  e->prev = NULL;
-  e->next = NULL;
-}
-
-void refRegistryInitContents(RefRegistry *r) {
-  r->used = NULL;
-  r->free = NULL;
-}
-
-void refRegistryFreeContents(RefRegistry *r) {
-  if (r != NULL) {
-    RefElem *elem = NULL;
-
-    elem = r->free;
-    while (elem != NULL) {
-      RefElem *freeMe = elem;
-      elem = elem->next;
-      free(freeMe);
-    }
-    r->free = NULL;
-
-    elem = r->used;
-    while (elem != NULL) {
-      RefElem *freeMe = elem;
-      elem = elem->next;
-      free(freeMe);
-    }
-    r->used = NULL;
-  }
-}
-
-Ref createRef(VM *vm, Value value) {
-
-  RefRegistry *registry = &vm->refs;
-
-  RefElem *newHead = NULL;
-  if (registry->free != NULL) { // look for free first
-    newHead = registry->free;
-    registry->free = registry->free->next;
-  }
-  else { // allocate
-    newHead = malloc(sizeof(RefElem));
-    if (newHead == NULL) {
-      explode("failed to allocate RefElem");
-    }
-  }
-
-  newHead->heapObject = value;
-  newHead->prev = NULL;
-  newHead->next = registry->used;
-
-  registry->used = newHead;
-
-  Ref ref = (Ref)&newHead;
-  return ref;
-}
-
-Value refDeref(Ref ref) {
-  RefElem *elem = (RefElem*)ref;
-  return elem->heapObject;
-}
-
-ValueType getRefType(Ref ref) {
-  RefElem *elem = (RefElem*)ref;
-  return valueType(elem->heapObject);
-}
-
-void destroyRef(VM *vm, Ref ref) {
-
-  RefRegistry *registry = &vm->refs;
-
-  RefElem *elem = (RefElem*)ref;
-
-  // clear
-  elem->heapObject = nil();
-
-  // remove
-  if (elem->prev != NULL) {
-    elem->prev->next = elem->next;
-  }
-  if (elem->next != NULL) {
-    elem->next->prev = elem->prev;
-  }
-
-  // add to free list
-  elem->prev = NULL;
-  elem->next = registry->free;
-  registry->free = elem;
 }
 
 /*
@@ -3705,7 +3567,6 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
   GCCreate(&vm->gc, 1024 * 1000);
   symbolTableInit(&vm->symbolTable);
   initCFns(vm);
-  refRegistryInitContents(&vm->refs);
   stackInitContents(&vm->stack, 1024 * 1000);
   vm->current = NULL;
 
@@ -3716,7 +3577,6 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
 void vmFreeContents(VM *vm) {
   if (vm != NULL) {
     GCFreeContents(&vm->gc);
-    refRegistryFreeContents(&vm->refs);
     // TODO: seems like we're missing a few things here
     symbolTableFreeContents(&vm->symbolTable);
   }
