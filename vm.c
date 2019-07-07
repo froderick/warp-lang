@@ -993,9 +993,7 @@ void destroyRef(VM *vm, Ref ref) {
  * Loading Constants as Values
  */
 
-RetVal tryHydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c, Value *ptr, uint16_t constantIndex, Error *error);
-
-void hydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values);
+Value hydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c);
 
 void fnInitContents(Fn *fn) {
 
@@ -1022,6 +1020,13 @@ void fnInitContents(Fn *fn) {
   fn->sourceFileNameOffset = 0;
   fn->numLineNumbers = 0;
   fn->lineNumbersOffset = 0;
+}
+
+void hydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values) {
+  for (uint16_t i=0; i<numConstants; i++) {
+    Constant c = constants[i];
+    values[i] = hydrateConstant(vm, values, c);
+  }
 }
 
 Value fnHydrate(VM *vm, FnConstant *fnConst) {
@@ -1240,9 +1245,7 @@ Value listHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant listCons
 // TODO: I had another thought, can we get rid of the nested graph of constants and flatten it entirely?
 
 Value hydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c) {
-
   Value v;
-
   switch (c.type) {
     case CT_BOOL:
       v = wrapBool(c.boolean);
@@ -1272,15 +1275,7 @@ Value hydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c) {
     default:
       explode("invalid constant: %u", c.type);
   }
-
   return v;
-}
-
-void hydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values) {
-  for (uint16_t i=0; i<numConstants; i++) {
-    Constant c = constants[i];
-    values[i] = hydrateConstant(vm, values, c);
-  }
 }
 
 /*
