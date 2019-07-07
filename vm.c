@@ -2797,9 +2797,7 @@ RetVal tryExceptionPrintf(VMException *e, Error *error) {
     return ret;
 }
 
-RetVal tryFrameEval(VM *vm, Pool_t outputPool, Error *error) {
-  RetVal ret;
-
+void frameEval(VM *vm, Pool_t outputPool) {
   uint8_t inst;
   TryEval tryEval;
 
@@ -2825,21 +2823,18 @@ RetVal tryFrameEval(VM *vm, Pool_t outputPool, Error *error) {
       explode("instruction unimplemented: %s (%u)", getInstName(&vm->instTable, inst), inst);
     }
 
-    ret = tryEval(vm, vm->current, error);
-
-    if (ret != R_SUCCESS) {
+    Error error;
+    errorInitContents(&error);
+    if (tryEval(vm, vm->current, &error) != R_SUCCESS) {
       VMException ex;
       // TODO: exceptions should go on the heap
-      throws(tryExceptionMake(vm->current, outputPool, &ex, error));
+      if (tryExceptionMake(vm->current, outputPool, &ex, &error) != R_SUCCESS) {
+        explode("failed to create an exception");
+      }
       setException(vm->current, ex);
       break;
     }
   }
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 /*
@@ -3352,11 +3347,7 @@ void popFrameRoot(VM *vm) {
  *
  */
 
-RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, Value *result, VMException *exception, bool *exceptionThrown,  Error *error) {
-
-  RetVal ret;
-
-  bool pushed = false;
+void _vmEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, Value *result, VMException *exception, bool *exceptionThrown) {
 
   FnConstant c;
   constantFnInitContents(&c);
@@ -3365,11 +3356,8 @@ RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, Value *result, 
   c.code = codeUnit->code;
 
   Value fnRef = fnHydrate(vm, &c);
-
   Frame_t frame = pushFrame(vm, fnRef);
-  pushed = true;
-
-  throws(tryFrameEval(vm, outputPool, error));
+  frameEval(vm, outputPool);
 
   if (frame->exceptionSet) {
     *exceptionThrown = true;
@@ -3380,14 +3368,6 @@ RetVal _tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, Value *result, 
   }
 
   popFrame(vm);
-
-  return R_SUCCESS;
-
-  failure:
-    if (pushed) {
-      popFrame(vm);
-    }
-    return ret;
 }
 
 RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, VMEvalResult *result, Error *error) {
@@ -3398,7 +3378,7 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, VMEvalResult *re
   VMException exception;
   bool exceptionThrown = false;
 
-  throws(_tryVMEval(vm, codeUnit, outputPool, &value, &exception, &exceptionThrown, error));
+  _vmEval(vm, codeUnit, outputPool, &value, &exception, &exceptionThrown);
 
   if (exceptionThrown) {
     result->type = RT_EXCEPTION;
