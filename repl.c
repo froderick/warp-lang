@@ -30,6 +30,9 @@ RetVal tryReplCompile(Pool_t outputPool, TokenStream_t stream, FileInfo fileInfo
   }
 
   throws(tryExprRead(outputPool, stream, &expr, error));
+
+  throws(tryExprPrn(outputPool, expr, error));
+
   throws(tryFormAnalyzeOptions(options, expr, outputPool, &form, error));
   throws(tryCompileTopLevel(outputPool, form, codeUnit, error));
 
@@ -150,7 +153,7 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
         goto failure;
       }
     }
-    //printCodeUnit(&unit);
+    printCodeUnit(&unit);
 
     throws(tryVMEval(vm, &unit, pool, &result, error));
   }

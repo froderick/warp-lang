@@ -343,6 +343,7 @@ typedef struct VM {
   InstTable instTable;
   ValueTypeTable valueTypeTable;
   Stack stack;
+  FrameRoot_t noFrameRoots;
   Frame_t current;
   SymbolTable symbolTable;
 } VM;
@@ -689,17 +690,25 @@ void* alloc(VM *vm, uint64_t length) {
 
   void *ptr = NULL;
 
+  collect(vm);
+
   int success = _alloc(&vm->gc, length, &ptr);
 
   if (success == R_OOM) {
-    collect(vm);
-
-    success = _alloc(&vm->gc, length, &ptr);
-
-    if (success == R_OOM) {
-      explode("out of memory, failed to allocate %" PRIu64 " bytes", length);
-    }
+    explode("out of memory, failed to allocate %" PRIu64 " bytes", length);
   }
+
+//  int success = _alloc(&vm->gc, length, &ptr);
+//
+//  if (success == R_OOM) {
+//    collect(vm);
+//
+//    success = _alloc(&vm->gc, length, &ptr);
+//
+//    if (success == R_OOM) {
+//      explode("out of memory, failed to allocate %" PRIu64 " bytes", length);
+//    }
+//  }
 
   return ptr;
 }
@@ -795,42 +804,51 @@ void collect(VM *vm) {
     }
   }
 
+  // relocate noFrameRoots
+  FrameRoot_t noFrameRoot = vm->noFrameRoots;
+  while (noFrameRoot != NULL) {
+    Value *valuePtr = frameRootValue(noFrameRoot);
+    relocate(vm, valuePtr);
+    noFrameRoot = frameRootNext(noFrameRoot);
+  }
+
   // relocate call stack roots
   Frame_t current = vm->current;
-  while (true) {
+  if (current != NULL) {
+    while (true) {
 
-    // relocate fnRef
-    {
-      Value oldFnRef = getFnRef(current);
-      Value newFnRef = oldFnRef;
-      relocate(vm, &newFnRef);
-      setFnRef(vm, current, newFnRef);
-    }
+      // relocate fnRef
+      {
+        Value oldFnRef = getFnRef(current);
+        Value newFnRef = oldFnRef;
+        relocate(vm, &newFnRef);
+        setFnRef(vm, current, newFnRef);
+      }
 
-    uint16_t locals = numLocals(current);
-    for (uint16_t i=0; i<locals; i++) {
-      Value *val = getLocalRef(current, i);
-      relocate(vm, val);
-    }
+      uint16_t locals = numLocals(current);
+      for (uint16_t i = 0; i < locals; i++) {
+        Value *val = getLocalRef(current, i);
+        relocate(vm, val);
+      }
 
-    uint64_t operands = numOperands(current);
-    for (uint64_t i=0; i<operands; i++) {
-      Value *val = getOperandRef(current, i);
-      relocate(vm, val);
-    }
+      uint64_t operands = numOperands(current);
+      for (uint64_t i = 0; i < operands; i++) {
+        Value *val = getOperandRef(current, i);
+        relocate(vm, val);
+      }
 
-    FrameRoot_t root = frameRoots(vm);
-    while (root != NULL) {
-      Value *valuePtr = frameRootValue(root);
-      relocate(vm, valuePtr);
-      root = frameRootNext(root);
-    }
+      FrameRoot_t root = frameRoots(vm);
+      while (root != NULL) {
+        Value *valuePtr = frameRootValue(root);
+        relocate(vm, valuePtr);
+        root = frameRootNext(root);
+      }
 
-    if (!hasParent(current)) {
-      break;
-    }
-    else {
-      current = getParent(current);
+      if (!hasParent(current)) {
+        break;
+      } else {
+        current = getParent(current);
+      }
     }
   }
 
@@ -855,7 +873,7 @@ void collect(VM *vm) {
  * Loading Constants as Values
  */
 
-Value hydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c);
+Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c);
 
 void fnInitContents(Fn *fn) {
 
@@ -884,66 +902,58 @@ void fnInitContents(Fn *fn) {
   fn->lineNumbersOffset = 0;
 }
 
-void hydrateConstants(VM *vm, uint16_t numConstants, Constant *constants, Value *values) {
-  for (uint16_t i=0; i<numConstants; i++) {
-    Constant c = constants[i];
-    values[i] = hydrateConstant(vm, values, c);
-  }
-}
-
 Value fnHydrate(VM *vm, FnConstant *fnConst) {
 
-  // cleanup on failure
   Fn *fn = NULL;
-
-  uint64_t nameSize = (fnConst->name.length + 1) * sizeof(wchar_t);
-  uint64_t constantsSize = fnConst->numConstants * sizeof(Value);
-  uint64_t codeSize = fnConst->code.codeLength * sizeof(uint8_t);
-  uint64_t sourceFileNameSize = (fnConst->code.sourceTable.fileName.length + 1) * sizeof(wchar_t);
-  uint64_t lineNumbersSize = fnConst->code.sourceTable.numLineNumbers * sizeof(LineNumber);
-
-  uint64_t fnSize = padAllocSize(sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize + lineNumbersSize);
-
-  fn = alloc(vm, fnSize);
-
-  fnInitContents(fn);
-
-  fn->header = makeObjectHeader(W_FN_TYPE, fnSize);
-
-  fn->nameOffset           = sizeof(Fn);
-  fn->constantsOffset      = sizeof(Fn) + nameSize;
-  fn->codeOffset           = sizeof(Fn) + nameSize + constantsSize;
-  fn->sourceFileNameOffset = sizeof(Fn) + nameSize + constantsSize + codeSize;
-  fn->lineNumbersOffset    = sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize;
-
-  fn->hasName = fnConst->hasName;
-  if (fn->hasName) {
-    fn->nameLength = fnConst->name.length;
-    size_t copySize = fnConst->name.length * sizeof(wchar_t);
-
-    memcpy(fnName(fn), fnConst->name.value, copySize);
-    fnName(fn)[fn->nameLength] = L'\0';
-
-    fn->bindingSlotIndex = fnConst->bindingSlotIndex;
-  }
-
-  fn->numCaptures = fnConst->numCaptures;
-  fn->numArgs = fnConst->numArgs;
-  fn->usesVarArgs = fnConst->usesVarArgs;
-
-  fn->numConstants = fnConst->numConstants;
-  hydrateConstants(vm, fn->numConstants, fnConst->constants, fnConstants(fn));
-
-  fn->numLocals = fnConst->code.numLocals;
-  fn->maxOperandStackSize = fnConst->code.maxOperandStackSize;
-
   {
-    fn->codeLength = fnConst->code.codeLength;
-    memcpy(fnCode(fn), fnConst->code.code, codeSize);
-  }
+    uint64_t nameSize = (fnConst->name.length + 1) * sizeof(wchar_t);
+    uint64_t constantsSize = fnConst->numConstants * sizeof(Value);
+    uint64_t codeSize = fnConst->code.codeLength * sizeof(uint8_t);
+    uint64_t sourceFileNameSize = (fnConst->code.sourceTable.fileName.length + 1) * sizeof(wchar_t);
+    uint64_t lineNumbersSize = fnConst->code.sourceTable.numLineNumbers * sizeof(LineNumber);
 
-  fn->hasSourceTable = fnConst->code.hasSourceTable;
-  if (fn->hasSourceTable) {
+    uint64_t fnSize = padAllocSize(
+        sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize + lineNumbersSize);
+
+    fn = alloc(vm, fnSize);
+
+    fnInitContents(fn);
+
+    fn->header = makeObjectHeader(W_FN_TYPE, fnSize);
+
+    fn->nameOffset = sizeof(Fn);
+    fn->constantsOffset = sizeof(Fn) + nameSize;
+    fn->codeOffset = sizeof(Fn) + nameSize + constantsSize;
+    fn->sourceFileNameOffset = sizeof(Fn) + nameSize + constantsSize + codeSize;
+    fn->lineNumbersOffset = sizeof(Fn) + nameSize + constantsSize + codeSize + sourceFileNameSize;
+
+    fn->hasName = fnConst->hasName;
+    if (fn->hasName) {
+      fn->nameLength = fnConst->name.length;
+      size_t copySize = fnConst->name.length * sizeof(wchar_t);
+
+      memcpy(fnName(fn), fnConst->name.value, copySize);
+      fnName(fn)[fn->nameLength] = L'\0';
+
+      fn->bindingSlotIndex = fnConst->bindingSlotIndex;
+    }
+
+    fn->numCaptures = fnConst->numCaptures;
+    fn->numArgs = fnConst->numArgs;
+    fn->usesVarArgs = fnConst->usesVarArgs;
+
+    fn->numConstants = fnConst->numConstants;
+
+    fn->numLocals = fnConst->code.numLocals;
+    fn->maxOperandStackSize = fnConst->code.maxOperandStackSize;
+
+    {
+      fn->codeLength = fnConst->code.codeLength;
+      memcpy(fnCode(fn), fnConst->code.code, codeSize);
+    }
+
+    fn->hasSourceTable = fnConst->code.hasSourceTable;
+    if (fn->hasSourceTable) {
 
       fn->sourceFileNameLength = fnConst->code.sourceTable.fileName.length;
       size_t copySize = fnConst->code.sourceTable.fileName.length * sizeof(wchar_t);
@@ -953,7 +963,19 @@ Value fnHydrate(VM *vm, FnConstant *fnConst) {
 
       fn->numLineNumbers = fnConst->code.sourceTable.numLineNumbers;
       memcpy(fnLineNumbers(fn), fnConst->code.sourceTable.lineNumbers, lineNumbersSize);
+    }
   }
+
+  for (uint16_t i=0; i<fn->numConstants; i++) {
+    fnConstants(fn)[i] = nil();
+  }
+
+  pushFrameRoot(vm, (Value*)&fn);
+  for (uint16_t i=0; i<fn->numConstants; i++) {
+    Value hydrated = hydrateConstant(vm, &fn, fnConst->constants[i]);
+    fnConstants(fn)[i] = hydrated;
+  }
+  popFrameRoot(vm);
 
   return (Value)fn;
 }
@@ -966,13 +988,11 @@ void stringInitContents(String *s) {
 }
 
 Value stringHydrate(VM *vm, wchar_t *text, uint64_t length) {
-  String *str = NULL;
 
   uint64_t textSize = (length + 1) * sizeof(wchar_t);
   uint64_t strSize = padAllocSize(sizeof(String) + textSize);
 
-  str = alloc(vm, strSize);
-
+  String *str = alloc(vm, strSize);
   stringInitContents(str);
 
   str->header = makeObjectHeader(W_STR_TYPE, strSize);
@@ -995,26 +1015,25 @@ void symbolInitContents(Symbol *s) {
 
 Value symbolHydrate(VM *vm, SymbolConstant symConst) {
 
-  Value string = stringHydrate(vm, symConst.value, symConst.length);
+  Value protectedName = stringHydrate(vm, symConst.value, symConst.length);
 
-  Value result = getSymbol(vm, string);
+  Value result = getSymbol(vm, protectedName);
   if (valueType(result) == VT_NIL) {
 
-    Symbol *symbol = NULL;
-    uint64_t size = padAllocSize(sizeof(Symbol));
+    pushFrameRoot(vm, &protectedName);
 
-    if (_alloc(&vm->gc, size, (void**)&symbol) == R_OOM) {
-      explode("failed to allocate symbol");
-    }
+    uint64_t size = padAllocSize(sizeof(Symbol));
+    Symbol *symbol = alloc(vm, size);
 
     symbolInitContents(symbol);
     symbol->header = makeObjectHeader(W_SYMBOL_TYPE, size);
     symbol->topLevelValue = nil();
-    symbol->name = string;
+    symbol->name = protectedName;
 
     putSymbol(vm, (Value)symbol);
-
     result = (Value)symbol;
+
+    popFrameRoot(vm);
   }
 
   return result;
@@ -1053,60 +1072,70 @@ void consInitContents(Cons *c) {
   c->next = nil();
 }
 
-Value _allocateCons(VM *vm, Value value, Value next, Value meta) {
+//Value allocateCons(VM *vm, Value value, Value next, Value meta);
 
-  ValueType nextType = valueType(next);
-  if (nextType != VT_NIL && nextType != VT_LIST) {
-    explode("a Cons next must be nil or a list: %u", nextType);
-  }
+Cons* makeCons(VM *vm) {
 
   Cons *cons = NULL;
-
   uint64_t size = padAllocSize(sizeof(Cons));
   cons = alloc(vm, size);
 
   consInitContents(cons);
   cons->header = makeObjectHeader(W_LIST_TYPE, size);
-  cons->metadata = meta;
-  cons->value = value;
-  cons->next = next;
 
-  return (Value)cons;
+  return cons;
 }
 
 /*
  * alreadyHydratedConstants is a pointer to the array of all values materialized for the current fn or codeunit, so far.
  * it is included so that references to already-hydrated values can be resolved by constant index.
  */
-Value listHydrate(VM *vm, Value *alreadyHydratedConstants, ListConstant listConst) {
+Value listHydrate(VM *vm, Fn **protectedFn, ListConstant listConst) {
 
   // build up meta property list with conses
-  Value meta = nil();
+  Value protectedMeta = nil();
+  pushFrameRoot(vm, &protectedMeta);
 
   for (uint64_t i=0; i<listConst.meta.numProperties; i++) {
     ConstantMetaProperty *p = &listConst.meta.properties[i];
-    meta = _allocateCons(vm, alreadyHydratedConstants[p->valueIndex], meta, nil());
-    meta = _allocateCons(vm, alreadyHydratedConstants[p->keyIndex], meta, nil());
+
+    Cons *propValue = makeCons(vm);
+    propValue->value = fnConstants(*protectedFn)[p->valueIndex];
+    propValue->next = protectedMeta;
+    protectedMeta = (Value)propValue;
+
+    Cons *propKey = makeCons(vm);
+    propKey->value = fnConstants(*protectedFn)[p->keyIndex];
+    propKey->next = protectedMeta;
+    protectedMeta = (Value)propKey;
   }
 
   // build up list with conses, each cons gets the same meta
-  Value seq = nil();
+  Value protectedSeq = nil();
+  pushFrameRoot(vm, &protectedSeq);
 
   for (uint16_t i = 0; i < listConst.length; i++) {
 
     uint16_t listConstEnd = listConst.length - 1;
     uint16_t valueIndex = listConst.constants[listConstEnd - i];
 
-    seq = _allocateCons(vm, alreadyHydratedConstants[valueIndex], seq, meta);
+    Cons *cons = makeCons(vm);
+    cons->value = fnConstants(*protectedFn)[valueIndex];
+    cons->next = protectedSeq;
+    cons->metadata = protectedMeta;
+    protectedSeq = (Value)cons;
   }
 
-  return seq;
+  popFrameRoot(vm);
+  popFrameRoot(vm);
+
+  return protectedSeq;
 }
 
 // TODO: I had a thought, can we get rid of CodeUnit entirely and just replace it with FnConstant?
 // TODO: I had another thought, can we get rid of the nested graph of constants and flatten it entirely?
 
-Value hydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c) {
+Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c) {
   Value v;
   switch (c.type) {
     case CT_BOOL:
@@ -1131,7 +1160,7 @@ Value hydrateConstant(VM *vm, Value *alreadyHydratedConstants, Constant c) {
       v = keywordHydrate(vm, c.keyword);
       break;
     case CT_LIST:
-      v = listHydrate(vm, alreadyHydratedConstants, c.list);
+      v = listHydrate(vm, protectedFn, c.list);
       break;
     case CT_NONE:
     default:
@@ -1210,7 +1239,7 @@ RetVal tryVMPrn(VM *vm, Value result, Pool_t pool, Expr *expr, Error *error) {
 //  return false;
 //}
 
-Value allocateCons(VM *vm, Value value, Value next) {
+Value allocateCons(VM *vm, Value value, Value next, Value meta) {
 
   ValueType nextType = valueType(next);
   if (nextType != VT_NIL && nextType != VT_LIST) {
@@ -1218,15 +1247,14 @@ Value allocateCons(VM *vm, Value value, Value next) {
   }
 
   Cons *cons = NULL;
-
   uint64_t size = padAllocSize(sizeof(Cons));
-
   cons = alloc(vm, size);
 
   consInitContents(cons);
   cons->header = makeObjectHeader(W_LIST_TYPE, size);
   cons->value = value;
   cons->next = next;
+  cons->metadata = meta;
 
   return (Value)cons;
 }
@@ -1364,7 +1392,7 @@ RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool use
 
     // read the extra args into that sequence, push it back on the stack
     for (uint16_t i = 0; i < numVarArgs; i++) {
-      Cons *cons = deref(&vm->gc, allocateCons(vm, nil(), nil()));
+      Cons *cons = deref(&vm->gc, allocateCons(vm, nil(), nil(), nil()));
       cons->value = popOperand(parent);
       cons->next = seq;
       seq = (Value)cons;
@@ -1664,29 +1692,29 @@ void closureInitContents(Closure *cl) {
 RetVal tryLoadClosureEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
-  uint16_t constantIndex = readIndex(frame);
-  Value fnValue = getConst(frame, constantIndex);
+  Fn *protectedFn;
+  {
+    uint16_t constantIndex = readIndex(frame);
+    Value fnValue = getConst(frame, constantIndex);
 
-  ValueType fnValueType = valueType(fnValue);
-  if (fnValueType != VT_FN) {
-    throwRuntimeError(error, "cannot create a closure from this value type: %s",
-        getValueTypeName(vm, fnValueType));
+    ValueType fnValueType = valueType(fnValue);
+    if (fnValueType != VT_FN) {
+      throwRuntimeError(error, "cannot create a closure from this value type: %s",
+                        getValueTypeName(vm, fnValueType));
+    }
+
+    protectedFn = deref(&vm->gc, fnValue);
   }
+  pushFrameRoot(vm, (Value*)&protectedFn);
 
-  Fn *fn = deref(&vm->gc, fnValue);
-
-  Closure *closure = NULL;
-
-  uint64_t capturesSize = fn->numCaptures * sizeof(Value);
+  uint64_t capturesSize = protectedFn->numCaptures * sizeof(Value);
   uint64_t clSize = padAllocSize(sizeof(Closure) + capturesSize);
-
-  closure = alloc(vm, clSize);
-  Value closureValue = (Value)closure;
+  Closure *closure = alloc(vm, clSize);
 
   closureInitContents(closure);
   closure->header = makeObjectHeader(W_CLOSURE_TYPE, clSize);
-  closure->fn = fnValue;
-  closure->numCaptures = fn->numCaptures;
+  closure->fn = (Value)protectedFn;
+  closure->numCaptures = protectedFn->numCaptures;
 
   closure->capturesOffset = sizeof(Closure);
 
@@ -1697,7 +1725,8 @@ RetVal tryLoadClosureEval(VM *vm, Frame_t frame, Error *error) {
     closureCaptures(closure)[idx] = capture;
   }
 
-  pushOperand(frame, closureValue);
+  popFrameRoot(vm);
+  pushOperand(frame, (Value)closure);
 
   return R_SUCCESS;
 
@@ -1771,7 +1800,7 @@ RetVal tryConsEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
   // gc may occur, so allocate the cons first
-  Value result = allocateCons(vm, nil(), nil());
+  Value result = allocateCons(vm, nil(), nil(), nil());
 
   Value seq = popOperand(frame);
   Value x = popOperand(frame);
@@ -3126,12 +3155,16 @@ Frame_t pushFrame(VM *vm, Value newFn) {
   frame->fn = fn;
 
   frame->locals = stackAllocate(stack, sizeof(Value) * frame->fn->numLocals, "locals");
+  for (uint16_t i = 0; i < frame->fn->numLocals; i++) {
+    frame->locals[i] = nil();
+  }
 
   frame->opStackMaxDepth = frame->fn->maxOperandStackSize;
   frame->opStackUsedDepth = 0;
   frame->opStack = stackAllocate(stack, sizeof(Value) * frame->opStackMaxDepth, "opStack");
 
   vm->current = frame;
+
 
   return frame;
 }
@@ -3157,6 +3190,9 @@ Frame* replaceFrame(VM *vm, Value newFn) {
 
   if (fn->numLocals > frame->fn->numLocals) {
     frame->locals = stackAllocate(stack, sizeof(Value) * fn->numLocals, "locals");
+  }
+  for (uint16_t i = 0; i < frame->fn->numLocals; i++) {
+    frame->locals[i] = nil();
   }
 
   if (fn->maxOperandStackSize > frame->opStackMaxDepth) {
@@ -3189,15 +3225,28 @@ void pushFrameRoot(VM *vm, Value *rootPtr) {
   Stack *stack = &vm->stack;
   Frame *frame = vm->current;
 
-  FrameRoot *root = stackAllocate(stack, sizeof(FrameRoot), "FrameRoot");
-  root->valuePtr = rootPtr;
-  root->next = frame->roots;
-  frame->roots = root;
+  if (frame == NULL) {
+    FrameRoot *root = stackAllocate(stack, sizeof(FrameRoot), "FrameRoot");
+    root->valuePtr = rootPtr;
+    root->next = vm->noFrameRoots;
+    vm->noFrameRoots = root;
+  }
+  else {
+    FrameRoot *root = stackAllocate(stack, sizeof(FrameRoot), "FrameRoot");
+    root->valuePtr = rootPtr;
+    root->next = frame->roots;
+    frame->roots = root;
+  }
 }
 
 void popFrameRoot(VM *vm) {
   Frame *frame = vm->current;
-  frame->roots = frame->roots->next;
+  if (frame == NULL) {
+    vm->noFrameRoots = vm->noFrameRoots->next;
+  }
+  else {
+    frame->roots = frame->roots->next;
+  }
 }
 
 /*
@@ -3505,38 +3554,39 @@ Value makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnIn
   return value;
 }
 
-void defVar(VM *vm, wchar_t *name, uint64_t length, Value value) {
+void defVar(VM *vm, wchar_t *name, uint64_t length, Value *protectedValue) {
 
-  Value string = stringHydrate(vm, name, length);
+  Value protectedName = stringHydrate(vm, name, length);
 
-  Value result = getSymbol(vm, string);
+  Value result = getSymbol(vm, protectedName);
   if (valueType(result) == VT_NIL) {
 
-    Symbol *symbol = NULL;
-    uint64_t size = padAllocSize(sizeof(Symbol));
+    pushFrameRoot(vm, &protectedName);
 
-    if (_alloc(&vm->gc, size, (void**)&symbol) == R_OOM) {
-      explode("failed to allocate symbol");
-    }
+    uint64_t size = padAllocSize(sizeof(Symbol));
+    Symbol *symbol = alloc(vm, size);
 
     symbolInitContents(symbol);
     symbol->header = makeObjectHeader(W_SYMBOL_TYPE, size);
     symbol->topLevelValue = nil();
-    symbol->name = string;
+    symbol->name = protectedName;
 
     putSymbol(vm, (Value)symbol);
-
     result = (Value)symbol;
+
+    popFrameRoot(vm);
   }
 
   Symbol *symbol = deref(&vm->gc, result);
   symbol->valueDefined = true;
-  symbol->topLevelValue = value;
+  symbol->topLevelValue = *protectedValue;
 }
 
 void defineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
-  Value value = makeCFn(vm, name, numArgs, varArgs, ptr);
-  defVar(vm, name, wcslen(name), value);
+  Value protectedValue = makeCFn(vm, name, numArgs, varArgs, ptr);
+  pushFrameRoot(vm, &protectedValue);
+  defVar(vm, name, wcslen(name), &protectedValue);
+  popFrameRoot(vm);
 }
 
 void initCFns(VM *vm) {
@@ -3565,9 +3615,9 @@ RetVal tryVMInitContents(VM *vm , Error *error) {
   vm->instTable = instTableCreate();
   vm->valueTypeTable = valueTypeTableCreate();
   GCCreate(&vm->gc, 1024 * 1000);
+  stackInitContents(&vm->stack, 1024 * 1000);
   symbolTableInit(&vm->symbolTable);
   initCFns(vm);
-  stackInitContents(&vm->stack, 1024 * 1000);
   vm->current = NULL;
 
   ret = R_SUCCESS;
