@@ -989,30 +989,34 @@ void symbolInitContents(Symbol *s) {
   s->isMacro = false;
 }
 
-Value symbolHydrate(VM *vm, SymbolConstant symConst) {
+Value symbolIntern(VM *vm, Value *protectedName) {
 
-  Value protectedName = stringHydrate(vm, symConst.value, symConst.length);
-
-  Value result = getSymbol(vm, protectedName);
+  Value result = getSymbol(vm, *protectedName);
   if (valueType(result) == VT_NIL) {
-
-    pushFrameRoot(vm, &protectedName);
 
     uint64_t size = padAllocSize(sizeof(Symbol));
     Symbol *symbol = alloc(vm, size);
 
     symbolInitContents(symbol);
     symbol->header = makeObjectHeader(W_SYMBOL_TYPE, size);
-    symbol->topLevelValue = nil();
-    symbol->name = protectedName;
+    symbol->name = *protectedName;
 
     putSymbol(vm, (Value)symbol);
     result = (Value)symbol;
-
-    popFrameRoot(vm);
   }
 
   return result;
+}
+
+Value symbolHydrate(VM *vm, SymbolConstant symConst) {
+
+  Value protectedName = stringHydrate(vm, symConst.value, symConst.length);
+  pushFrameRoot(vm, &protectedName);
+
+  Value value = symbolIntern(vm, &protectedName);
+
+  popFrameRoot(vm);
+  return value;
 }
 
 void keywordInitContents(Keyword *k) {
@@ -1048,8 +1052,6 @@ void consInitContents(Cons *c) {
   c->next = nil();
 }
 
-//Value allocateCons(VM *vm, Value value, Value next, Value meta);
-
 Cons* makeCons(VM *vm) {
 
   Cons *cons = NULL;
@@ -1063,8 +1065,9 @@ Cons* makeCons(VM *vm) {
 }
 
 /*
- * alreadyHydratedConstants is a pointer to the array of all values materialized for the current fn or codeunit, so far.
- * it is included so that references to already-hydrated values can be resolved by constant index.
+ * `protectedFn` is a alloc-safe pointer to the Fn for which a constant is being hydrated.
+ * This is included so we so that references to already-hydrated values can be resolved by
+ * constant index.
  */
 Value listHydrate(VM *vm, Fn **protectedFn, ListConstant listConst) {
 
@@ -3411,27 +3414,13 @@ RetVal tryPrintStrBuiltin(VM *vm, Frame_t frame, Error *error) {
 RetVal trySymbolBuiltin(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
-  Value value = popOperand(frame);
-  ASSERT_STR(value);
-  pushFrameRoot(vm, &value);
+  Value protectedName = popOperand(frame);
+  ASSERT_STR(protectedName);
 
-  Value result = getSymbol(vm, value);
-  if (valueType(result) == VT_NIL) {
-
-    uint64_t size = padAllocSize(sizeof(Symbol));
-    Symbol *symbol = alloc(vm, size);
-
-    symbolInitContents(symbol);
-    symbol->header = makeObjectHeader(W_SYMBOL_TYPE, size);
-    symbol->topLevelValue = nil();
-    symbol->name = value;
-
-    putSymbol(vm, (Value)symbol);
-
-    result = (Value)symbol;
-  }
-
+  pushFrameRoot(vm, &protectedName);
+  Value result = symbolIntern(vm, &protectedName);
   popFrameRoot(vm);
+
   pushOperand(frame, result);
 
   return R_SUCCESS;
@@ -3518,38 +3507,21 @@ Value makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnIn
   return value;
 }
 
-void defVar(VM *vm, wchar_t *name, uint64_t length, Value *protectedValue) {
-
-  Value protectedName = stringHydrate(vm, name, length);
-
-  Value result = getSymbol(vm, protectedName);
-  if (valueType(result) == VT_NIL) {
-
-    pushFrameRoot(vm, &protectedName);
-
-    uint64_t size = padAllocSize(sizeof(Symbol));
-    Symbol *symbol = alloc(vm, size);
-
-    symbolInitContents(symbol);
-    symbol->header = makeObjectHeader(W_SYMBOL_TYPE, size);
-    symbol->topLevelValue = nil();
-    symbol->name = protectedName;
-
-    putSymbol(vm, (Value)symbol);
-    result = (Value)symbol;
-
-    popFrameRoot(vm);
-  }
-
-  Symbol *symbol = deref(&vm->gc, result);
-  symbol->valueDefined = true;
-  symbol->topLevelValue = *protectedValue;
-}
-
 void defineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
-  Value protectedValue = makeCFn(vm, name, numArgs, varArgs, ptr);
-  pushFrameRoot(vm, &protectedValue);
-  defVar(vm, name, wcslen(name), &protectedValue);
+
+  Value protectedName = stringHydrate(vm, name, wcslen(name));
+  pushFrameRoot(vm, &protectedName);
+
+  Value protectedSymbol = symbolIntern(vm, &protectedName);
+  pushFrameRoot(vm, &protectedSymbol);
+
+  Value value = makeCFn(vm, name, numArgs, varArgs, ptr);
+
+  Symbol *symbol = deref(&vm->gc, protectedSymbol);
+  symbol->valueDefined = true;
+  symbol->topLevelValue = value;
+
+  popFrameRoot(vm);
   popFrameRoot(vm);
 }
 
