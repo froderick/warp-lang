@@ -337,6 +337,7 @@ typedef struct SymbolTable {
 } SymbolTable;
 
 typedef struct VM {
+  VMConfig config;
   GC gc;
   InstTable instTable;
   ValueTypeTable valueTypeTable;
@@ -688,25 +689,23 @@ void* alloc(VM *vm, uint64_t length) {
 
   void *ptr = NULL;
 
-  collect(vm);
-
-  int success = _alloc(&vm->gc, length, &ptr);
-
-  if (success == R_OOM) {
-    explode("out of memory, failed to allocate %" PRIu64 " bytes", length);
+  if (!vm->config.gcOnAlloc) {
+    int success = _alloc(&vm->gc, length, &ptr);
+    if (success == R_OOM) {
+      collect(vm);
+      success = _alloc(&vm->gc, length, &ptr);
+      if (success == R_OOM) {
+        explode("out of memory, failed to allocate %" PRIu64 " bytes", length);
+      }
+    }
   }
-
-//  int success = _alloc(&vm->gc, length, &ptr);
-//
-//  if (success == R_OOM) {
-//    collect(vm);
-//
-//    success = _alloc(&vm->gc, length, &ptr);
-//
-//    if (success == R_OOM) {
-//      explode("out of memory, failed to allocate %" PRIu64 " bytes", length);
-//    }
-//  }
+  else {
+    collect(vm);
+    int success = _alloc(&vm->gc, length, &ptr);
+    if (success == R_OOM) {
+      explode("out of memory, failed to allocate %" PRIu64 " bytes", length);
+    }
+  }
 
   return ptr;
 }
@@ -3627,9 +3626,14 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"keyword", 1, false, tryKeywordBuiltin);
 }
 
-RetVal tryVMInitContents(VM *vm , Error *error) {
+void vmConfigInitContents(VMConfig *config) {
+  config->gcOnAlloc = false;
+}
+
+RetVal tryVMInitContents(VM *vm, VMConfig config, Error *error) {
   RetVal ret;
 
+  vm->config = config;
   vm->instTable = instTableCreate();
   vm->valueTypeTable = valueTypeTableCreate();
   GCCreate(&vm->gc, 1024 * 1000);
@@ -3650,11 +3654,11 @@ void vmFreeContents(VM *vm) {
   }
 }
 
-RetVal tryVMMake(VM **ptr , Error *error) {
+RetVal tryVMMake(VM **ptr, VMConfig config, Error *error) {
   RetVal ret;
 
   tryMalloc(*ptr, sizeof(VM), "VM malloc");
-  throws(tryVMInitContents(*ptr, error));
+  throws(tryVMInitContents(*ptr, config, error));
 
   ret = R_SUCCESS;
   return ret;

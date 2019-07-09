@@ -163,9 +163,14 @@ void constantMetaInit(ConstantMeta *c);
 
 typedef struct VM *VM_t;
 
-RetVal tryVMInitContents(VM_t vm, Error *error);
+typedef struct VMConfig {
+  bool gcOnAlloc;
+} VMConfig;
+
+void vmConfigInitContents(VMConfig *config);
+
 void vmFreeContents(VM_t vm);
-RetVal tryVMMake(VM_t *ptr , Error *error);
+RetVal tryVMMake(VM_t *ptr, VMConfig config, Error *error);
 void vmFree(VM_t vm);
 
 typedef struct VMExceptionFrame {

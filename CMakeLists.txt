@@ -35,3 +35,4 @@ target_compile_options(repl-main PRIVATE -g)
 
 enable_testing()
 add_test(tests tests)
+add_test(tests-gc tests --gc-on-alloc)

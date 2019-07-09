@@ -14,6 +14,8 @@
 #define ONE_KB (1024)
 #define ONE_MB (1024 * 1000)
 
+VMConfig config;
+
 void assertToken(Token *t,
                  TokenType type, wchar_t *text, unsigned long position, unsigned long length) {
 
@@ -581,7 +583,7 @@ START_TEST(vmBasic) {
 
     errorInitContents(&error);
     ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &error), R_SUCCESS);
-    ck_assert_int_eq(tryVMMake(&vm, &error), R_SUCCESS);
+    ck_assert_int_eq(tryVMMake(&vm, config, &error), R_SUCCESS);
 
     uint8_t fnCode[] = {
         I_LOAD_CONST, 0, 0,
@@ -646,7 +648,7 @@ END_TEST
   wchar_t *result; \
   errorInitContents(&error); \
   result = NULL; \
-  ck_assert_int_eq(tryReplEval(pool, inputText, &result, &error), R_SUCCESS); \
+  ck_assert_int_eq(tryReplEval(pool, inputText, &result, config, &error), R_SUCCESS); \
   if (result != NULL) { \
     if (wcscmp(expectedOutputText, result) != 0) { \
       ck_abort_msg("got '%ls', expected '%ls'", result, expectedOutputText); \
@@ -845,7 +847,7 @@ END_TEST
   wchar_t *result; \
   errorInitContents(&error); \
   result = NULL; \
-  ck_assert_int_eq(tryReplEvalConf(pool, inputText, &result, false, &error), R_SUCCESS); \
+  ck_assert_int_eq(tryReplEvalConf(pool, inputText, &result, false, config, &error), R_SUCCESS); \
   if (result != NULL) { \
     if (wcscmp(expectedOutputText, result) != 0) { \
       ck_abort_msg("got '%ls', expected '%ls'", result, expectedOutputText); \
@@ -882,6 +884,10 @@ Suite * suite(void) {
   tcase_add_test(tc_core, repl);
   tcase_add_test(tc_core, gc);
 
+  if (config.gcOnAlloc) {
+    tcase_set_timeout(tc_core, 10);
+  }
+
   Suite *s = suite_create("lexer");
   suite_add_tcase(s, tc_core);
 
@@ -890,6 +896,11 @@ Suite * suite(void) {
 
 int main(int argc, char** argv)
 {
+  vmConfigInitContents(&config);
+  if (argc > 1 && strcmp("--gc-on-alloc", argv[1]) == 0) {
+    config.gcOnAlloc = true;
+  }
+
   int number_failed;
   Suite *s;
   SRunner *sr;

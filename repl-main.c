@@ -10,6 +10,7 @@ int main(void) {
 //  char *stdLib = "/warp/core.lsp";
 
   Error error;
+  VMConfig config;
   VM_t vm;
   InputStream_t source;
   TokenStream_t stream;
@@ -19,7 +20,8 @@ int main(void) {
 
   throws(tryPoolCreate(&sessionPool, ONE_MB, &error));
 
-  throws(tryVMMake(&vm, &error));
+  vmConfigInitContents(&config);
+  throws(tryVMMake(&vm, config, &error));
   throws(tryLoad(vm, STD_LIB, &error));
 
   throws(tryFileInputStreamMake(sessionPool, stdin, &source, &error));

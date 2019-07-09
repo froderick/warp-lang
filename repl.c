@@ -43,7 +43,8 @@ RetVal tryReplCompile(Pool_t outputPool, TokenStream_t stream, FileInfo fileInfo
     return ret;
 }
 
-RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputText, bool useStdLib, Error *error) {
+RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputText, bool useStdLib, VMConfig config,
+    Error *error) {
 
   RetVal ret;
 
@@ -61,7 +62,7 @@ RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputTe
   throws(tryPoolCreate(&pool, ONE_MB, error));
   throws(tryStringInputStreamMake(pool, inputText, wcslen(inputText), &source, error));
   throws(tryStreamMake(pool, source, &stream, error));
-  throws(tryVMMake(&vm, error));
+  throws(tryVMMake(&vm, config, error));
 
   if (useStdLib) {
     throws(tryLoad(vm, STD_LIB, error));
@@ -95,8 +96,8 @@ RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputTe
     return ret;
 }
 
-RetVal tryReplEval(Pool_t outputPool, wchar_t *inputText, wchar_t **outputText, Error *error) {
-  return tryReplEvalConf(outputPool, inputText, outputText, true, error);
+RetVal tryReplEval(Pool_t outputPool, wchar_t *inputText, wchar_t **outputText, VMConfig config, Error *error) {
+  return tryReplEvalConf(outputPool, inputText, outputText, true, config, error);
 }
 
 RetVal tryTextMakeFromChar(char *filename, Text *to, Error *error) {
