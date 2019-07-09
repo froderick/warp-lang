@@ -292,21 +292,6 @@ typedef struct ValueTypeTable {
 
 // vm state
 
-
-/*
- * TODO: if I add a global roots pointers registry and an API to add/remove pointers to roots from this registry
- * then I can protect myself from GC even mid-instruction.
- *
- * I could also add a stack-frame dedicated space for this, so as to avoid dealing with linked lists globally
- * and to get automatic cleanup of temporary roots. This would mean that my stack frames would no longer be
- * of a fixed size, but this is already technically true because of the way I'm using the opstack for this purpose.
- *
- * Also, CFns really shouldn't be touching the stack frame directly, there should be a way to bundle up those
- * arguments properly.
- *
- * Also, Pairs (lists, now) are a good idea to build directly into the VM.
- */
-
 typedef struct StackSegment StackSegment;
 
 typedef struct StackSegment {
@@ -615,8 +600,7 @@ void relocateChildren(VM *vm, ValueType type, void *obj) {
 }
 
 /*
- * NEW alloc/gc impl
- *
+ * alloc/gc impl
  * super useful: http://www.cs.cornell.edu/courses/cs312/2003fa/lectures/sec24.htm
  */
 
@@ -732,8 +716,6 @@ void* deref(GC *gc, Value value) {
   }
   return ptr;
 }
-
-void doPr(VM *vm, Value v);
 
 void relocate(VM *vm, Value *valuePtr) {
 
@@ -894,30 +876,6 @@ void fnInitContents(Fn *fn) {
   fn->sourceFileNameOffset = 0;
   fn->numLineNumbers = 0;
   fn->lineNumbersOffset = 0;
-}
-
-#define ONE_KB 1024
-RetVal tryVMPrn(VM *vm, Value result, Pool_t pool, Expr *expr, Error *error);
-
-void doPr(VM *vm, Value v) {
-
-  Error error;
-  errorInitContents(&error);
-
-  Pool_t pool = NULL;
-  if (tryPoolCreate(&pool, ONE_KB, &error) != R_SUCCESS) {
-    explode("failed to create pool");
-  }
-
-  Expr expr;
-  if (tryVMPrn(vm, v, pool, &expr, &error) != R_SUCCESS) {
-    explode("failed to prn");
-  }
-  if (tryExprPrn(pool, &expr, &error) != R_SUCCESS) {
-    explode("failed to other prn");
-  }
-
-  poolFree(pool);
 }
 
 Value fnHydrate(VM *vm, FnConstant *fnConst) {
@@ -1206,6 +1164,29 @@ RetVal tryVMPrn(VM *vm, Value result, Pool_t pool, Expr *expr, Error *error) {
 
   failure:
     return ret;
+}
+
+#define ONE_KB 1024
+
+void doPr(VM *vm, Value v) {
+
+  Error error;
+  errorInitContents(&error);
+
+  Pool_t pool = NULL;
+  if (tryPoolCreate(&pool, ONE_KB, &error) != R_SUCCESS) {
+    explode("failed to create pool");
+  }
+
+  Expr expr;
+  if (tryVMPrn(vm, v, pool, &expr, &error) != R_SUCCESS) {
+    explode("failed to prn");
+  }
+  if (tryExprPrn(pool, &expr, &error) != R_SUCCESS) {
+    explode("failed to other prn");
+  }
+
+  poolFree(pool);
 }
 
 /*
@@ -2523,35 +2504,6 @@ ValueTypeTable valueTypeTableCreate() {
   table.numValueTypes = sizeof(valueTypes) / sizeof(valueTypes[0]);
 
   return table;
-}
-
-void printEvalError(Frame_t frame, Error *error) {
-
-  printf("unhandled error: %ls", error->message);
-
-  Frame_t current = frame;
-  while (true) {
-
-    wchar_t *fnName;
-    if (hasFnName(current)) {
-      Text text = getFnName(current);
-      fnName = text.value;
-    }
-    else {
-      fnName = L"<root>";
-    }
-
-    wchar_t *file = L"core.lsp";
-    uint16_t lineNo = 100;
-    printf("\t%ls(%ls:%u)\n", fnName, file, lineNo);
-
-    if (!hasParent(current)) {
-      break;
-    }
-    else {
-      current = getParent(current);
-    }
-  }
 }
 
 void exFrameInitContents(VMExceptionFrame *f) {
