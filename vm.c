@@ -755,20 +755,6 @@ void relocate(VM *vm, Value *valuePtr) {
     *valuePtr = (*header << 1u);
   }
   else {
-
-//    if (valueType(*valuePtr) == VT_FN) {
-//      Fn *fn = (Fn*)*valuePtr;
-//      if (fn->hasName && wcscmp(fnName(fn), L"concat-n") == 0) {
-//        for (uint16_t i = 0; i < fn->numConstants; i++) {
-//          Value v = fnConstants(fn)[i];
-//          char *typeName = getValueTypeName(vm, valueType(v));
-//          printf("PRE-relocated constants[%u]: %s (", i, typeName);
-//          doPr(vm, v);
-//          printf(")\n");
-//        }
-//      }
-//    }
-
     uint64_t size = objectHeaderSize(*header);
 
     void *newPtr = NULL;
@@ -779,19 +765,6 @@ void relocate(VM *vm, Value *valuePtr) {
 
     *valuePtr = (Value)newPtr;
     *header = W_GC_FORWARDING_BIT | ((Value)newPtr >> 1u);
-
-//    if (valueType(*valuePtr) == VT_FN) {
-//      Fn *fn = (Fn*)*valuePtr;
-//      if (fn->hasName && wcscmp(fnName(fn), L"concat-n") == 0) {
-//        for (uint16_t i = 0; i < fn->numConstants; i++) {
-//          Value v = fnConstants(fn)[i];
-//          char *typeName = getValueTypeName(vm, valueType(v));
-//          printf("POST-relocated constants[%u]: %s (", i, typeName);
-//          doPr(vm, v);
-//          printf(")\n");
-//        }
-//      }
-//    }
   }
 }
 
@@ -801,8 +774,6 @@ uint64_t now() {
   uint64_t millis = now.tv_nsec / 1000000;
   return millis;
 }
-
-void doPr(VM *vm, Value v);
 
 void collect(VM *vm) {
 
@@ -896,28 +867,6 @@ void collect(VM *vm) {
   uint64_t duration = end - start;
 
   printf("gc: completed, %" PRIu64 " bytes recovered, %" PRIu64 " bytes used, took %" PRIu64 "ms\n", sizeRecovered, newHeapUsed, duration);
-
-//  {
-//    scanptr = vm->gc.currentHeap;
-//    while (scanptr < vm->gc.allocPtr) {
-//      ObjectHeader *header = scanptr;
-//
-//      if (objectHeaderValueType(*header) == VT_FN) {
-//        Fn *fn = (Fn*)header;
-//        if (fn->hasName && wcscmp(fnName(fn), L"concat-n") == 0) {
-//          for (uint16_t i = 0; i < fn->numConstants; i++) {
-//            Value v = fnConstants(fn)[i];
-//            const char *typeName = getValueTypeName(vm, valueType(v));
-//            printf("concat-n relocated constants[%u]: %s (", i, typeName);
-//            doPr(vm, v);
-//            printf(")\n");
-//          }
-//        }
-//      }
-//
-//      scanptr += objectHeaderSize(*header);
-//    }
-//  }
 }
 
 /*
@@ -1047,25 +996,10 @@ Value fnHydrate(VM *vm, FnConstant *fnConst) {
 
   pushFrameRoot(vm, (Value*)&fn);
   for (uint16_t i=0; i<fn->numConstants; i++) {
-
-//    if (fn->hasName && wcscmp(fnName(fn), L"concat-n") == 0) {
-//      printf("hi\n");
-//    }
-
     Value hydrated = hydrateConstant(vm, &fn, fnConst->constants[i]);
     fnConstants(fn)[i] = hydrated;
   }
   popFrameRoot(vm);
-
-  if (fn->hasName && wcscmp(fnName(fn), L"concat-n") == 0) {
-    for (uint16_t i=0; i<fn->numConstants; i++) {
-      Value v = fnConstants(fn)[i];
-      const char* typeName = getValueTypeName(vm, valueType(v));
-      printf("constants[%u]: %s (", i, typeName);
-      doPr(vm, v);
-      printf(")\n");
-    }
-  }
 
   return (Value)fn;
 }
