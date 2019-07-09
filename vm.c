@@ -668,6 +668,10 @@ void collect(VM *vm);
  */
 int _alloc(GC *gc, uint64_t length, void **ptr) {
 
+  if (length < sizeof(ObjectHeader)) {
+    explode("alloc length is too small, %" PRIu64, length);
+  }
+
   if ((length & W_PTR_MASK) != 0) {
     explode("oops, allocation was not 4-byte padded %" PRIu64, length);
   }
@@ -711,21 +715,12 @@ void* alloc(VM *vm, uint64_t length) {
 }
 
 uint64_t padAllocSize(uint64_t length) {
-  /*
-   * each object must be at least the size of a pointer, so we can replace it with a
-   * forwarding pointer during gc
-   */
-  if (length < 8) {
-    return 8;
+  uint16_t rem = length % 4;
+  if (rem != 0) {
+    return length + (4 - rem);
   }
   else {
-    uint16_t rem = length % 8;
-    if (rem != 0) {
-      return length + (8 - rem);
-    }
-    else {
-      return length;
-    }
+    return length;
   }
 }
 
