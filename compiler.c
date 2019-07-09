@@ -472,6 +472,31 @@ RetVal nilConstantGetIndex(Output output, uint16_t *index, Error *error) {
     return ret;
 }
 
+RetVal uintConstantGetIndex(uint64_t value, Output output, uint16_t *index, Error *error) {
+  RetVal ret;
+
+  // look for already-defined uint constant
+  for (uint16_t i=0; i<output.constants->numUsed; i++) {
+    Constant *c = &output.constants->constants[i];
+    if (c->type == CT_INT && c->integer == value) {
+      *index = i;
+      return R_SUCCESS;
+    }
+  }
+
+  // create int constant
+  Constant c;
+  c.type = CT_INT;
+  c.integer = value;
+  throws(tryAppendConstant(output, c, error));
+  *index = output.constants->numUsed - 1;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 RetVal varRefConstantGetIndex(Text name, Output output, uint16_t *index, Error *error) {
   RetVal ret;
 
@@ -524,14 +549,7 @@ RetVal appendMeta(Output output, Expr *constant, ConstantMeta *meta, Error *erro
       lineNo->keyIndex = index;
     }
 
-    {
-      Constant value;
-      value.type = CT_INT;
-      value.integer = constant->source.lineNumber;
-      throws(tryAppendConstant(output, value, error));
-      uint16_t index = output.constants->numUsed - 1;
-      lineNo->valueIndex = index;
-    }
+    throws(uintConstantGetIndex(constant->source.lineNumber, output, &lineNo->valueIndex, error));
   }
 
   return R_SUCCESS;
@@ -800,11 +818,8 @@ RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
 
   // push the number of arguments
   {
-    Constant c;
-    c.type = CT_INT;
-    c.integer = form->fnCall.args.numForms;
-    throws(tryAppendConstant(output, c, error));
-    uint16_t index = output.constants->numUsed - 1;
+    uint16_t index;
+    throws(uintConstantGetIndex(form->fnCall.args.numForms, output, &index, error));
     uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
     throws(tryCodeAppend(output, sizeof(code), code, error));
   }

@@ -267,9 +267,7 @@ typedef struct InstTable {
 
 typedef struct Invocable {
   Value ref;
-  Value fnRef;
   Fn *fn;
-  bool hasClosure;
   Closure *closure;
 } Invocable;
 
@@ -591,7 +589,7 @@ Frame_t popFrame(VM *vm);
 
 void pushFrameRoot(VM *vm, Value *rootPtr);
 void popFrameRoot(VM *vm);
-FrameRoot_t frameRoots(VM *vm);
+FrameRoot_t frameRoots(Frame_t frame);
 Value* frameRootValue(FrameRoot_t root);
 FrameRoot_t frameRootNext(FrameRoot_t root);
 
@@ -741,6 +739,8 @@ void* deref(GC *gc, Value value) {
   return ptr;
 }
 
+void doPr(VM *vm, Value v);
+
 void relocate(VM *vm, Value *valuePtr) {
 
   Value value = *valuePtr;
@@ -755,6 +755,20 @@ void relocate(VM *vm, Value *valuePtr) {
     *valuePtr = (*header << 1u);
   }
   else {
+
+//    if (valueType(*valuePtr) == VT_FN) {
+//      Fn *fn = (Fn*)*valuePtr;
+//      if (fn->hasName && wcscmp(fnName(fn), L"concat-n") == 0) {
+//        for (uint16_t i = 0; i < fn->numConstants; i++) {
+//          Value v = fnConstants(fn)[i];
+//          char *typeName = getValueTypeName(vm, valueType(v));
+//          printf("PRE-relocated constants[%u]: %s (", i, typeName);
+//          doPr(vm, v);
+//          printf(")\n");
+//        }
+//      }
+//    }
+
     uint64_t size = objectHeaderSize(*header);
 
     void *newPtr = NULL;
@@ -765,6 +779,19 @@ void relocate(VM *vm, Value *valuePtr) {
 
     *valuePtr = (Value)newPtr;
     *header = W_GC_FORWARDING_BIT | ((Value)newPtr >> 1u);
+
+//    if (valueType(*valuePtr) == VT_FN) {
+//      Fn *fn = (Fn*)*valuePtr;
+//      if (fn->hasName && wcscmp(fnName(fn), L"concat-n") == 0) {
+//        for (uint16_t i = 0; i < fn->numConstants; i++) {
+//          Value v = fnConstants(fn)[i];
+//          char *typeName = getValueTypeName(vm, valueType(v));
+//          printf("POST-relocated constants[%u]: %s (", i, typeName);
+//          doPr(vm, v);
+//          printf(")\n");
+//        }
+//      }
+//    }
   }
 }
 
@@ -774,6 +801,8 @@ uint64_t now() {
   uint64_t millis = now.tv_nsec / 1000000;
   return millis;
 }
+
+void doPr(VM *vm, Value v);
 
 void collect(VM *vm) {
 
@@ -837,7 +866,7 @@ void collect(VM *vm) {
         relocate(vm, val);
       }
 
-      FrameRoot_t root = frameRoots(vm);
+      FrameRoot_t root = frameRoots(current);
       while (root != NULL) {
         Value *valuePtr = frameRootValue(root);
         relocate(vm, valuePtr);
@@ -867,6 +896,28 @@ void collect(VM *vm) {
   uint64_t duration = end - start;
 
   printf("gc: completed, %" PRIu64 " bytes recovered, %" PRIu64 " bytes used, took %" PRIu64 "ms\n", sizeRecovered, newHeapUsed, duration);
+
+//  {
+//    scanptr = vm->gc.currentHeap;
+//    while (scanptr < vm->gc.allocPtr) {
+//      ObjectHeader *header = scanptr;
+//
+//      if (objectHeaderValueType(*header) == VT_FN) {
+//        Fn *fn = (Fn*)header;
+//        if (fn->hasName && wcscmp(fnName(fn), L"concat-n") == 0) {
+//          for (uint16_t i = 0; i < fn->numConstants; i++) {
+//            Value v = fnConstants(fn)[i];
+//            const char *typeName = getValueTypeName(vm, valueType(v));
+//            printf("concat-n relocated constants[%u]: %s (", i, typeName);
+//            doPr(vm, v);
+//            printf(")\n");
+//          }
+//        }
+//      }
+//
+//      scanptr += objectHeaderSize(*header);
+//    }
+//  }
 }
 
 /*
@@ -900,6 +951,30 @@ void fnInitContents(Fn *fn) {
   fn->sourceFileNameOffset = 0;
   fn->numLineNumbers = 0;
   fn->lineNumbersOffset = 0;
+}
+
+#define ONE_KB 1024
+RetVal tryVMPrn(VM *vm, Value result, Pool_t pool, Expr *expr, Error *error);
+
+void doPr(VM *vm, Value v) {
+
+  Error error;
+  errorInitContents(&error);
+
+  Pool_t pool = NULL;
+  if (tryPoolCreate(&pool, ONE_KB, &error) != R_SUCCESS) {
+    explode("failed to create pool");
+  }
+
+  Expr expr;
+  if (tryVMPrn(vm, v, pool, &expr, &error) != R_SUCCESS) {
+    explode("failed to prn");
+  }
+  if (tryExprPrn(pool, &expr, &error) != R_SUCCESS) {
+    explode("failed to other prn");
+  }
+
+  poolFree(pool);
 }
 
 Value fnHydrate(VM *vm, FnConstant *fnConst) {
@@ -972,10 +1047,25 @@ Value fnHydrate(VM *vm, FnConstant *fnConst) {
 
   pushFrameRoot(vm, (Value*)&fn);
   for (uint16_t i=0; i<fn->numConstants; i++) {
+
+//    if (fn->hasName && wcscmp(fnName(fn), L"concat-n") == 0) {
+//      printf("hi\n");
+//    }
+
     Value hydrated = hydrateConstant(vm, &fn, fnConst->constants[i]);
     fnConstants(fn)[i] = hydrated;
   }
   popFrameRoot(vm);
+
+  if (fn->hasName && wcscmp(fnName(fn), L"concat-n") == 0) {
+    for (uint16_t i=0; i<fn->numConstants; i++) {
+      Value v = fnConstants(fn)[i];
+      const char* typeName = getValueTypeName(vm, valueType(v));
+      printf("constants[%u]: %s (", i, typeName);
+      doPr(vm, v);
+      printf(")\n");
+    }
+  }
 
   return (Value)fn;
 }
@@ -1239,26 +1329,6 @@ RetVal tryVMPrn(VM *vm, Value result, Pool_t pool, Expr *expr, Error *error) {
 //  return false;
 //}
 
-Value allocateCons(VM *vm, Value value, Value next, Value meta) {
-
-  ValueType nextType = valueType(next);
-  if (nextType != VT_NIL && nextType != VT_LIST) {
-    explode("a Cons next must be nil or a list: %s", getValueTypeName(vm, nextType));
-  }
-
-  Cons *cons = NULL;
-  uint64_t size = padAllocSize(sizeof(Cons));
-  cons = alloc(vm, size);
-
-  consInitContents(cons);
-  cons->header = makeObjectHeader(W_LIST_TYPE, size);
-  cons->value = value;
-  cons->next = next;
-  cons->metadata = meta;
-
-  return (Value)cons;
-}
-
 /*
  * Instruction Definitions
  */
@@ -1307,36 +1377,26 @@ RetVal tryStoreLocalEval(VM *vm, Frame_t frame, Error *error) {
 
 void invocableInitContents(Invocable *i) {
   i->ref = nil();    // the reference to the initially invoked value (could be closure or fn)
-  i->fnRef = nil();  // always points to the actual fn
-  i->fn = NULL;
-  i->hasClosure = false;
-  i->closure = NULL;
+  i->fn = NULL;      // always points to the actual fn
+  i->closure = NULL; // points to the closure, if there is one
 }
 
-RetVal tryPopInvocable(VM *vm, Value pop, Invocable *invocable, Error *error) {
+RetVal tryMakeInvocable(VM *vm, Value pop, Invocable *invocable, Error *error) {
   RetVal ret;
 
   invocableInitContents(invocable);
 
   invocable->ref = pop;
-  invocable->fnRef = pop;
 
-  ValueType fnRefType = valueType(invocable->fnRef);
+  ValueType fnRefType = valueType(invocable->ref);
   switch (fnRefType) {
     case VT_FN: {
-
-      invocable->fn = deref(&vm->gc, invocable->fnRef);
-
-      invocable->hasClosure = false;
+      invocable->fn = deref(&vm->gc, invocable->ref);
       invocable->closure = NULL;
       break;
     }
     case VT_CLOSURE: {
-
-      invocable->closure = deref(&vm->gc, invocable->fnRef);
-
-      invocable->hasClosure = true;
-      invocable->fnRef = invocable->closure->fn;
+      invocable->closure = deref(&vm->gc, invocable->ref);
       invocable->fn = deref(&vm->gc, invocable->closure->fn);
       break;
     }
@@ -1347,9 +1407,24 @@ RetVal tryPopInvocable(VM *vm, Value pop, Invocable *invocable, Error *error) {
   }
 
   return R_SUCCESS;
-
   failure:
   return ret;
+}
+
+void protectInvocable(VM *vm, Invocable *invocable) {
+  pushFrameRoot(vm, &invocable->ref);
+  pushFrameRoot(vm, (Value*)&invocable->fn);
+  if (invocable->closure != NULL) {
+    pushFrameRoot(vm, (Value*) &invocable->closure);
+  }
+}
+
+void unprotectInvocable(VM *vm, Invocable *invocable) {
+  popFrameRoot(vm);
+  popFrameRoot(vm);
+  if (invocable->closure != NULL) {
+    popFrameRoot(vm);
+  }
 }
 
 RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarArgs, Error *error) {
@@ -1392,7 +1467,7 @@ RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool use
 
     // read the extra args into that sequence, push it back on the stack
     for (uint16_t i = 0; i < numVarArgs; i++) {
-      Cons *cons = deref(&vm->gc, allocateCons(vm, nil(), nil(), nil()));
+      Cons *cons = makeCons(vm);
       cons->value = popOperand(parent);
       cons->next = seq;
       seq = (Value)cons;
@@ -1407,39 +1482,43 @@ RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool use
   return ret;
 }
 
-RetVal tryInvokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable invocable, Error *error) {
+RetVal tryInvokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invocable, Error *error) {
   RetVal ret;
 
-  throws(tryPreprocessArguments(vm, parent, invocable.fn->numArgs, invocable.fn->usesVarArgs, error));
+  protectInvocable(vm, invocable);
 
-  for (uint16_t i = 0; i < invocable.fn->numArgs; i++) {
+  throws(tryPreprocessArguments(vm, parent, invocable->fn->numArgs, invocable->fn->usesVarArgs, error));
+
+  for (uint16_t i = 0; i < invocable->fn->numArgs; i++) {
     Value arg = popOperand(parent);
 
-    uint16_t idx = invocable.fn->numArgs - (1 + i);
+    uint16_t idx = invocable->fn->numArgs - (1 + i);
     setLocal(child, idx, arg);
   }
 
-  if (invocable.fn->numCaptures > 0) {
+  if (invocable->fn->numCaptures > 0) {
 
-    if (!invocable.hasClosure) {
+    if (!invocable->closure) {
       explode("cannot invoke this fn without a closure, it captures variables: %u",
-          invocable.fn->numCaptures);
+          invocable->fn->numCaptures);
     }
-    if (invocable.closure->numCaptures < invocable.fn->numCaptures) {
+    if (invocable->closure->numCaptures < invocable->fn->numCaptures) {
       explode("closure does not have enough captured variables: %u",
-          invocable.closure->numCaptures);
+          invocable->closure->numCaptures);
     }
 
-    uint16_t nextLocalIdx = invocable.fn->numArgs;
-    for (uint16_t i=0; i<invocable.fn->numCaptures; i++) {
-      setLocal(child, nextLocalIdx, closureCaptures(invocable.closure)[i]);
+    uint16_t nextLocalIdx = invocable->fn->numArgs;
+    for (uint16_t i=0; i<invocable->fn->numCaptures; i++) {
+      setLocal(child, nextLocalIdx, closureCaptures(invocable->closure)[i]);
       nextLocalIdx = nextLocalIdx + 1;
     }
   }
 
-  if (invocable.fn->hasName) {
-    setLocal(child, invocable.fn->bindingSlotIndex, invocable.ref);
+  if (invocable->fn->hasName) {
+    setLocal(child, invocable->fn->bindingSlotIndex, invocable->ref);
   }
+
+  unprotectInvocable(vm, invocable);
 
   return R_SUCCESS;
 
@@ -1473,18 +1552,17 @@ RetVal tryInvokeDynEval(VM *vm, Frame_t frame, Error *error) {
   }
   else {
     Invocable invocable;
-    throws(tryPopInvocable(vm, pop, &invocable, error));
+    throws(tryMakeInvocable(vm, pop, &invocable, error));
 
-    frame = pushFrame(vm, invocable.fnRef);
+    frame = pushFrame(vm, (Value)invocable.fn);
     pushed = true;
 
     Frame_t parent = getParent(frame);
 
-    throws(tryInvokePopulateLocals(vm, parent, frame, invocable, error));
+    throws(tryInvokePopulateLocals(vm, parent, frame, &invocable, error));
   }
 
   return R_SUCCESS;
-
   failure:
     if (pushed) {
       popFrame(vm);
@@ -1513,16 +1591,16 @@ RetVal tryInvokeDynTailEval(VM *vm, Frame_t frame, Error *error) {
   }
   else {
     Invocable invocable;
-    throws(tryPopInvocable(vm, pop, &invocable, error));
+    throws(tryMakeInvocable(vm, pop, &invocable, error));
 
-    replaceFrame(vm, invocable.fnRef);
-    throws(tryInvokePopulateLocals(vm, frame, frame, invocable, error));
+    replaceFrame(vm, (Value)invocable.fn);
+
+    throws(tryInvokePopulateLocals(vm, frame, frame, &invocable, error));
   }
 
   return R_SUCCESS;
   failure:
     return ret;
-
 }
 
 // (8)              | (objectref ->)
@@ -1653,6 +1731,9 @@ RetVal tryLoadVarEval(VM *vm, Frame_t frame, Error *error) {
   ValueType varNameType = valueType(value);
 
   if (varNameType != VT_SYMBOL) {
+
+    Fn *fn = deref(&vm->gc, value);
+
     explode("expected a symbol: %s", getValueTypeName(vm, varNameType));
   }
 
@@ -1800,7 +1881,7 @@ RetVal tryConsEval(VM *vm, Frame_t frame, Error *error) {
   RetVal ret;
 
   // gc may occur, so allocate the cons first
-  Value result = allocateCons(vm, nil(), nil(), nil());
+  Cons *cons = makeCons(vm);
 
   Value seq = popOperand(frame);
   Value x = popOperand(frame);
@@ -1810,11 +1891,10 @@ RetVal tryConsEval(VM *vm, Frame_t frame, Error *error) {
     throwRuntimeError(error, "cannot cons onto a value of type %s", getValueTypeName(vm, seqType));
   }
 
-  Cons *cons = deref(&vm->gc, result);
   cons->value = x;
   cons->next = seq;
 
-  pushOperand(frame, result);
+  pushOperand(frame, (Value)cons);
 
   return R_SUCCESS;
 
@@ -2135,6 +2215,7 @@ void relocateChildrenList(VM_t vm, void *obj) {
   Cons *cons = obj;
   relocate(vm, &cons->value);
   relocate(vm, &cons->next);
+  relocate(vm, &cons->metadata);
 }
 
 void relocateChildrenClosure(VM_t vm, void *obj) {
@@ -2987,6 +3068,9 @@ void setLocal(Frame *frame, uint16_t localIndex, Value value) {
   if (localIndex >= frame->fn->numLocals) {
     explode("no such local: %u", localIndex);
   }
+  if (value == 0) {
+    explode("invalid local value (NULL): %u", localIndex);
+  }
   frame->locals[localIndex] = value;
 }
 
@@ -3191,7 +3275,7 @@ Frame* replaceFrame(VM *vm, Value newFn) {
   if (fn->numLocals > frame->fn->numLocals) {
     frame->locals = stackAllocate(stack, sizeof(Value) * fn->numLocals, "locals");
   }
-  for (uint16_t i = 0; i < frame->fn->numLocals; i++) {
+  for (uint16_t i = 0; i < fn->numLocals; i++) {
     frame->locals[i] = nil();
   }
 
@@ -3209,8 +3293,8 @@ Frame* replaceFrame(VM *vm, Value newFn) {
   return frame;
 }
 
-FrameRoot_t frameRoots(VM *vm) {
-  return vm->current->roots;
+FrameRoot_t frameRoots(Frame_t frame) {
+  return frame->roots;
 }
 
 Value* frameRootValue(FrameRoot_t root) {
