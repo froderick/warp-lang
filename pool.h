@@ -16,4 +16,12 @@ void poolFree(Pool_t pool);
   throws(tryPoolAllocate(pool, (void*)&var, size, desc, error)); \
 }
 
+#define palloc(pool, var, size, desc) {\
+  Error error; \
+  errorInitContents(&error); \
+  if (tryPoolAllocate(pool, (void*)&var, size, desc, &error) != R_SUCCESS) { \
+    explode("cannot palloc"); \
+  } \
+}
+
 #endif //WARP_LANG_POOL_H

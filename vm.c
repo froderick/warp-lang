@@ -3,6 +3,7 @@
 #include <libgen.h>
 #include <time.h>
 #include <inttypes.h>
+#include <setjmp.h>
 #include "vm.h"
 #include "utils.h"
 
@@ -135,7 +136,7 @@ uint64_t unwrapUint(Value v) {
 
 typedef struct Frame *Frame_t;
 typedef struct FrameRoot *FrameRoot_t;
-typedef RetVal (*CFnInvoke) (VM_t vm, Frame_t frame, Error *error);
+typedef void (*CFnInvoke) (VM_t vm, Frame_t frame);
 
 typedef struct CFn {
   ObjectHeader header;
@@ -250,12 +251,12 @@ typedef struct GC {
 
 // instruction definitions
 
-typedef RetVal (*TryEval) (struct VM *vm, Frame_t frame, Error *error);
+typedef void (*Eval) (struct VM *vm, Frame_t frame);
 
 typedef struct Inst {
   const char *name;
   void (*print)(int *i, const char* name, uint8_t *code);
-  TryEval tryEval;
+  Eval eval;
 } Inst;
 
 typedef struct InstTable {
@@ -272,16 +273,14 @@ typedef struct Invocable {
 } Invocable;
 
 typedef void (*RelocateChildren)(VM_t vm, void *obj);
-typedef RetVal (*TryPrn)(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error);
-typedef RetVal (*TryHashCode)(VM_t vm, Value value, uint32_t *hash, Error *error);
+typedef void (*Prn)(VM_t vm, Value result, Expr *expr);
 typedef bool (*Equals)(VM_t vm, Value this, Value that);
 
 typedef struct ValueTypeInfo {
   const char *name;
   bool (*isTruthy)(Value value);
   RelocateChildren relocateChildren;
-  TryPrn tryPrn;
-  TryHashCode tryHashCode;
+  Prn prn;
   Equals equals;
 } ValueTypeInfo;
 
@@ -330,6 +329,8 @@ typedef struct VM {
   FrameRoot_t noFrameRoots;
   Frame_t current;
   SymbolTable symbolTable;
+  Pool_t outputPool; // this is mutable, it changes on every eval request
+  jmp_buf jumpBuf;
 } VM;
 
 /*
@@ -566,8 +567,8 @@ bool getLineNumber(Frame_t frame, uint64_t *lineNumber);
 bool getFileName(Frame_t frame, Text *fileName);
 
 bool hasException(Frame_t frame);
-void setException(Frame_t frame, VMException e);
-VMException getException(Frame_t frame);
+void setException(Frame_t frame, VMException *e);
+VMException* getException(Frame_t frame);
 
 Frame_t pushFrame(VM *vm, Value newFn);
 Frame_t replaceFrame(VM *vm, Value newFn);
@@ -1153,20 +1154,11 @@ Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c) {
  *
  * Some representations are approximate and cannot be round-tripped through eval, such as functions and closures.
  */
-RetVal tryVMPrn(VM *vm, Value result, Pool_t pool, Expr *expr, Error *error) {
-  RetVal ret;
-
-  exprInitContents(expr);
-
+void vmPrn(VM *vm, Value result, Expr *expr) {
   ValueType resultType = valueType(result);
-
-  TryPrn prn = vm->valueTypeTable.valueTypes[resultType].tryPrn;
-  throws(prn(vm, result, pool, expr, error));
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  exprInitContents(expr);
+  Prn prn = vm->valueTypeTable.valueTypes[resultType].prn;
+  prn(vm, result, expr);
 }
 
 #define ONE_KB 1024
@@ -1176,116 +1168,224 @@ void doPr(VM *vm, Value v) {
   Error error;
   errorInitContents(&error);
 
-  Pool_t pool = NULL;
-  if (tryPoolCreate(&pool, ONE_KB, &error) != R_SUCCESS) {
-    explode("failed to create pool");
-  }
-
   Expr expr;
-  if (tryVMPrn(vm, v, pool, &expr, &error) != R_SUCCESS) {
-    explode("failed to prn");
-  }
-  if (tryExprPrn(pool, &expr, &error) != R_SUCCESS) {
+  vmPrn(vm, v, &expr);
+  if (tryExprPrn(vm->outputPool, &expr, &error) != R_SUCCESS) {
     explode("failed to other prn");
   }
-
-  poolFree(pool);
 }
 
-/*
- * Managing namespaces of vars
- */
+#define RAISE_MSG_LENGTH 1023
 
-#define ONE_KB 1024
+typedef struct Raised {
+  wchar_t message[RAISE_MSG_LENGTH + 1];
+  const char *fileName;
+  uint64_t lineNumber;
+  const char *functionName;
+} Raised;
 
-//bool resolveVar(Namespaces *analyzer, wchar_t *symbolName, uint64_t symbolNameLength, Var **var) {
-//
-//  Namespace *ns;
-//  wchar_t *searchName;
-//  uint64_t searchNameLength;
-//
-//  // assume unqualified namespace at first
-//  ns = analyzer->currentNamespace;
-//  searchName = symbolName;
-//  searchNameLength = symbolNameLength;
-//
-//  if (symbolNameLength > 2) { // need at least three characters to qualify a var name with a namespace: ('q/n')
-//
-//    // attempt to find a qualified namespace
-//    wchar_t *slashPtr = wcschr(symbolName, L'/');
-//    if (slashPtr != NULL) { // qualified
-//      uint64_t nsLen = slashPtr - symbolName;
-//
-//      for (int i=0; i<analyzer->numNamespaces; i++) {
-//
-//        Namespace *thisNs = &analyzer->namespaces[i];
-//        if (wcsncmp(symbolName, thisNs->name, nsLen) == 0) {
-//          ns = thisNs;
-//          searchName = slashPtr + 1;
-//          searchNameLength = symbolNameLength - (nsLen + 1);
-//          break;
-//        }
-//      }
-//    }
-//  }
-//
-//  // find var within namespace
-//
-//  for (int i=0; i<ns->localVars.length; i++) {
-//    if (wcscmp(searchName, ns->localVars.vars[i].name) == 0) {
-//      *var = &ns->localVars.vars[i];
-//      return true;
-//    }
-//  }
-//
-//  return false;
-//}
-
-/*
- * Instruction Definitions
- */
-
-// (8), typeIndex (16) | (-> value)
-RetVal tryLoadConstEval(VM *vm, Frame_t frame, Error *error) {
-  uint16_t constantIndex = readIndex(frame);
-  Value constant = getConst(frame, constantIndex);
-  pushOperand(frame, constant);
-  return R_SUCCESS;
+void exFrameInitContents(VMExceptionFrame *f) {
+  textInitContents(&f->functionName);
+  f->unknownSource = true;
+  f->lineNumber = 0;
+  textInitContents(&f->fileName);
 }
 
-// (8), typeIndex (16) | (-> value)
-RetVal tryLoadLocalEval(VM *vm, Frame_t frame, Error *error) {
-  uint16_t localIndex = readIndex(frame);
-  Value v = getLocal(frame, localIndex);
-  pushOperand(frame, v);
-  return R_SUCCESS;
+VMException* exceptionMake(VM *vm, Raised *raised) {
+
+  Error error;
+  errorInitContents(&error);
+
+  wchar_t msg[ERROR_MSG_LENGTH];
+
+  VMException *exception;
+  palloc(vm->outputPool, exception, sizeof(VMException), "VMException");
+  exceptionInitContents(exception);
+
+  swprintf(msg, ERROR_MSG_LENGTH, L"unhandled error: %ls", raised->message);
+  if (tryTextMake(vm->outputPool, msg, &exception->message, wcslen(msg), &error) != R_SUCCESS) {
+    explode("make text");
+  }
+
+  uint64_t numFrames = 0;
+  {
+    Frame_t current = vm->current;
+    while (true) {
+      numFrames++;
+      if (!hasParent(current)) {
+        break;
+      }
+      else {
+        current = getParent(current);
+      }
+    }
+  }
+
+  // native frame
+  numFrames++;
+
+  exception->frames.length = numFrames;
+  palloc(vm->outputPool, exception->frames.elements, sizeof(VMExceptionFrame) * numFrames, "VMExceptionFrame array");
+
+
+  { // native frame
+
+    VMExceptionFrame *f = &exception->frames.elements[0];
+    exFrameInitContents(f);
+
+    f->functionName.length = strlen(raised->functionName) + 1;
+    palloc(vm->outputPool, f->functionName.value, f->functionName.length * sizeof(wchar_t), "wide string");
+    swprintf(f->functionName.value, f->functionName.length, L"%s", raised->functionName);
+
+    f->unknownSource = false;
+
+    char* fileName = basename((char *) raised->fileName);
+    f->fileName.length = strlen(fileName) + 1;
+    palloc(vm->outputPool, f->fileName.value, f->fileName.length * sizeof(wchar_t), "wide string");
+    swprintf(f->fileName.value, f->fileName.length, L"%s", fileName);
+
+    f->lineNumber = raised->lineNumber;
+  }
+
+  Frame_t current = vm->current;
+  for (uint64_t i=1; i<numFrames; i++) {
+
+    VMExceptionFrame *f = &exception->frames.elements[i];
+    exFrameInitContents(f);
+
+    if (hasFnName(current)) {
+      Text text = getFnName(current);
+      if (tryTextCopy(vm->outputPool, &text, &f->functionName, &error) != R_SUCCESS) {
+        explode("text copy");
+      }
+    }
+    else {
+      wchar_t *name = L"<root>\0";
+      if (tryTextMake(vm->outputPool, name, &f->functionName, wcslen(name), &error) != R_SUCCESS) {
+        explode("text make");
+      }
+    }
+
+    if (hasSourceTable(current)) {
+      f->unknownSource = false;
+      getFileName(current, &f->fileName);
+      getLineNumber(current, &f->lineNumber);
+    }
+
+    if (hasParent(current)) {
+      current = getParent(current);
+    }
+  }
+
+  return exception;
 }
 
-// (8), typeIndex  (16) | (objectref ->)
-RetVal tryStoreLocalEval(VM *vm, Frame_t frame, Error *error) {
+RetVal tryExceptionPrint(Pool_t pool, VMException *e, wchar_t **ptr, Error *error) {
   RetVal ret;
 
-  uint16_t localIndex = readIndex(frame);
-  Value v = popOperand(frame);
-  setLocal(frame, localIndex, v);
+  // clean up on exit always
+  StringBuffer_t b = NULL;
 
+  throws(tryStringBufferMake(pool, &b, error));
+
+  throws(tryStringBufferAppendStr(b, error->message, error));
+
+  wchar_t msg[ERROR_MSG_LENGTH];
+
+  for (uint64_t i=0; i<e->frames.length; i++) {
+    VMExceptionFrame *f = &e->frames.elements[i];
+
+    if (f->unknownSource) {
+      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(Unknown Source)\n", f->functionName.value);
+    }
+    else {
+      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(%ls:%" PRIu64 ")\n", f->functionName.value, f->fileName.value,
+               f->lineNumber);
+    }
+    throws(tryStringBufferAppendStr(b, msg, error));
+  }
+
+  wchar_t *output;
+  throws(tryCopyText(pool, stringBufferText(b), &output, stringBufferLength(b), error));
+
+  *ptr = output;
   return R_SUCCESS;
 
   failure:
   return ret;
 }
 
+RetVal tryExceptionPrintf(VMException *e, Error *error) {
+  RetVal ret;
+
+  Pool_t pool = NULL;
+  throws(tryPoolCreate(&pool, ONE_KB, error));
+
+  wchar_t *msg;
+  throws(tryExceptionPrint(pool, e, &msg, error));
+  printf("%ls\n", msg);
+
+  ret = R_SUCCESS;
+  goto done;
+
+  failure:
+  done:
+  poolFree(pool);
+  return ret;
+}
+
+void raisedInitContents(Raised *r) {
+  r->lineNumber = 0;
+  r->functionName = NULL;
+  r->fileName = NULL;
+}
+
+// TODO: exceptions should go on the heap as values
+void handleRaise(VM *vm, Raised *r) {
+  VMException *ex = exceptionMake(vm, r);
+  setException(vm->current, ex);
+  longjmp(vm->jumpBuf, 1);
+}
+
+#define raise(vm, str, ...) {\
+  Raised r; \
+  raisedInitContents(&r); \
+  r.fileName = __FILE__; \
+  r.lineNumber = __LINE__; \
+  r.functionName = __func__; \
+  \
+  int len = 64; \
+  char msg[len]; \
+  snprintf(msg, len, str, ##__VA_ARGS__); \
+  \
+  swprintf(r.message, ERROR_MSG_LENGTH, L"vm raised an exception: %s\n", str); \
+  handleRaise(vm, &r); \
+}
+
 /*
- * TODO: let's make a separate heap (perm-gen) for compiled, loaded code
- * - this would mean that we can depend on the locations of functions not changing due to garbage collection
- *   while regular instructions within a function are being executed.
- * - we would garbage collect functions whenever the space is exhausted, which would be caused by attempting to
- *   load new code. we'd start from the roots like normal gc, just with different semantics
- * - the only time functions would get moved is when loading more code, which triggers gc.
- * - this lets us write vm code that keeps direct pointers to hydrated compiled code
- *
- * - see https://www.quora.com/What-are-some-best-practices-in-using-the-Java-8-JVM-Metaspace
+ * Instruction Definitions
  */
+
+// (8), typeIndex (16) | (-> value)
+void tryLoadConstEval(VM *vm, Frame_t frame) {
+  uint16_t constantIndex = readIndex(frame);
+  Value constant = getConst(frame, constantIndex);
+  pushOperand(frame, constant);
+}
+
+// (8), typeIndex (16) | (-> value)
+void tryLoadLocalEval(VM *vm, Frame_t frame) {
+  uint16_t localIndex = readIndex(frame);
+  Value v = getLocal(frame, localIndex);
+  pushOperand(frame, v);
+}
+
+// (8), typeIndex  (16) | (objectref ->)
+void tryStoreLocalEval(VM *vm, Frame_t frame) {
+  uint16_t localIndex = readIndex(frame);
+  Value v = popOperand(frame);
+  setLocal(frame, localIndex, v);
+}
 
 void invocableInitContents(Invocable *i) {
   i->ref = nil();    // the reference to the initially invoked value (could be closure or fn)
@@ -1293,11 +1393,9 @@ void invocableInitContents(Invocable *i) {
   i->closure = NULL; // points to the closure, if there is one
 }
 
-RetVal tryMakeInvocable(VM *vm, Value pop, Invocable *invocable, Error *error) {
-  RetVal ret;
+void makeInvocable(VM *vm, Value pop, Invocable *invocable) {
 
   invocableInitContents(invocable);
-
   invocable->ref = pop;
 
   ValueType fnRefType = valueType(invocable->ref);
@@ -1314,13 +1412,9 @@ RetVal tryMakeInvocable(VM *vm, Value pop, Invocable *invocable, Error *error) {
     }
     default:
       // fail: not all values are invocable
-      throwRuntimeError(error, "cannot invoke this value type as a function: %s",
+      raise(vm, "cannot invoke this value type as a function: %s",
           getValueTypeName(vm, fnRefType));
   }
-
-  return R_SUCCESS;
-  failure:
-  return ret;
 }
 
 void protectInvocable(VM *vm, Invocable *invocable) {
@@ -1339,9 +1433,7 @@ void unprotectInvocable(VM *vm, Invocable *invocable) {
   }
 }
 
-RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarArgs, Error *error) {
-
-  RetVal ret;
+void preprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarArgs) {
 
   Value numArgsSuppliedValue = popOperand(parent);
   if (valueType(numArgsSuppliedValue) != VT_UINT) {
@@ -1353,7 +1445,7 @@ RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool use
 
   if (!usesVarArgs) {
     if (numArgsSupplied != numArgs) {
-      throwRuntimeError(error, "required arguments not supplied, expected %u but got %" PRIu64, numArgs,
+      raise(vm, "required arguments not supplied, expected %u but got %" PRIu64, numArgs,
           numArgsSupplied);
     }
   }
@@ -1370,7 +1462,7 @@ RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool use
       numVarArgs = 0;
     }
     else {
-      throwRuntimeError(error, "required arguments not supplied, expected %u or more arguments but got %" PRIu64,
+      raise(vm, "required arguments not supplied, expected %u or more arguments but got %" PRIu64,
                         numArgs - 1, numArgsSupplied);
     }
 
@@ -1388,18 +1480,13 @@ RetVal tryPreprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool use
     popFrameRoot(vm);
     pushOperand(parent, seq);
   }
-
-  return R_SUCCESS;
-  failure:
-  return ret;
 }
 
-RetVal tryInvokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invocable, Error *error) {
-  RetVal ret;
+void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invocable) {
 
   protectInvocable(vm, invocable);
 
-  throws(tryPreprocessArguments(vm, parent, invocable->fn->numArgs, invocable->fn->usesVarArgs, error));
+  preprocessArguments(vm, parent, invocable->fn->numArgs, invocable->fn->usesVarArgs);
 
   for (uint16_t i = 0; i < invocable->fn->numArgs; i++) {
     Value arg = popOperand(parent);
@@ -1431,55 +1518,29 @@ RetVal tryInvokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable 
   }
 
   unprotectInvocable(vm, invocable);
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
-RetVal tryInvokeCFn(VM *vm, Frame_t frame, Value cFn, Error *error) {
-  RetVal ret;
-
+void invokeCFn(VM *vm, Frame_t frame, Value cFn) {
   CFn *fn = deref(&vm->gc, cFn);
-  throws(tryPreprocessArguments(vm, frame, fn->numArgs, fn->usesVarArgs, error));
-  throws(fn->ptr(vm, frame, error));
-
-  return R_SUCCESS;
-  failure:
-  return ret;
+  preprocessArguments(vm, frame, fn->numArgs, fn->usesVarArgs);
+  fn->ptr(vm, frame);
 }
 
 // (8)              | (objectref, args... -> ...)
-RetVal tryInvokeDynEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
-
-  // for cleanup on failure
-  bool pushed = false;
-
+void tryInvokeDynEval(VM *vm, Frame_t frame) {
   Value pop = popOperand(frame);
-
   if (valueType(pop) == VT_CFN) {
-    throws(tryInvokeCFn(vm, frame, pop, error));
+    invokeCFn(vm, frame, pop);
   }
   else {
     Invocable invocable;
-    throws(tryMakeInvocable(vm, pop, &invocable, error));
+    Frame_t parent;
 
+    makeInvocable(vm, pop, &invocable);
     frame = pushFrame(vm, (Value)invocable.fn);
-    pushed = true;
-
-    Frame_t parent = getParent(frame);
-
-    throws(tryInvokePopulateLocals(vm, parent, frame, &invocable, error));
+    parent = getParent(frame);
+    invokePopulateLocals(vm, parent, frame, &invocable);
   }
-
-  return R_SUCCESS;
-  failure:
-    if (pushed) {
-      popFrame(vm);
-    }
-    return ret;
 }
 
 /*
@@ -1493,130 +1554,93 @@ RetVal tryInvokeDynEval(VM *vm, Frame_t frame, Error *error) {
  */
 
 // (8)              | (objectref, args... -> ...)
-RetVal tryInvokeDynTailEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
-
+void tryInvokeDynTailEval(VM *vm, Frame_t frame) {
   Value pop = popOperand(frame);
-
   if (valueType(pop) == VT_CFN) {
-    throws(tryInvokeCFn(vm, frame, pop, error));
+    invokeCFn(vm, frame, pop);
   }
   else {
     Invocable invocable;
-    throws(tryMakeInvocable(vm, pop, &invocable, error));
-
+    makeInvocable(vm, pop, &invocable);
     replaceFrame(vm, (Value)invocable.fn);
-
-    throws(tryInvokePopulateLocals(vm, frame, frame, &invocable, error));
+    invokePopulateLocals(vm, frame, frame, &invocable);
   }
-
-  return R_SUCCESS;
-  failure:
-    return ret;
 }
 
 // (8)              | (objectref ->)
-RetVal tryRetEval(VM *vm, Frame_t frame, Error *error) {
+void tryRetEval(VM *vm, Frame_t frame) {
   Value v = popOperand(frame);
   setResult(frame, v);
-  return R_SUCCESS;
 }
 
 // (8)              | (a, b -> 0 | 1)
-RetVal tryCmpEval(VM *vm, Frame_t frame, Error *error) {
-
+void tryCmpEval(VM *vm, Frame_t frame) {
   Value a = popOperand(frame);
   Value b = popOperand(frame);
-
   Value c = wrapBool(a == b);
   pushOperand(frame, c);
-
-  return R_SUCCESS;
 }
 
 // (8), offset (16) | (->)
-RetVal tryJmpEval(VM *vm, Frame_t frame, Error *error) {
+void tryJmpEval(VM *vm, Frame_t frame) {
   uint16_t newPc = readIndex(frame);
   setPc(frame, newPc);
-  return R_SUCCESS;
 }
 
 // (8), offset (16) | (value ->)
-RetVal tryJmpIfEval(VM *vm, Frame_t frame, Error *error) {
+void tryJmpIfEval(VM *vm, Frame_t frame) {
   Value test = popOperand(frame);
-
   bool truthy = isTruthy(vm, test);
-
   uint16_t newPc = readIndex(frame);
   if (truthy) {
     setPc(frame, newPc);
   }
-
-  return R_SUCCESS;
 }
 
 // (8), offset (16) | (value ->)
-RetVal tryJmpIfNotEval(VM *vm, Frame_t frame, Error *error) {
+void tryJmpIfNotEval(VM *vm, Frame_t frame) {
   Value test = popOperand(frame);
-
   bool truthy = isTruthy(vm, test);
-
   uint16_t newPc = readIndex(frame);
   if (!truthy) {
     setPc(frame, newPc);
   }
-
-  return R_SUCCESS;
 }
 
 // (8)              | (a, b -> c)
-RetVal tryAddEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
-
+void tryAddEval(VM *vm, Frame_t frame) {
   Value b = popOperand(frame);
   Value a = popOperand(frame);
 
   if (valueType(a) != VT_UINT) {
-    throwRuntimeError(error, "can only add integers: %s", getValueTypeName(vm, valueType(a)));
+    raise(vm, "can only add integers: %s", getValueTypeName(vm, valueType(a)));
   }
   if (valueType(b) != VT_UINT) {
-    throwRuntimeError(error, "can only add integers: %s", getValueTypeName(vm, valueType(b)));
+    raise(vm, "can only add integers: %s", getValueTypeName(vm, valueType(b)));
   }
 
   Value c = wrapUint(unwrapUint(a) + unwrapUint(b));
   pushOperand(frame, c);
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 // (8)              | (a, b -> c)
-RetVal trySubEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
-
+void trySubEval(VM *vm, Frame_t frame) {
   Value b = popOperand(frame);
   Value a = popOperand(frame);
 
   if (valueType(a) != VT_UINT) {
-    throwRuntimeError(error, "can only subtract integers: %s", getValueTypeName(vm, valueType(a)));
+    raise(vm, "can only subtract integers: %s", getValueTypeName(vm, valueType(a)));
   }
   if (valueType(b) != VT_UINT) {
-    throwRuntimeError(error, "can only subtract integers: %s", getValueTypeName(vm, valueType(b)));
+    raise(vm, "can only subtract integers: %s", getValueTypeName(vm, valueType(b)));
   }
 
   Value c = wrapUint(unwrapUint(a) - unwrapUint(b));
   pushOperand(frame, c);
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 // (8), offset (16)  | (value ->)
-RetVal tryDefVarEval(VM *vm, Frame_t frame, Error *error) {
+void tryDefVarEval(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
   uint16_t constantIndex = readIndex(frame);
@@ -1631,21 +1655,16 @@ RetVal tryDefVarEval(VM *vm, Frame_t frame, Error *error) {
   symbol->topLevelValue = value;
 
   pushOperand(frame, nil());
-  return R_SUCCESS;
 }
 
 // (8), offset 16  | (-> value)
-RetVal tryLoadVarEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
+void tryLoadVarEval(VM *vm, Frame_t frame) {
 
   uint16_t constantIndex = readIndex(frame);
   Value value = getConst(frame, constantIndex);
   ValueType varNameType = valueType(value);
 
   if (varNameType != VT_SYMBOL) {
-
-    Fn *fn = deref(&vm->gc, value);
-
     explode("expected a symbol: %s", getValueTypeName(vm, varNameType));
   }
 
@@ -1663,15 +1682,10 @@ RetVal tryLoadVarEval(VM *vm, Frame_t frame, Error *error) {
     }
 
     String *name = deref(&vm->gc, symbol->name);
-    throwRuntimeError(error, "no value defined for : '%ls'", stringValue(name));
+    raise(vm, "no value defined for : '%ls'", stringValue(name));
   }
 
   pushOperand(frame, symbol->topLevelValue);
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 void closureInitContents(Closure *cl) {
@@ -1682,9 +1696,7 @@ void closureInitContents(Closure *cl) {
 }
 
 // (8), offset (16) | (captures... -> value)
-RetVal tryLoadClosureEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
-
+void tryLoadClosureEval(VM *vm, Frame_t frame) {
   Fn *protectedFn;
   {
     uint16_t constantIndex = readIndex(frame);
@@ -1692,8 +1704,7 @@ RetVal tryLoadClosureEval(VM *vm, Frame_t frame, Error *error) {
 
     ValueType fnValueType = valueType(fnValue);
     if (fnValueType != VT_FN) {
-      throwRuntimeError(error, "cannot create a closure from this value type: %s",
-                        getValueTypeName(vm, fnValueType));
+      raise(vm, "cannot create a closure from this value type: %s", getValueTypeName(vm, fnValueType));
     }
 
     protectedFn = deref(&vm->gc, fnValue);
@@ -1720,78 +1731,31 @@ RetVal tryLoadClosureEval(VM *vm, Frame_t frame, Error *error) {
 
   popFrameRoot(vm);
   pushOperand(frame, (Value)closure);
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
 // (8)        | (a, b -> b, a)
-RetVal trySwapEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
-
+void trySwapEval(VM *vm, Frame_t frame) {
   Value a = popOperand(frame);
   Value b = popOperand(frame);
-
   pushOperand(frame, a);
   pushOperand(frame, b);
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
 // (8)        | (jumpAddr, handler ->)
-RetVal trySetHandlerEval(VM *vm, Frame_t frame, Error *error) {
+void trySetHandlerEval(VM *vm, Frame_t frame) {
   ExceptionHandler handler;
-
   handler.jumpAddress = readIndex(frame);
   handler.localIndex = readIndex(frame);
-
   setHandler(frame, handler);
-
-  return R_SUCCESS;
 }
 
 // (8)        | (->)
-RetVal tryClearHandlerEval(VM *vm, Frame_t frame, Error *error) {
+void tryClearHandlerEval(VM *vm, Frame_t frame) {
   clearHandler(frame);
-  return R_SUCCESS;
 }
 
-/* 1. It is ok to implement builtin c functions the same way we implement instructions:
- *    - one signature: RetVal doit(VM *vm, ExecFrame_t frame, Error *error);
- *    - each function must read its params from the op stack and write its return value to the opstack
- *    - each function must guard against triggering gc while it is running
- *
- * 2. It is ok to manually add builtin c functions and metadata to the registry in vm init code
- *    - this can be automated in the future
- *
- * 3. Builtins are defined entirely by the VM, and require no definitions in the standard library.
- *    - a VM always hydrates builtins on startup and defines them in vars before evaluating code
- *    - the 'builtin' special form goes away
- *
- * 4. Builtins are invocable just like any other function.
- *
- * //////////// old ideas /////////////
- *
- * - make a CFn object and add support for creating such objects programmatically within the VM
- * - when initializing the vm, for each builtin function, create the CFn object and define a var
- *   with that function's name, and CFn's value.
- * - make the CFn object invocable, such that it just stops short of invoking a specific c function and then bombs out
- * - make code to dynamically invoke such a c function based on the function's metadata stored in the CFn
- * - use a special comment format to identify functions and their arguments that can be called as CFn's, write code
- *   to scan c files as a part of the build process and generate metadata for the VM to load on start
- * // DECL_FN(name, arg1, arg2)
- *
- */
-
 // (8),             | (x, seq -> newseq)
-RetVal tryConsEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
-
+void tryConsEval(VM *vm, Frame_t frame) {
   // gc may occur, so allocate the cons first
   Cons *cons = makeCons(vm);
 
@@ -1800,29 +1764,22 @@ RetVal tryConsEval(VM *vm, Frame_t frame, Error *error) {
 
   ValueType seqType = valueType(seq);
   if (seqType != VT_NIL && seqType != VT_LIST) {
-    throwRuntimeError(error, "cannot cons onto a value of type %s", getValueTypeName(vm, seqType));
+    raise(vm, "cannot cons onto a value of type %s", getValueTypeName(vm, seqType));
   }
 
   cons->value = x;
   cons->next = seq;
 
   pushOperand(frame, (Value)cons);
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
 // (8),             | (seq -> x)
-RetVal tryFirstEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
+void tryFirstEval(VM *vm, Frame_t frame) {
 
   Value seq = popOperand(frame);
   ValueType seqType = valueType(seq);
 
   Value result;
-
   if (seqType == VT_NIL) {
     result = nil();
   }
@@ -1831,26 +1788,19 @@ RetVal tryFirstEval(VM *vm, Frame_t frame, Error *error) {
     result = cons->value;
   }
   else {
-    throwRuntimeError(error, "cannot get first from a value of type %s", getValueTypeName(vm, seqType));
+    raise(vm, "cannot get first from a value of type %s", getValueTypeName(vm, seqType));
   }
 
   pushOperand(frame, result);
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
 // (8),             | (seq -> seq)
-RetVal tryRestEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
+void tryRestEval(VM *vm, Frame_t frame) {
 
   Value seq = popOperand(frame);
   ValueType seqType = valueType(seq);
 
   Value result;
-
   if (seqType == VT_NIL) {
     result = nil();
   }
@@ -1859,26 +1809,20 @@ RetVal tryRestEval(VM *vm, Frame_t frame, Error *error) {
     result = cons->next;
   }
   else {
-    throwRuntimeError(error, "cannot get rest from a value of type %s", getValueTypeName(vm, seqType));
+    raise(vm, "cannot get rest from a value of type %s", getValueTypeName(vm, seqType));
   }
 
   pushOperand(frame, result);
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
 // (8),             | (name -> nil)
-RetVal trySetMacroEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
+void trySetMacroEval(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
   ValueType type = valueType(value);
 
   if (type != VT_SYMBOL) {
-    throwRuntimeError(error, "only symbols can identify vars: %s", getValueTypeName(vm, type));
+    raise(vm, "only symbols can identify vars: %s", getValueTypeName(vm, type));
   }
 
   Symbol *s = deref(&vm->gc, value);
@@ -1895,101 +1839,65 @@ RetVal trySetMacroEval(VM *vm, Frame_t frame, Error *error) {
       }
     }
 
-    throwRuntimeError(error, "no value is defined for this var: %ls", stringValue(name));
+    raise(vm, "no value is defined for this var: %ls", stringValue(name));
   }
 
   if (!s->isMacro) {
     if (valueType(s->topLevelValue) != VT_FN) {
-      throwRuntimeError(error, "only vars referring to functions can be macros: %ls -> %s",
+      raise(vm, "only vars referring to functions can be macros: %ls -> %s",
           stringValue(name), getValueTypeName(vm, valueType(s->topLevelValue)));
     }
     s->isMacro = true;
   }
 
   pushOperand(frame, nil());
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 // (8),             | (name -> bool)
-RetVal tryGetMacroEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
-
+void tryGetMacroEval(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
-  ValueType type = valueType(value);
 
+  ValueType type = valueType(value);
   if (type != VT_SYMBOL) {
-    throwRuntimeError(error, "only symbols can identify vars: %s", getValueTypeName(vm, type));
+    raise(vm, "only symbols can identify vars: %s", getValueTypeName(vm, type));
   }
 
   Symbol *s = deref(&vm->gc, value);
-
   Value result = wrapBool(s->isMacro);
   pushOperand(frame, result);
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 // (8),             | (name -> bool)
-RetVal tryGCEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
-
+void tryGCEval(VM *vm, Frame_t frame) {
   collect(vm);
-
   pushOperand(frame, nil());
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 // (8),             | (value -> value)
-RetVal tryGetTypeEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
-
+void tryGetTypeEval(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
   Value typeId = wrapUint(valueType(value));
   pushOperand(frame, typeId);
-
-  return R_SUCCESS;
 }
 
-RetVal tryVMPrn(VM *vm, Value result, Pool_t pool, Expr *expr, Error *error);
+void vmPrn(VM *vm, Value result, Expr *expr);
 
 #define ONE_KB 1024
 
 // (8),             | (value -> value)
-RetVal tryPrnEval(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
-
-  Pool_t pool = NULL;
-  throws(tryPoolCreate(&pool, ONE_KB, error));
-
+void tryPrnEval(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
 
+  Error error;
+  errorInitContents(&error);
   Expr expr;
-  throws(tryVMPrn(vm, value, pool, &expr, error));
-  throws(tryExprPrn(pool, &expr, error));
+  vmPrn(vm, value, &expr);
+  if (tryExprPrn(vm->outputPool, &expr, &error) != R_SUCCESS) {
+    explode("expr prn");
+  }
   printf("\n");
 
   pushOperand(frame, nil());
-
-  ret = R_SUCCESS;
-  goto done;
-
-  failure:
-    goto done;
-
-  done:
-    poolFree(pool);
-    return ret;
 }
 
 void printInst(int *i, const char* name, uint8_t *code) {
@@ -2020,31 +1928,31 @@ InstTable instTableCreate() {
   for (int i=0; i<instructionsAllocated; i++) {
     table.instructions[i].name = NULL;
     table.instructions[i].print = NULL;
-    table.instructions[i].tryEval = NULL;
+    table.instructions[i].eval = NULL;
   }
 
   // init with known instructions
   Inst instructions[]      = {
-      [I_LOAD_CONST]       = { .name = "I_LOAD_CONST",      .print = printInstAndIndex,   .tryEval = tryLoadConstEval },
-      [I_LOAD_LOCAL]       = { .name = "I_LOAD_LOCAL",      .print = printInstAndIndex,   .tryEval = tryLoadLocalEval },
-      [I_STORE_LOCAL]      = { .name = "I_STORE_LOCAL",     .print = printInstAndIndex,   .tryEval = tryStoreLocalEval },
-      [I_INVOKE_DYN]       = { .name = "I_INVOKE_DYN",      .print = printInst,           .tryEval = tryInvokeDynEval },
-      [I_INVOKE_DYN_TAIL]  = { .name = "I_INVOKE_DYN_TAIL", .print = printInst,           .tryEval = tryInvokeDynTailEval },
-      [I_RET]              = { .name = "I_RET",             .print = printInst,           .tryEval = tryRetEval },
-      [I_CMP]              = { .name = "I_CMP",             .print = printInst,           .tryEval = tryCmpEval },
-      [I_JMP]              = { .name = "I_JMP",             .print = printInstAndIndex,   .tryEval = tryJmpEval },
-      [I_JMP_IF]           = { .name = "I_JMP_IF",          .print = printInstAndIndex,   .tryEval = tryJmpIfEval },
-      [I_JMP_IF_NOT]       = { .name = "I_JMP_IF_NOT",      .print = printInstAndIndex,   .tryEval = tryJmpIfNotEval },
-      [I_ADD]              = { .name = "I_ADD",             .print = printInst,           .tryEval = tryAddEval },
-      [I_SUB]              = { .name = "I_SUB",             .print = printInst,           .tryEval = trySubEval },
-      [I_DEF_VAR]          = { .name = "I_DEF_VAR",         .print = printInstAndIndex,   .tryEval = tryDefVarEval },
-      [I_LOAD_VAR]         = { .name = "I_LOAD_VAR",        .print = printInstAndIndex,   .tryEval = tryLoadVarEval },
-      [I_LOAD_CLOSURE]     = { .name = "I_LOAD_CLOSURE",    .print = printInstAndIndex,   .tryEval = tryLoadClosureEval },
-      [I_SWAP]             = { .name = "I_SWAP",            .print = printInst,           .tryEval = trySwapEval },
-      [I_SET_HANDLER]      = { .name = "I_SET_HANDLER",     .print = printInstAndIndex2x, .tryEval = trySetHandlerEval },
-      [I_CLEAR_HANDLER]    = { .name = "I_CLEAR_HANDLER",   .print = printInst,           .tryEval = tryClearHandlerEval },
+      [I_LOAD_CONST]       = { .name = "I_LOAD_CONST",      .print = printInstAndIndex,   .eval = tryLoadConstEval },
+      [I_LOAD_LOCAL]       = { .name = "I_LOAD_LOCAL",      .print = printInstAndIndex,   .eval = tryLoadLocalEval },
+      [I_STORE_LOCAL]      = { .name = "I_STORE_LOCAL",     .print = printInstAndIndex,   .eval = tryStoreLocalEval },
+      [I_INVOKE_DYN]       = { .name = "I_INVOKE_DYN",      .print = printInst,           .eval = tryInvokeDynEval },
+      [I_INVOKE_DYN_TAIL]  = { .name = "I_INVOKE_DYN_TAIL", .print = printInst,           .eval = tryInvokeDynTailEval },
+      [I_RET]              = { .name = "I_RET",             .print = printInst,           .eval = tryRetEval },
+      [I_CMP]              = { .name = "I_CMP",             .print = printInst,           .eval = tryCmpEval },
+      [I_JMP]              = { .name = "I_JMP",             .print = printInstAndIndex,   .eval = tryJmpEval },
+      [I_JMP_IF]           = { .name = "I_JMP_IF",          .print = printInstAndIndex,   .eval = tryJmpIfEval },
+      [I_JMP_IF_NOT]       = { .name = "I_JMP_IF_NOT",      .print = printInstAndIndex,   .eval = tryJmpIfNotEval },
+      [I_ADD]              = { .name = "I_ADD",             .print = printInst,           .eval = tryAddEval },
+      [I_SUB]              = { .name = "I_SUB",             .print = printInst,           .eval = trySubEval },
+      [I_DEF_VAR]          = { .name = "I_DEF_VAR",         .print = printInstAndIndex,   .eval = tryDefVarEval },
+      [I_LOAD_VAR]         = { .name = "I_LOAD_VAR",        .print = printInstAndIndex,   .eval = tryLoadVarEval },
+      [I_LOAD_CLOSURE]     = { .name = "I_LOAD_CLOSURE",    .print = printInstAndIndex,   .eval = tryLoadClosureEval },
+      [I_SWAP]             = { .name = "I_SWAP",            .print = printInst,           .eval = trySwapEval },
+      [I_SET_HANDLER]      = { .name = "I_SET_HANDLER",     .print = printInstAndIndex2x, .eval = trySetHandlerEval },
+      [I_CLEAR_HANDLER]    = { .name = "I_CLEAR_HANDLER",   .print = printInst,           .eval = tryClearHandlerEval },
 
-      [I_CONS]             = { .name = "I_CONS",            .print = printInst,           .tryEval = tryConsEval },
+      [I_CONS]             = { .name = "I_CONS",            .print = printInst,           .eval = tryConsEval },
 
 //      [I_NEW]         = { .name = "I_NEW",         .print = printUnknown},
 //      [I_GET_FIELD]   = { .name = "I_GET_FIELD",   .print = printUnknown},
@@ -2144,86 +2052,91 @@ void relocateChildrenSymbol(VM_t vm, void *obj) {
   relocate(vm, &s->topLevelValue);
 }
 
-RetVal tryPrnNil(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
+void prnNil(VM_t vm, Value result, Expr *expr) {
   expr->type = N_NIL;
-  return R_SUCCESS;
 }
 
-RetVal tryPrnInt(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
+void prnInt(VM_t vm, Value result, Expr *expr) {
   expr->type = N_NUMBER;
   expr->number.value = unwrapUint(result);
-  return R_SUCCESS;
 }
 
-RetVal tryPrnBool(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
+void prnBool(VM_t vm, Value result, Expr *expr) {
   expr->type = N_BOOLEAN;
   expr->boolean.value = unwrapBool(result);
-  return R_SUCCESS;
 }
 
-RetVal tryPrnFn(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
+void prnFn(VM_t vm, Value result, Expr *expr) {
   expr->type = N_STRING;
   wchar_t function[] = L"<function>";
   expr->string.length = wcslen(function);
-  return tryCopyText(pool, function, &expr->string.value, expr->string.length, error);
+
+  Error error;
+  errorInitContents(&error);
+  if (tryCopyText(vm->outputPool, function, &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
+    explode("copy text");
+  }
 }
 
-RetVal tryPrnCFn(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
+void tryPrnCFn(VM_t vm, Value result, Expr *expr) {
   expr->type = N_STRING;
   wchar_t function[] = L"<c-function>";
   expr->string.length = wcslen(function);
-  return tryCopyText(pool, function, &expr->string.value, expr->string.length, error);
+
+  Error error;
+  errorInitContents(&error);
+  if (tryCopyText(vm->outputPool, function, &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
+    explode("copy text");
+  }
 }
 
-RetVal tryPrnClosure(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
+void prnClosure(VM_t vm, Value result, Expr *expr) {
   expr->type = N_STRING;
   wchar_t function[] = L"<closure>";
   expr->string.length = wcslen(function);
-  return tryCopyText(pool, function, &expr->string.value, expr->string.length, error);
+
+  Error error;
+  errorInitContents(&error);
+  if (tryCopyText(vm->outputPool, function, &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
+    explode("copy text");
+  }
 }
 
-RetVal tryPrnStr(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
-  RetVal ret;
-
+void prnStr(VM_t vm, Value result, Expr *expr) {
   String *str = deref(&vm->gc, result);
-
   expr->type = N_STRING;
   expr->string.length = str->length;
-  throws(tryCopyText(pool, stringValue(str), &expr->string.value, expr->string.length, error));
 
-  return R_SUCCESS;
-  failure:
-  return ret;
+  Error error;
+  errorInitContents(&error);
+  if(tryCopyText(vm->outputPool, stringValue(str), &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
+    explode("copy text");
+  }
 }
 
-RetVal tryPrnSymbol(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
-
-  RetVal ret;
-
+void prnSymbol(VM_t vm, Value result, Expr *expr) {
   Symbol *sym = deref(&vm->gc, result);
   String *str = deref(&vm->gc, sym->name);
-
   expr->type = N_SYMBOL;
   expr->symbol.length = str->length;
-  throws(tryCopyText(pool, stringValue(str), &expr->symbol.value, expr->string.length, error));
 
-  return R_SUCCESS;
-  failure:
-  return ret;
+  Error error;
+  errorInitContents(&error);
+  if(tryCopyText(vm->outputPool, stringValue(str), &expr->symbol.value, expr->string.length, &error) != R_SUCCESS) {
+    explode("copy text");
+  }
 }
 
-RetVal tryPrnKeyword(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
-  RetVal ret;
-
+void prnKeyword(VM_t vm, Value result, Expr *expr) {
   Keyword *kw = deref(&vm->gc, result);
-
   expr->type = N_KEYWORD;
   expr->keyword.length = kw->length;
-  throws(tryCopyText(pool, keywordValue(kw), &expr->keyword.value, expr->string.length, error));
 
-  return R_SUCCESS;
-  failure:
-  return ret;
+  Error error;
+  errorInitContents(&error);
+  if (tryCopyText(vm->outputPool, keywordValue(kw), &expr->keyword.value, expr->string.length, &error) != R_SUCCESS) {
+    explode("copy text");
+  }
 }
 
 bool isEmpty(Value value) {
@@ -2235,49 +2148,42 @@ typedef struct Property {
   Value value;
 } Property;
 
-RetVal tryReadProperty(VM *vm, Value *ptr, Property *p, Error *error) {
-  RetVal ret;
+void readProperty(VM *vm, Value *ptr, Property *p) {
 
   if (valueType(*ptr) != VT_LIST) {
-    throwRuntimeError(error, "expected property list: %s",
-                      getValueTypeName(vm, valueType(*ptr)));
+    raise(vm, "expected property list: %s",
+              getValueTypeName(vm, valueType(*ptr)));
   }
 
   Cons *properties = deref(&vm->gc, *ptr);
 
   if (valueType(properties->value) != VT_KEYWORD) {
-    throwRuntimeError(error, "expected keyword for property key: %s",
-                      getValueTypeName(vm, valueType(properties->value)));
+    raise(vm, "expected keyword for property key: %s",
+              getValueTypeName(vm, valueType(properties->value)));
   }
 
   p->key = deref(&vm->gc, properties->value);
 
   if (isEmpty(properties->next)) {
-    throwRuntimeError(error, "expected value for property but only found a key: %ls", keywordValue(p->key));
+    raise(vm, "expected value for property but only found a key: %ls", keywordValue(p->key));
   }
 
   properties = deref(&vm->gc, properties->next);
   p->value = properties->value;
 
   *ptr = properties->next;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
-RetVal tryPrnMetadata(VM_t vm, Value metadata, Expr *expr, Error *error) {
-  RetVal ret;
-
+void prnMetadata(VM_t vm, Value metadata, Expr *expr) {
   while (!isEmpty(metadata)) {
 
     Property p;
-    throws(tryReadProperty(vm, &metadata, &p, error));
+    readProperty(vm, &metadata, &p);
 
     if (wcscmp(L"line-number", keywordValue(p.key)) == 0) {
 
       if (valueType(p.value) != VT_UINT) {
-        throwRuntimeError(error, "expected line-number property value to be an int: %s",
+        raise(vm, "expected line-number property value to be an int: %s",
                           getValueTypeName(vm, valueType(p.value)));
       }
 
@@ -2288,49 +2194,47 @@ RetVal tryPrnMetadata(VM_t vm, Value metadata, Expr *expr, Error *error) {
       // ignore property
     }
   }
-
-  return R_SUCCESS;
-  failure:
-  return ret;
 }
 
-RetVal tryPrnList(VM_t vm, Value result, Pool_t pool, Expr *expr, Error *error) {
-  RetVal ret;
-
+void prnList(VM_t vm, Value result, Expr *expr) {
   Cons *cons = deref(&vm->gc, result);
 
   expr->type = N_LIST;
 
-  throws(tryPrnMetadata(vm, cons->metadata, expr, error));
+  prnMetadata(vm, cons->metadata, expr);
 
   listInitContents(&expr->list);
   Expr *elem;
 
-  tryPalloc(pool, elem, sizeof(Expr), "Expr");
+  palloc(vm->outputPool, elem, sizeof(Expr), "Expr");
   exprInitContents(elem);
 
-  throws(tryVMPrn(vm, cons->value, pool, elem, error));
-  throws(tryListAppend(pool, &expr->list, elem, error));
+  vmPrn(vm, cons->value, elem);
+
+  Error error;
+  errorInitContents(&error);
+  if (tryListAppend(vm->outputPool, &expr->list, elem, &error) != R_SUCCESS) {
+    explode("list append");
+  }
 
   while (valueType(cons->next) != VT_NIL) {
 
     if (valueType(cons->next) != VT_LIST) {
-      throwRuntimeError(error, "this should always be a type of VT_LIST: %s",
-                        getValueTypeName(vm, valueType(cons->next)));
+      raise(vm, "this should always be a type of VT_LIST: %s",
+                getValueTypeName(vm, valueType(cons->next)));
     }
 
     cons = deref(&vm->gc, cons->next);
 
-    tryPalloc(pool, elem, sizeof(Expr), "Expr");
+    palloc(vm->outputPool, elem, sizeof(Expr), "Expr");
     exprInitContents(elem);
 
-    throws(tryVMPrn(vm, cons->value, pool, elem, error));
-    throws(tryListAppend(pool, &expr->list, elem, error));
-  }
+    vmPrn(vm, cons->value, elem);
 
-  return R_SUCCESS;
-  failure:
-  return ret;
+    if (tryListAppend(vm->outputPool, &expr->list, elem, &error) != R_SUCCESS) {
+      explode("list append");
+    }
+  }
 }
 
 bool equals(VM_t vm, Value this, Value that);
@@ -2447,7 +2351,7 @@ ValueTypeTable valueTypeTableCreate() {
     table.valueTypes[i].name = NULL;
     table.valueTypes[i].isTruthy = NULL;
     table.valueTypes[i].relocateChildren = NULL;
-    table.valueTypes[i].tryPrn = NULL;
+    table.valueTypes[i].prn = NULL;
   }
 
   // init with known value types
@@ -2455,52 +2359,52 @@ ValueTypeTable valueTypeTableCreate() {
       [VT_NIL]       = {.name = "nil",
                         .isTruthy = &isTruthyNo,
                         .relocateChildren = NULL,
-                        .tryPrn = &tryPrnNil,
+                        .prn = &prnNil,
                         .equals = NULL},
       [VT_UINT]      = {.name = "uint",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
-                        .tryPrn = &tryPrnInt,
+                        .prn = &prnInt,
                         .equals = NULL},
       [VT_BOOL]      = {.name = "bool",
                         .isTruthy = &isTruthyBool,
                         .relocateChildren = NULL,
-                        .tryPrn = &tryPrnBool,
+                        .prn = &prnBool,
                         .equals = NULL},
       [VT_FN]        = {.name = "fn",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenFn,
-                        .tryPrn = &tryPrnFn,
+                        .prn = &prnFn,
                         .equals = NULL},
       [VT_STR]       = {.name = "str",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
-                        .tryPrn = &tryPrnStr,
+                        .prn = &prnStr,
                         .equals = &equalsStr},
       [VT_SYMBOL]    = {.name = "symbol",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenSymbol,
-                        .tryPrn = &tryPrnSymbol,
+                        .prn = &prnSymbol,
                         .equals = &equalsSymbol},
       [VT_KEYWORD]   = {.name = "keyword",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
-                        .tryPrn = &tryPrnKeyword,
+                        .prn = &prnKeyword,
                         .equals = &equalsKeyword},
       [VT_LIST]      = {.name = "list",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenList,
-                        .tryPrn = &tryPrnList,
+                        .prn = &prnList,
                         .equals = &equalsList},
       [VT_CLOSURE]   = {.name = "closure",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenClosure,
-                        .tryPrn = &tryPrnClosure,
+                        .prn = &prnClosure,
                         .equals = NULL},
       [VT_CFN]       = {.name = "cfn",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
-                        .tryPrn = &tryPrnCFn,
+                        .prn = &tryPrnCFn,
                         .equals = NULL}
   };
   memcpy(table.valueTypes, valueTypes, sizeof(valueTypes));
@@ -2509,185 +2413,33 @@ ValueTypeTable valueTypeTableCreate() {
   return table;
 }
 
-void exFrameInitContents(VMExceptionFrame *f) {
-  textInitContents(&f->functionName);
-  f->unknownSource = true;
-  f->lineNumber = 0;
-  textInitContents(&f->fileName);
-}
-
-RetVal tryExceptionMake(Frame_t frame, Pool_t pool, VMException *exception, Error *error) {
-  RetVal ret;
-
-  Error reference = *error;
-
-  wchar_t msg[ERROR_MSG_LENGTH];
-  exceptionInitContents(exception);
-
-  swprintf(msg, ERROR_MSG_LENGTH, L"unhandled error: %ls", reference.message);
-  throws(tryTextMake(pool, msg, &exception->message, wcslen(msg), error));
-
-  uint64_t numFrames = 0;
-  {
-    Frame_t current = frame;
-    while (true) {
-      numFrames++;
-      if (!hasParent(current)) {
-        break;
-      }
-      else {
-        current = getParent(current);
-      }
-    }
-  }
-
-  // native frame
-  numFrames++;
-
-  exception->frames.length = numFrames;
-  tryPalloc(pool, exception->frames.elements, sizeof(VMExceptionFrame) * numFrames, "VMExceptionFrame array");
-
-  { // native frame
-
-    VMExceptionFrame *f = &exception->frames.elements[0];
-    exFrameInitContents(f);
-
-    f->functionName.length = strlen(reference.functionName) + 1;
-    tryPalloc(pool, f->functionName.value, f->functionName.length * sizeof(wchar_t), "wide string");
-    swprintf(f->functionName.value, f->functionName.length, L"%s", reference.functionName);
-
-    f->unknownSource = false;
-
-    char* fileName = basename((char *) reference.fileName);
-    f->fileName.length = strlen(fileName) + 1;
-    tryPalloc(pool, f->fileName.value, f->fileName.length * sizeof(wchar_t), "wide string");
-    swprintf(f->fileName.value, f->fileName.length, L"%s", fileName);
-
-    f->lineNumber = reference.lineNumber;
-  }
-
-  Frame_t current = frame;
-  for (uint64_t i=1; i<numFrames; i++) {
-
-    VMExceptionFrame *f = &exception->frames.elements[i];
-    exFrameInitContents(f);
-
-    if (hasFnName(current)) {
-      Text text = getFnName(current);
-      throws(tryTextCopy(pool, &text, &f->functionName, error));
-    }
-    else {
-      wchar_t *name = L"<root>\0";
-      throws(tryTextMake(pool, name, &f->functionName, wcslen(name), error));
-    }
-
-    if (hasSourceTable(current)) {
-      f->unknownSource = false;
-      getFileName(current, &f->fileName);
-      getLineNumber(current, &f->lineNumber);
-    }
-
-    if (hasParent(current)) {
-      current = getParent(current);
-    }
-  }
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
-RetVal tryExceptionPrint(Pool_t pool, VMException *e, wchar_t **ptr, Error *error) {
-  RetVal ret;
-
-  // clean up on exit always
-  StringBuffer_t b = NULL;
-
-  throws(tryStringBufferMake(pool, &b, error));
-
-  throws(tryStringBufferAppendStr(b, error->message, error));
-
-  wchar_t msg[ERROR_MSG_LENGTH];
-
-  for (uint64_t i=0; i<e->frames.length; i++) {
-    VMExceptionFrame *f = &e->frames.elements[i];
-
-    if (f->unknownSource) {
-      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(Unknown Source)\n", f->functionName.value);
-    }
-    else {
-      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(%ls:%" PRIu64 ")\n", f->functionName.value, f->fileName.value,
-          f->lineNumber);
-    }
-    throws(tryStringBufferAppendStr(b, msg, error));
-  }
-
-  wchar_t *output;
-  throws(tryCopyText(pool, stringBufferText(b), &output, stringBufferLength(b), error));
-
-  *ptr = output;
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
-RetVal tryExceptionPrintf(VMException *e, Error *error) {
-  RetVal ret;
-
-  Pool_t pool = NULL;
-  throws(tryPoolCreate(&pool, ONE_KB, error));
-
-  wchar_t *msg;
-  throws(tryExceptionPrint(pool, e, &msg, error));
-  printf("%ls\n", msg);
-
-  ret = R_SUCCESS;
-  goto done;
-
-  failure:
-  done:
-    poolFree(pool);
-    return ret;
-}
-
-void frameEval(VM *vm, Pool_t outputPool) {
+void frameEval(VM *vm) {
   uint8_t inst;
-  TryEval tryEval;
+  Eval eval;
 
-  while (true) {
+  if (!setjmp(vm->jumpBuf)) {
 
-    if (hasResult(vm->current)) {
-      if (!hasParent(vm->current)) {
-        break;
+    while (true) {
+
+      if (hasResult(vm->current)) {
+        if (!hasParent(vm->current)) {
+          break;
+        }
+        else {
+          Value result = getResult(vm->current);
+          Frame_t parent = getParent(vm->current);
+          pushOperand(parent, result);
+          popFrame(vm);
+        }
       }
-      else {
-        Value result = getResult(vm->current);
-        Frame_t parent = getParent(vm->current);
-        pushOperand(parent, result);
 
-        popFrame(vm);
+      inst = readInstruction(vm->current);
+      eval = vm->instTable.instructions[inst].eval;
+      if (eval == NULL) {
+        explode("instruction unimplemented: %s (%u)", getInstName(&vm->instTable, inst), inst);
       }
-    }
 
-    inst = readInstruction(vm->current);
-    tryEval = vm->instTable.instructions[inst].tryEval;
-
-    if (tryEval == NULL) {
-      explode("instruction unimplemented: %s (%u)", getInstName(&vm->instTable, inst), inst);
-    }
-
-    Error error;
-    errorInitContents(&error);
-    if (tryEval(vm, vm->current, &error) != R_SUCCESS) {
-      VMException ex;
-      // TODO: exceptions should go on the heap
-      if (tryExceptionMake(vm->current, outputPool, &ex, &error) != R_SUCCESS) {
-        explode("failed to create an exception");
-      }
-      setException(vm->current, ex);
-      break;
+      eval(vm, vm->current);
     }
   }
 }
@@ -2864,7 +2616,7 @@ typedef struct Frame {
   ExceptionHandler handler;
   bool handlerSet;
 
-  VMException exception;
+  VMException *exception;
   bool exceptionSet;
 } Frame;
 
@@ -2884,7 +2636,7 @@ void frameInitContents(Frame *frame) {
   frame->pc = 0;
   handlerInitContents(&frame->handler);
   frame->handlerSet = false;
-  exceptionInitContents(&frame->exception);
+  frame->exception = NULL;
   frame->exceptionSet = false;
 
   frame->opStackUsedDepth = 0;
@@ -3095,12 +2847,12 @@ bool hasException(Frame_t frame) {
   return frame->exceptionSet;
 }
 
-void setException(Frame_t frame, VMException e) {
+void setException(Frame_t frame, VMException *e) {
   frame->exception = e;
   frame->exceptionSet = true;
 }
 
-VMException getException(Frame_t frame) {
+VMException* getException(Frame_t frame) {
   if (!frame->exceptionSet) {
     explode("handler not set");
   }
@@ -3225,7 +2977,7 @@ void popFrameRoot(VM *vm) {
  *
  */
 
-void _vmEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, Value *result, VMException *exception, bool *exceptionThrown) {
+void _vmEval(VM *vm, CodeUnit *codeUnit, Value *result, VMException *exception, bool *exceptionThrown) {
 
   FnConstant c;
   constantFnInitContents(&c);
@@ -3235,11 +2987,11 @@ void _vmEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, Value *result, VMExc
 
   Value fnRef = fnHydrate(vm, &c);
   Frame_t frame = pushFrame(vm, fnRef);
-  frameEval(vm, outputPool);
+  frameEval(vm);
 
   if (frame->exceptionSet) {
     *exceptionThrown = true;
-    *exception = frame->exception;
+    *exception = *frame->exception;
   }
   else {
     *result = frame->result;
@@ -3256,7 +3008,9 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, VMEvalResult *re
   VMException exception;
   bool exceptionThrown = false;
 
-  _vmEval(vm, codeUnit, outputPool, &value, &exception, &exceptionThrown);
+  vm->outputPool = outputPool;
+
+  _vmEval(vm, codeUnit, &value, &exception, &exceptionThrown);
 
   if (exceptionThrown) {
     result->type = RT_EXCEPTION;
@@ -3264,8 +3018,10 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, VMEvalResult *re
   }
   else {
     result->type = RT_RESULT;
-    throws(tryVMPrn(vm, value, outputPool, &result->result, error));
+    vmPrn(vm, value, &result->result);
   }
+
+  vm->outputPool = NULL;
 
   return R_SUCCESS;
 
@@ -3277,15 +3033,15 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, VMEvalResult *re
  * builtin procedures
  */
 
-#define ASSERT_SEQ(value, ...) {\
+#define ASSERT_SEQ(vm, value, ...) {\
   if (valueType(value) != VT_LIST && valueType(value) != VT_NIL) { \
-    throwRuntimeError(error, "expected a list type: %s", getValueTypeName(vm, valueType(value))); \
+    raise(vm, "expected a list type: %s", getValueTypeName(vm, valueType(value))); \
   } \
 }
 
-#define ASSERT_STR(value, ...) {\
+#define ASSERT_STR(vm, value, ...) {\
   if (valueType(value) != VT_STR) { \
-    throwRuntimeError(error, "expected a string type: %s", getValueTypeName(vm, valueType(value))); \
+    raise(vm, "expected a string type: %s", getValueTypeName(vm, valueType(value))); \
   } \
 }
 
@@ -3318,11 +3074,10 @@ Value stringMakeBlank(VM *vm, uint64_t length) {
  * pop the args list back off the stack, deref and copy each one into the new list
  * push the new string onto the stack
  */
-RetVal tryStrJoinBuiltin(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
+void tryStrJoinBuiltin(VM *vm, Frame_t frame) {
 
   Value strings = popOperand(frame);
-  ASSERT_SEQ(strings);
+  ASSERT_SEQ(vm, strings);
   pushFrameRoot(vm, &strings);
 
   uint64_t totalLength = 0;
@@ -3332,7 +3087,7 @@ RetVal tryStrJoinBuiltin(VM *vm, Frame_t frame, Error *error) {
 
     Cons *seq = deref(&vm->gc, cursor);
 
-    ASSERT_STR(seq->value);
+    ASSERT_STR(vm, seq->value);
 
     String *string = deref(&vm->gc, seq->value);
     totalLength += string->length;
@@ -3361,28 +3116,27 @@ RetVal tryStrJoinBuiltin(VM *vm, Frame_t frame, Error *error) {
 
   popFrameRoot(vm);
   pushOperand(frame, resultRef);
-
-  return R_SUCCESS;
-  failure:
-  return ret;
 }
 
-RetVal tryPrStrBuiltinConf(VM *vm, Frame_t frame, bool readable, Error *error) {
-  RetVal ret;
-
+void tryPrStrBuiltinConf(VM *vm, Frame_t frame, bool readable) {
   Value value = popOperand(frame);
 
-  // note: using off-heap memory to construct the string
-  Pool_t pool = NULL;
   Expr expr;
   exprInitContents(&expr);
   StringBuffer_t b = NULL;
 
-  throws(tryPoolCreate(&pool, ONE_KB, error));
+  Error error;
+  errorInitContents(&error);
 
-  throws(tryVMPrn(vm, value, pool, &expr, error));
-  throws(tryStringBufferMake(pool, &b, error));
-  throws(tryExprPrnBufConf(&expr, b, readable, error));
+  vmPrn(vm, value, &expr);
+
+  if (tryStringBufferMake(vm->outputPool, &b, &error) != R_SUCCESS) {
+    explode("sbmake");
+  }
+
+  if (tryExprPrnBufConf(&expr, b, readable, &error) != R_SUCCESS) {
+    explode("prnbuf");
+  }
 
   Value resultRef = stringMakeBlank(vm, stringBufferLength(b));
   String *result = deref(&vm->gc, resultRef);
@@ -3390,42 +3144,25 @@ RetVal tryPrStrBuiltinConf(VM *vm, Frame_t frame, bool readable, Error *error) {
   memcpy(stringValue(result), stringBufferText(b), stringBufferLength(b) * sizeof(wchar_t));
 
   pushOperand(frame, resultRef);
-
-  ret = R_SUCCESS;
-  goto done;
-
-  failure:
-  goto done;
-
-  done:
-    // clean up off-heap memory
-    poolFree(pool);
-    return ret;
 }
 
-RetVal tryPrStrBuiltin(VM *vm, Frame_t frame, Error *error) {
-  return tryPrStrBuiltinConf(vm, frame, true, error);
+void tryPrStrBuiltin(VM *vm, Frame_t frame) {
+  tryPrStrBuiltinConf(vm, frame, true);
 }
 
-RetVal tryPrintStrBuiltin(VM *vm, Frame_t frame, Error *error) {
-  return tryPrStrBuiltinConf(vm, frame, false, error);
+void tryPrintStrBuiltin(VM *vm, Frame_t frame) {
+  tryPrStrBuiltinConf(vm, frame, false);
 }
 
-RetVal trySymbolBuiltin(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
-
+void trySymbolBuiltin(VM *vm, Frame_t frame) {
   Value protectedName = popOperand(frame);
-  ASSERT_STR(protectedName);
+  ASSERT_STR(vm, protectedName);
 
   pushFrameRoot(vm, &protectedName);
   Value result = symbolIntern(vm, &protectedName);
   popFrameRoot(vm);
 
   pushOperand(frame, result);
-
-  return R_SUCCESS;
-  failure:
-  return ret;
 }
 
 Value keywordMakeBlank(VM *vm, uint64_t length) {
@@ -3446,11 +3183,9 @@ Value keywordMakeBlank(VM *vm, uint64_t length) {
   return (Value)kw;
 }
 
-RetVal tryKeywordBuiltin(VM *vm, Frame_t frame, Error *error) {
-  RetVal ret;
-
+void tryKeywordBuiltin(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
-  ASSERT_STR(value);
+  ASSERT_STR(vm, value);
   pushFrameRoot(vm, &value);
 
   uint64_t length = 0;
@@ -3468,10 +3203,6 @@ RetVal tryKeywordBuiltin(VM *vm, Frame_t frame, Error *error) {
 
   pushOperand(frame, result);
   popFrameRoot(vm);
-
-  return R_SUCCESS;
-  failure:
-  return ret;
 }
 
 void cFnInitContents(CFn *fn) {
@@ -3549,9 +3280,7 @@ void vmConfigInitContents(VMConfig *config) {
   config->gcOnAlloc = false;
 }
 
-RetVal tryVMInitContents(VM *vm, VMConfig config, Error *error) {
-  RetVal ret;
-
+void vmInitContents(VM *vm, VMConfig config) {
   vm->config = config;
   vm->instTable = instTableCreate();
   vm->valueTypeTable = valueTypeTableCreate();
@@ -3560,9 +3289,7 @@ RetVal tryVMInitContents(VM *vm, VMConfig config, Error *error) {
   symbolTableInit(&vm->symbolTable);
   initCFns(vm);
   vm->current = NULL;
-
-  ret = R_SUCCESS;
-  return ret;
+  vm->outputPool = NULL;
 }
 
 void vmFreeContents(VM *vm) {
@@ -3577,7 +3304,7 @@ RetVal tryVMMake(VM **ptr, VMConfig config, Error *error) {
   RetVal ret;
 
   tryMalloc(*ptr, sizeof(VM), "VM malloc");
-  throws(tryVMInitContents(*ptr, config, error));
+  vmInitContents(*ptr, config);
 
   ret = R_SUCCESS;
   return ret;

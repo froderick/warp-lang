@@ -630,6 +630,17 @@ mid gc 2, pre scanptr:
    */
 
 
+/*
+ * TODO: let's make a separate heap (perm-gen) for compiled, loaded code
+ * - this would mean that we can depend on the locations of functions not changing due to garbage collection
+ *   while regular instructions within a function are being executed.
+ * - we would garbage collect functions whenever the space is exhausted, which would be caused by attempting to
+ *   load new code. we'd start from the roots like normal gc, just with different semantics
+ * - the only time functions would get moved is when loading more code, which triggers gc.
+ * - this lets us write vm code that keeps direct pointers to hydrated compiled code
+ *
+ * - see https://www.quora.com/What-are-some-best-practices-in-using-the-Java-8-JVM-Metaspace
+ */
 
 
 
@@ -637,6 +648,33 @@ mid gc 2, pre scanptr:
 
 
 
+
+/* 1. It is ok to implement builtin c functions the same way we implement instructions:
+ *    - one signature: RetVal doit(VM *vm, ExecFrame_t frame, Error *error);
+ *    - each function must read its params from the op stack and write its return value to the opstack
+ *    - each function must guard against triggering gc while it is running
+ *
+ * 2. It is ok to manually add builtin c functions and metadata to the registry in vm init code
+ *    - this can be automated in the future
+ *
+ * 3. Builtins are defined entirely by the VM, and require no definitions in the standard library.
+ *    - a VM always hydrates builtins on startup and defines them in vars before evaluating code
+ *    - the 'builtin' special form goes away
+ *
+ * 4. Builtins are invocable just like any other function.
+ *
+ * //////////// old ideas /////////////
+ *
+ * - make a CFn object and add support for creating such objects programmatically within the VM
+ * - when initializing the vm, for each builtin function, create the CFn object and define a var
+ *   with that function's name, and CFn's value.
+ * - make the CFn object invocable, such that it just stops short of invoking a specific c function and then bombs out
+ * - make code to dynamically invoke such a c function based on the function's metadata stored in the CFn
+ * - use a special comment format to identify functions and their arguments that can be called as CFn's, write code
+ *   to scan c files as a part of the build process and generate metadata for the VM to load on start
+ * // DECL_FN(name, arg1, arg2)
+ *
+ */
 
 
 
