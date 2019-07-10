@@ -1288,7 +1288,7 @@ RetVal tryExceptionPrint(Pool_t pool, VMException *e, wchar_t **ptr, Error *erro
 
   throws(tryStringBufferMake(pool, &b, error));
 
-  throws(tryStringBufferAppendStr(b, error->message, error));
+  throws(tryStringBufferAppendStr(b, e->message.value, error));
 
   wchar_t msg[ERROR_MSG_LENGTH];
 
@@ -1358,7 +1358,7 @@ void handleRaise(VM *vm, Raised *r) {
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   \
-  swprintf(r.message, ERROR_MSG_LENGTH, L"vm raised an exception: %s\n", str); \
+  swprintf(r.message, ERROR_MSG_LENGTH, L"vm raised an exception: %s\n", msg); \
   handleRaise(vm, &r); \
 }
 
