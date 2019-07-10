@@ -216,12 +216,8 @@ typedef struct Symbol {
 typedef struct Keyword {
   ObjectHeader header;
 
-  uint64_t length;
-  size_t valueOffset;
-  uint32_t hash;
+  Value name;
 } Keyword;
-
-wchar_t* keywordValue(Keyword *x) { return (void*)x + x->valueOffset; }
 
 typedef struct Cons {
   ObjectHeader header;
@@ -330,6 +326,7 @@ typedef struct VM {
   FrameRoot_t noFrameRoots;
   Frame_t current;
   Table symbolTable;
+  Table keywordTable;
   Pool_t outputPool; // this is mutable, it changes on every eval request
   jmp_buf jumpBuf;
 } VM;
@@ -458,14 +455,8 @@ void _putEntryWithHash(VM *vm, Table *table, Value insertMe, Value name, uint32_
 }
 
 void _putEntry(VM *vm, Table *table, Value name, Value insertMe) {
-
-  if (valueType(insertMe) != VT_SYMBOL) {
-    explode("can only insert symbols");
-  }
-
   String *s = deref(&vm->gc, name);
   uint32_t hash = stringHash(s);
-
   _putEntryWithHash(vm, table, insertMe, name, hash);
 }
 
@@ -775,6 +766,7 @@ void collect(VM *vm) {
 
   // relocate tables
   relocateTable(vm, &vm->symbolTable);
+  relocateTable(vm, &vm->keywordTable);
 
   // relocate noFrameRoots
   FrameRoot_t noFrameRoot = vm->noFrameRoots;
@@ -1018,28 +1010,37 @@ Value symbolHydrate(VM *vm, SymbolConstant symConst) {
 
 void keywordInitContents(Keyword *k) {
   k->header = 0;
-  k->length = 0;
-  k->valueOffset = 0;
-  k->hash = 0;
+  k->name = nil();
+}
+
+Value keywordIntern(VM *vm, Value *protectedName) {
+
+  Table *table = &vm->keywordTable;
+  Value result = tableLookup(vm, table, *protectedName);
+  if (valueType(result) == VT_NIL) {
+
+    uint64_t size = padAllocSize(sizeof(Keyword));
+    Keyword *kw = alloc(vm, size);
+
+    keywordInitContents(kw);
+    kw->header = makeObjectHeader(W_KEYWORD_TYPE, size);
+    kw->name = *protectedName;
+
+    putEntry(vm, table, *protectedName, (Value)kw);
+    result = (Value)kw;
+  }
+
+  return result;
 }
 
 Value keywordHydrate(VM *vm, KeywordConstant kwConst) {
-  Keyword *kw = NULL;
+  Value protectedName = stringHydrate(vm, kwConst.value, kwConst.length);
+  pushFrameRoot(vm, &protectedName);
 
-  uint64_t textSize = (kwConst.length + 1) * sizeof(wchar_t);
-  uint64_t size = padAllocSize(sizeof(Keyword) + textSize);
+  Value value = keywordIntern(vm, &protectedName);
 
-  kw = alloc(vm, size);
-
-  keywordInitContents(kw);
-  kw->header = makeObjectHeader(W_KEYWORD_TYPE, size);
-  kw->length = kwConst.length;
-
-  kw->valueOffset = sizeof(Keyword);
-  memcpy(keywordValue(kw), kwConst.value, kw->length * sizeof(wchar_t));
-  keywordValue(kw)[kw->length] = L'\0';
-
-  return (Value)kw;
+  popFrameRoot(vm);
+  return value;
 }
 
 void consInitContents(Cons *c) {
@@ -2048,6 +2049,11 @@ void relocateChildrenSymbol(VM_t vm, void *obj) {
   relocate(vm, &s->topLevelValue);
 }
 
+void relocateChildrenKeyword(VM_t vm, void *obj) {
+  Keyword *k = obj;
+  relocate(vm, &k->name);
+}
+
 void prnNil(VM_t vm, Value result, Expr *expr) {
   expr->type = N_NIL;
 }
@@ -2125,12 +2131,13 @@ void prnSymbol(VM_t vm, Value result, Expr *expr) {
 
 void prnKeyword(VM_t vm, Value result, Expr *expr) {
   Keyword *kw = deref(&vm->gc, result);
+  String *str = deref(&vm->gc, kw->name);
   expr->type = N_KEYWORD;
-  expr->keyword.length = kw->length;
+  expr->keyword.length = str->length;
 
   Error error;
   errorInitContents(&error);
-  if (tryCopyText(vm->outputPool, keywordValue(kw), &expr->keyword.value, expr->string.length, &error) != R_SUCCESS) {
+  if (tryCopyText(vm->outputPool, stringValue(str), &expr->keyword.value, expr->string.length, &error) != R_SUCCESS) {
     explode("copy text");
   }
 }
@@ -2161,7 +2168,8 @@ void readProperty(VM *vm, Value *ptr, Property *p) {
   p->key = deref(&vm->gc, properties->value);
 
   if (isEmpty(properties->next)) {
-    raise(vm, "expected value for property but only found a key: %ls", keywordValue(p->key));
+    String *str = deref(&vm->gc, p->key->name);
+    raise(vm, "expected value for property but only found a key: %ls", stringValue(str));
   }
 
   properties = deref(&vm->gc, properties->next);
@@ -2176,7 +2184,9 @@ void prnMetadata(VM_t vm, Value metadata, Expr *expr) {
     Property p;
     readProperty(vm, &metadata, &p);
 
-    if (wcscmp(L"line-number", keywordValue(p.key)) == 0) {
+    String *str = deref(&vm->gc, p.key->name);
+
+    if (wcscmp(L"line-number", stringValue(str)) == 0) {
 
       if (valueType(p.value) != VT_UINT) {
         raise(vm, "expected line-number property value to be an int: %s",
@@ -2259,7 +2269,6 @@ bool equalsStr(VM_t vm, Value this, Value that) {
 }
 
 bool equalsSymbol(VM_t vm, Value this, Value that) {
-
   if (valueType(this) == valueType(that)) {
     return false;
   }
@@ -2269,25 +2278,11 @@ bool equalsSymbol(VM_t vm, Value this, Value that) {
 }
 
 bool equalsKeyword(VM_t vm, Value this, Value that) {
-
   if (valueType(this) == valueType(that)) {
     return false;
   }
   else {
-
-    Keyword *a = deref(&vm->gc, this);
-    Keyword *b = deref(&vm->gc, that);
-
-    if (a == b) {
-      return true;
-    }
-
-    if (a->length != b->length) {
-      return false;
-    }
-    else {
-      return wcscmp(keywordValue(a), keywordValue(b)) == 0;
-    }
+    return this == that;
   }
 }
 
@@ -2384,7 +2379,7 @@ ValueTypeTable valueTypeTableCreate() {
                         .equals = &equalsSymbol},
       [VT_KEYWORD]   = {.name = "keyword",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = NULL,
+                        .relocateChildren = &relocateChildrenKeyword,
                         .prn = &prnKeyword,
                         .equals = &equalsKeyword},
       [VT_LIST]      = {.name = "list",
@@ -3161,44 +3156,15 @@ void symbolBuiltin(VM *vm, Frame_t frame) {
   pushOperand(frame, result);
 }
 
-Value keywordMakeBlank(VM *vm, uint64_t length) {
-  Keyword *kw = NULL;
-
-  uint64_t textSize = (length + 1) * sizeof(wchar_t);
-  uint64_t size = padAllocSize(sizeof(Keyword) + textSize);
-
-  kw = alloc(vm, size);
-
-  keywordInitContents(kw);
-  kw->header = makeObjectHeader(W_KEYWORD_TYPE, size);
-  kw->length = length;
-
-  kw->valueOffset = sizeof(Symbol);
-  keywordValue(kw)[kw->length] = L'\0';
-
-  return (Value)kw;
-}
-
 void keywordBuiltin(VM *vm, Frame_t frame) {
-  Value value = popOperand(frame);
-  ASSERT_STR(vm, value);
-  pushFrameRoot(vm, &value);
+  Value protectedName = popOperand(frame);
+  ASSERT_STR(vm, protectedName);
 
-  uint64_t length = 0;
-  {
-    String *string = deref(&vm->gc, value);
-    length = string->length;
-  }
-
-  Value result = keywordMakeBlank(vm, length);
-
-  // actually copy string into symbol
-  String *string = deref(&vm->gc, value);
-  Keyword *kw = deref(&vm->gc, result);
-  memcpy(keywordValue(kw), stringValue(string), kw->length * sizeof(wchar_t));
+  pushFrameRoot(vm, &protectedName);
+  Value result = keywordIntern(vm, &protectedName);
+  popFrameRoot(vm);
 
   pushOperand(frame, result);
-  popFrameRoot(vm);
 }
 
 void cFnInitContents(CFn *fn) {
@@ -3283,6 +3249,7 @@ void vmInitContents(VM *vm, VMConfig config) {
   GCCreate(&vm->gc, 1024 * 1000);
   stackInitContents(&vm->stack, 1024 * 1000);
   tableInit(&vm->symbolTable);
+  tableInit(&vm->keywordTable);
   initCFns(vm);
   vm->current = NULL;
   vm->outputPool = NULL;
