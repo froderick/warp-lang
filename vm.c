@@ -307,18 +307,19 @@ typedef struct Stack {
   StackSegment *current;     // the most recent segment to be allocated
 } Stack;
 
-typedef struct SymbolEntry {
+typedef struct TableEntry {
   bool used;
+  Value name;
   uint32_t nameHash;
-  Value symbol;
-} SymbolEntry;
+  Value value;
+} TableEntry;
 
-typedef struct SymbolTable {
+typedef struct Table {
   uint64_t size;
   uint64_t numAllocatedEntries;
-  SymbolEntry *entries;
+  TableEntry *entries;
   // load
-} SymbolTable;
+} Table;
 
 typedef struct VM {
   VMConfig config;
@@ -328,7 +329,7 @@ typedef struct VM {
   Stack stack;
   FrameRoot_t noFrameRoots;
   Frame_t current;
-  SymbolTable symbolTable;
+  Table symbolTable;
   Pool_t outputPool; // this is mutable, it changes on every eval request
   jmp_buf jumpBuf;
 } VM;
@@ -355,24 +356,20 @@ uint32_t stringHash(String *s) {
   return h;
 }
 
-void* deref(GC *gc, Value value);
-uint64_t padAllocSize(uint64_t length);
-void* alloc(VM *vm, uint64_t length);
-void symbolInitContents(Symbol *s);
-
-void symbolEntryInitContents(SymbolEntry *e) {
+void tableEntryInitContents(TableEntry *e) {
   e->used = false;
-  e->symbol = nil();
+  e->name = nil();
   e->nameHash = 0;
+  e->value = nil();
 }
 
-void symbolTableInitContents(SymbolTable *t) {
+void tableInitContents(Table *t) {
   t->numAllocatedEntries = 0;
   t->entries = NULL;
   t->size = 0;
 }
 
-void symbolTableFreeContents(SymbolTable *t) {
+void tableFreeContents(Table *t) {
   if (t != NULL) {
     free(t->entries);
     t->numAllocatedEntries = 0;
@@ -381,32 +378,33 @@ void symbolTableFreeContents(SymbolTable *t) {
   }
 }
 
-void symbolTableInit(SymbolTable *table) {
+void tableInit(Table *table) {
 
-  symbolTableInitContents(table);
+  tableInitContents(table);
 
   table->numAllocatedEntries = SYMBOL_TABLE_MIN_ENTRIES;
-  table->entries = malloc(sizeof(SymbolEntry) * table->numAllocatedEntries);
+  table->entries = malloc(sizeof(TableEntry) * table->numAllocatedEntries);
   if (table->entries == NULL) {
-    explode("failed to allocate SymbolEntries array");
+    explode("failed to allocate TableEntries array");
   }
   for (uint64_t i=0; i<table->numAllocatedEntries; i++) {
-    symbolEntryInitContents(&table->entries[i]);
+    tableEntryInitContents(&table->entries[i]);
   }
 }
 
-SymbolEntry* findEntry(VM *vm, SymbolTable *table, String* name, uint32_t hash) {
+void* deref(GC *gc, Value value);
+
+TableEntry* findEntry(VM *vm, Table *table, String* name, uint32_t hash) {
 
   uint64_t index = hash % table->numAllocatedEntries;
 
   for (uint64_t i = index; i < table->numAllocatedEntries; i++) {
-    SymbolEntry *entry = &table->entries[i];
+    TableEntry *entry = &table->entries[i];
 
     if (!entry->used) {
       return entry;
     } else {
-      Symbol *thisSym = deref(&vm->gc, entry->symbol);
-      String *thisName = deref(&vm->gc, thisSym->name);
+      String *thisName = deref(&vm->gc, entry->name);
       if (wcscmp(stringValue(name), stringValue(thisName)) == 0) {
         return entry;
       }
@@ -414,70 +412,66 @@ SymbolEntry* findEntry(VM *vm, SymbolTable *table, String* name, uint32_t hash) 
   }
 
   for (uint64_t i = 0; i < index; i++) {
-    SymbolEntry *entry = &table->entries[i];
+    TableEntry *entry = &table->entries[i];
 
     if (!entry->used) {
       return entry;
     } else {
-      Symbol *thisSym = deref(&vm->gc, entry->symbol);
-      String *thisName = deref(&vm->gc, thisSym->name);
+      String *thisName = deref(&vm->gc, entry->name);
       if (wcscmp(stringValue(name), stringValue(thisName)) == 0) {
         return entry;
       }
     }
   }
 
-  explode("could not find an available SymbolEntry");
+  explode("could not find an available TableEntry");
 }
 
-Value getSymbol(VM *vm, Value name) {
+Value tableLookup(VM *vm, Table *table, Value name) {
 
   if (valueType(name) != VT_STR) {
-    explode("symbol names must be strings");
+    explode("names must be strings");
   }
 
   String *s = deref(&vm->gc, name);
   uint32_t hash = stringHash(s);
 
-  SymbolTable *table = &vm->symbolTable;
-  SymbolEntry *found = findEntry(vm, table, s, hash);
+  TableEntry *found = findEntry(vm, table, s, hash);
 
   if (found->used) {
-    return found->symbol;
+    return found->value;
   }
   else {
     return nil();
   }
 }
 
-void _putSymbolWithHash(VM *vm, SymbolTable *table, Value insertMe, String* name, uint32_t hash) {
-  SymbolEntry *found = findEntry(vm, table, name, hash);
+void _putEntryWithHash(VM *vm, Table *table, Value insertMe, Value name, uint32_t hash) {
+  TableEntry *found = findEntry(vm, table, deref(&vm->gc, name), hash);
   if (!found ->used) {
     table->size++;
     found->used = true;
   }
+  found->name = name;
   found->nameHash = hash;
-  found->symbol = insertMe;
+  found->value = insertMe;
 }
 
-void _putSymbol(VM *vm, SymbolTable *table, Value insertMe) {
+void _putEntry(VM *vm, Table *table, Value name, Value insertMe) {
 
   if (valueType(insertMe) != VT_SYMBOL) {
     explode("can only insert symbols");
   }
 
-  Symbol *sym = deref(&vm->gc, insertMe);
-  String *name = deref(&vm->gc, sym->name);
-  uint32_t hash = stringHash(name);
+  String *s = deref(&vm->gc, name);
+  uint32_t hash = stringHash(s);
 
-  _putSymbolWithHash(vm, table, insertMe, name, hash);
+  _putEntryWithHash(vm, table, insertMe, name, hash);
 }
 
-void putSymbol(VM *vm, Value insertMe) {
+void putEntry(VM *vm, Table *table, Value name, Value insertMe) {
 
-  SymbolTable *table = &vm->symbolTable;
-
-  _putSymbol(vm, table, insertMe);
+  _putEntry(vm, table, name, insertMe);
 
   float load = (float)table->size / (float)table->numAllocatedEntries;
 
@@ -496,25 +490,22 @@ void putSymbol(VM *vm, Value insertMe) {
     }
 
     uint64_t numOldEntries = table->numAllocatedEntries;
-    SymbolEntry *oldEntries = table->entries;
+    TableEntry *oldEntries = table->entries;
 
     table->size = 0;
     table->numAllocatedEntries = newAllocatedEntries;
-    table->entries = malloc(sizeof(SymbolEntry) * newAllocatedEntries);
+    table->entries = malloc(sizeof(TableEntry) * newAllocatedEntries);
     if (table->entries == NULL) {
-      explode("failed to allocate SymbolEntries array");
+      explode("failed to allocate TableEntries array");
     }
     for (uint64_t i=0; i<table->numAllocatedEntries; i++) {
-      symbolEntryInitContents(&table->entries[i]);
+      tableEntryInitContents(&table->entries[i]);
     }
 
     for (uint64_t i=0; i<numOldEntries; i++) {
-      SymbolEntry *oldEntry = &oldEntries[i];
-
+      TableEntry *oldEntry = &oldEntries[i];
       if (oldEntry->used) {
-        Symbol *sym = deref(&vm->gc, oldEntry->symbol);
-        String *name = deref(&vm->gc, sym->name);
-        _putSymbolWithHash(vm, table, oldEntry->symbol, name, oldEntry->nameHash);
+        _putEntryWithHash(vm, table, oldEntry->value, oldEntry->name, oldEntry->nameHash);
       }
     }
 
@@ -752,6 +743,16 @@ uint64_t now() {
   return millis;
 }
 
+void relocateTable(VM *vm, Table *table) {
+  for (uint64_t i=0; i<table->numAllocatedEntries; i++) {
+    TableEntry *entry = &table->entries[i];
+    if (entry->used) {
+      relocate(vm, &entry->name);
+      relocate(vm, &entry->value);
+    }
+  }
+}
+
 void collect(VM *vm) {
 
   uint64_t oldHeapUsed = vm->gc.allocPtr - vm->gc.currentHeap;
@@ -772,14 +773,8 @@ void collect(VM *vm) {
 
   memset(vm->gc.currentHeap, 0, vm->gc.heapSize);
 
-  // relocate symbol table
-  SymbolTable *table = &vm->symbolTable;
-  for (uint64_t i=0; i<table->numAllocatedEntries; i++) {
-    SymbolEntry *entry = &table->entries[i];
-    if (entry->used) {
-      relocate(vm, &entry->symbol);
-    }
-  }
+  // relocate tables
+  relocateTable(vm, &vm->symbolTable);
 
   // relocate noFrameRoots
   FrameRoot_t noFrameRoot = vm->noFrameRoots;
@@ -992,7 +987,8 @@ void symbolInitContents(Symbol *s) {
 
 Value symbolIntern(VM *vm, Value *protectedName) {
 
-  Value result = getSymbol(vm, *protectedName);
+  Table *table = &vm->symbolTable;
+  Value result = tableLookup(vm, table, *protectedName);
   if (valueType(result) == VT_NIL) {
 
     uint64_t size = padAllocSize(sizeof(Symbol));
@@ -1002,7 +998,7 @@ Value symbolIntern(VM *vm, Value *protectedName) {
     symbol->header = makeObjectHeader(W_SYMBOL_TYPE, size);
     symbol->name = *protectedName;
 
-    putSymbol(vm, (Value)symbol);
+    putEntry(vm, table, *protectedName, (Value) symbol);
     result = (Value)symbol;
   }
 
@@ -1673,9 +1669,9 @@ void loadVarEval(VM *vm, Frame_t frame) {
   if (!symbol->valueDefined) {
 
     for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
-      SymbolEntry *e = &vm->symbolTable.entries[i];
+      TableEntry *e = &vm->symbolTable.entries[i];
       if (e->used) {
-        Symbol *s = deref(&vm->gc, e->symbol);
+        Symbol *s = deref(&vm->gc, e->value);
         String *name = deref(&vm->gc, s->name);
         printf("symbol-table: %ls (defined=%u)\n", stringValue(name), s->valueDefined);
       }
@@ -1831,9 +1827,9 @@ void setMacroEval(VM *vm, Frame_t frame) {
   if (!s->valueDefined) {
 
     for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
-      SymbolEntry *e = &vm->symbolTable.entries[i];
+      TableEntry *e = &vm->symbolTable.entries[i];
       if (e->used) {
-        Symbol *sym = deref(&vm->gc, e->symbol);
+        Symbol *sym = deref(&vm->gc, e->value);
         String *symName = deref(&vm->gc, sym->name);
         printf("symbol-table: %ls (defined=%u)\n", stringValue(symName), s->valueDefined);
       }
@@ -3286,7 +3282,7 @@ void vmInitContents(VM *vm, VMConfig config) {
   vm->valueTypeTable = valueTypeTableCreate();
   GCCreate(&vm->gc, 1024 * 1000);
   stackInitContents(&vm->stack, 1024 * 1000);
-  symbolTableInit(&vm->symbolTable);
+  tableInit(&vm->symbolTable);
   initCFns(vm);
   vm->current = NULL;
   vm->outputPool = NULL;
@@ -3296,7 +3292,7 @@ void vmFreeContents(VM *vm) {
   if (vm != NULL) {
     GCFreeContents(&vm->gc);
     // TODO: seems like we're missing a few things here
-    symbolTableFreeContents(&vm->symbolTable);
+    tableFreeContents(&vm->symbolTable);
   }
 }
 
