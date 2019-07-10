@@ -1367,21 +1367,21 @@ void handleRaise(VM *vm, Raised *r) {
  */
 
 // (8), typeIndex (16) | (-> value)
-void tryLoadConstEval(VM *vm, Frame_t frame) {
+void loadConstEval(VM *vm, Frame_t frame) {
   uint16_t constantIndex = readIndex(frame);
   Value constant = getConst(frame, constantIndex);
   pushOperand(frame, constant);
 }
 
 // (8), typeIndex (16) | (-> value)
-void tryLoadLocalEval(VM *vm, Frame_t frame) {
+void loadLocalEval(VM *vm, Frame_t frame) {
   uint16_t localIndex = readIndex(frame);
   Value v = getLocal(frame, localIndex);
   pushOperand(frame, v);
 }
 
 // (8), typeIndex  (16) | (objectref ->)
-void tryStoreLocalEval(VM *vm, Frame_t frame) {
+void storeLocalEval(VM *vm, Frame_t frame) {
   uint16_t localIndex = readIndex(frame);
   Value v = popOperand(frame);
   setLocal(frame, localIndex, v);
@@ -1527,7 +1527,7 @@ void invokeCFn(VM *vm, Frame_t frame, Value cFn) {
 }
 
 // (8)              | (objectref, args... -> ...)
-void tryInvokeDynEval(VM *vm, Frame_t frame) {
+void invokeDynEval(VM *vm, Frame_t frame) {
   Value pop = popOperand(frame);
   if (valueType(pop) == VT_CFN) {
     invokeCFn(vm, frame, pop);
@@ -1554,7 +1554,7 @@ void tryInvokeDynEval(VM *vm, Frame_t frame) {
  */
 
 // (8)              | (objectref, args... -> ...)
-void tryInvokeDynTailEval(VM *vm, Frame_t frame) {
+void invokeDynTailEval(VM *vm, Frame_t frame) {
   Value pop = popOperand(frame);
   if (valueType(pop) == VT_CFN) {
     invokeCFn(vm, frame, pop);
@@ -1568,13 +1568,13 @@ void tryInvokeDynTailEval(VM *vm, Frame_t frame) {
 }
 
 // (8)              | (objectref ->)
-void tryRetEval(VM *vm, Frame_t frame) {
+void retEval(VM *vm, Frame_t frame) {
   Value v = popOperand(frame);
   setResult(frame, v);
 }
 
 // (8)              | (a, b -> 0 | 1)
-void tryCmpEval(VM *vm, Frame_t frame) {
+void cmpEval(VM *vm, Frame_t frame) {
   Value a = popOperand(frame);
   Value b = popOperand(frame);
   Value c = wrapBool(a == b);
@@ -1582,13 +1582,13 @@ void tryCmpEval(VM *vm, Frame_t frame) {
 }
 
 // (8), offset (16) | (->)
-void tryJmpEval(VM *vm, Frame_t frame) {
+void jmpEval(VM *vm, Frame_t frame) {
   uint16_t newPc = readIndex(frame);
   setPc(frame, newPc);
 }
 
 // (8), offset (16) | (value ->)
-void tryJmpIfEval(VM *vm, Frame_t frame) {
+void jmpIfEval(VM *vm, Frame_t frame) {
   Value test = popOperand(frame);
   bool truthy = isTruthy(vm, test);
   uint16_t newPc = readIndex(frame);
@@ -1598,7 +1598,7 @@ void tryJmpIfEval(VM *vm, Frame_t frame) {
 }
 
 // (8), offset (16) | (value ->)
-void tryJmpIfNotEval(VM *vm, Frame_t frame) {
+void jmpIfNotEval(VM *vm, Frame_t frame) {
   Value test = popOperand(frame);
   bool truthy = isTruthy(vm, test);
   uint16_t newPc = readIndex(frame);
@@ -1608,7 +1608,7 @@ void tryJmpIfNotEval(VM *vm, Frame_t frame) {
 }
 
 // (8)              | (a, b -> c)
-void tryAddEval(VM *vm, Frame_t frame) {
+void addEval(VM *vm, Frame_t frame) {
   Value b = popOperand(frame);
   Value a = popOperand(frame);
 
@@ -1624,7 +1624,7 @@ void tryAddEval(VM *vm, Frame_t frame) {
 }
 
 // (8)              | (a, b -> c)
-void trySubEval(VM *vm, Frame_t frame) {
+void subEval(VM *vm, Frame_t frame) {
   Value b = popOperand(frame);
   Value a = popOperand(frame);
 
@@ -1640,7 +1640,7 @@ void trySubEval(VM *vm, Frame_t frame) {
 }
 
 // (8), offset (16)  | (value ->)
-void tryDefVarEval(VM *vm, Frame_t frame) {
+void defVarEval(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
   uint16_t constantIndex = readIndex(frame);
@@ -1658,7 +1658,7 @@ void tryDefVarEval(VM *vm, Frame_t frame) {
 }
 
 // (8), offset 16  | (-> value)
-void tryLoadVarEval(VM *vm, Frame_t frame) {
+void loadVarEval(VM *vm, Frame_t frame) {
 
   uint16_t constantIndex = readIndex(frame);
   Value value = getConst(frame, constantIndex);
@@ -1696,7 +1696,7 @@ void closureInitContents(Closure *cl) {
 }
 
 // (8), offset (16) | (captures... -> value)
-void tryLoadClosureEval(VM *vm, Frame_t frame) {
+void loadClosureEval(VM *vm, Frame_t frame) {
   Fn *protectedFn;
   {
     uint16_t constantIndex = readIndex(frame);
@@ -1734,7 +1734,7 @@ void tryLoadClosureEval(VM *vm, Frame_t frame) {
 }
 
 // (8)        | (a, b -> b, a)
-void trySwapEval(VM *vm, Frame_t frame) {
+void swapEval(VM *vm, Frame_t frame) {
   Value a = popOperand(frame);
   Value b = popOperand(frame);
   pushOperand(frame, a);
@@ -1742,7 +1742,7 @@ void trySwapEval(VM *vm, Frame_t frame) {
 }
 
 // (8)        | (jumpAddr, handler ->)
-void trySetHandlerEval(VM *vm, Frame_t frame) {
+void setHandlerEval(VM *vm, Frame_t frame) {
   ExceptionHandler handler;
   handler.jumpAddress = readIndex(frame);
   handler.localIndex = readIndex(frame);
@@ -1750,12 +1750,12 @@ void trySetHandlerEval(VM *vm, Frame_t frame) {
 }
 
 // (8)        | (->)
-void tryClearHandlerEval(VM *vm, Frame_t frame) {
+void clearHandlerEval(VM *vm, Frame_t frame) {
   clearHandler(frame);
 }
 
 // (8),             | (x, seq -> newseq)
-void tryConsEval(VM *vm, Frame_t frame) {
+void consEval(VM *vm, Frame_t frame) {
   // gc may occur, so allocate the cons first
   Cons *cons = makeCons(vm);
 
@@ -1774,7 +1774,7 @@ void tryConsEval(VM *vm, Frame_t frame) {
 }
 
 // (8),             | (seq -> x)
-void tryFirstEval(VM *vm, Frame_t frame) {
+void firstEval(VM *vm, Frame_t frame) {
 
   Value seq = popOperand(frame);
   ValueType seqType = valueType(seq);
@@ -1795,7 +1795,7 @@ void tryFirstEval(VM *vm, Frame_t frame) {
 }
 
 // (8),             | (seq -> seq)
-void tryRestEval(VM *vm, Frame_t frame) {
+void restEval(VM *vm, Frame_t frame) {
 
   Value seq = popOperand(frame);
   ValueType seqType = valueType(seq);
@@ -1816,7 +1816,7 @@ void tryRestEval(VM *vm, Frame_t frame) {
 }
 
 // (8),             | (name -> nil)
-void trySetMacroEval(VM *vm, Frame_t frame) {
+void setMacroEval(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
   ValueType type = valueType(value);
@@ -1854,7 +1854,7 @@ void trySetMacroEval(VM *vm, Frame_t frame) {
 }
 
 // (8),             | (name -> bool)
-void tryGetMacroEval(VM *vm, Frame_t frame) {
+void getMacroEval(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
 
   ValueType type = valueType(value);
@@ -1868,13 +1868,13 @@ void tryGetMacroEval(VM *vm, Frame_t frame) {
 }
 
 // (8),             | (name -> bool)
-void tryGCEval(VM *vm, Frame_t frame) {
+void gcEval(VM *vm, Frame_t frame) {
   collect(vm);
   pushOperand(frame, nil());
 }
 
 // (8),             | (value -> value)
-void tryGetTypeEval(VM *vm, Frame_t frame) {
+void getTypeEval(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
   Value typeId = wrapUint(valueType(value));
   pushOperand(frame, typeId);
@@ -1885,7 +1885,7 @@ void vmPrn(VM *vm, Value result, Expr *expr);
 #define ONE_KB 1024
 
 // (8),             | (value -> value)
-void tryPrnEval(VM *vm, Frame_t frame) {
+void prnEval(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
 
   Error error;
@@ -1933,26 +1933,26 @@ InstTable instTableCreate() {
 
   // init with known instructions
   Inst instructions[]      = {
-      [I_LOAD_CONST]       = { .name = "I_LOAD_CONST",      .print = printInstAndIndex,   .eval = tryLoadConstEval },
-      [I_LOAD_LOCAL]       = { .name = "I_LOAD_LOCAL",      .print = printInstAndIndex,   .eval = tryLoadLocalEval },
-      [I_STORE_LOCAL]      = { .name = "I_STORE_LOCAL",     .print = printInstAndIndex,   .eval = tryStoreLocalEval },
-      [I_INVOKE_DYN]       = { .name = "I_INVOKE_DYN",      .print = printInst,           .eval = tryInvokeDynEval },
-      [I_INVOKE_DYN_TAIL]  = { .name = "I_INVOKE_DYN_TAIL", .print = printInst,           .eval = tryInvokeDynTailEval },
-      [I_RET]              = { .name = "I_RET",             .print = printInst,           .eval = tryRetEval },
-      [I_CMP]              = { .name = "I_CMP",             .print = printInst,           .eval = tryCmpEval },
-      [I_JMP]              = { .name = "I_JMP",             .print = printInstAndIndex,   .eval = tryJmpEval },
-      [I_JMP_IF]           = { .name = "I_JMP_IF",          .print = printInstAndIndex,   .eval = tryJmpIfEval },
-      [I_JMP_IF_NOT]       = { .name = "I_JMP_IF_NOT",      .print = printInstAndIndex,   .eval = tryJmpIfNotEval },
-      [I_ADD]              = { .name = "I_ADD",             .print = printInst,           .eval = tryAddEval },
-      [I_SUB]              = { .name = "I_SUB",             .print = printInst,           .eval = trySubEval },
-      [I_DEF_VAR]          = { .name = "I_DEF_VAR",         .print = printInstAndIndex,   .eval = tryDefVarEval },
-      [I_LOAD_VAR]         = { .name = "I_LOAD_VAR",        .print = printInstAndIndex,   .eval = tryLoadVarEval },
-      [I_LOAD_CLOSURE]     = { .name = "I_LOAD_CLOSURE",    .print = printInstAndIndex,   .eval = tryLoadClosureEval },
-      [I_SWAP]             = { .name = "I_SWAP",            .print = printInst,           .eval = trySwapEval },
-      [I_SET_HANDLER]      = { .name = "I_SET_HANDLER",     .print = printInstAndIndex2x, .eval = trySetHandlerEval },
-      [I_CLEAR_HANDLER]    = { .name = "I_CLEAR_HANDLER",   .print = printInst,           .eval = tryClearHandlerEval },
+      [I_LOAD_CONST]       = { .name = "I_LOAD_CONST",      .print = printInstAndIndex,   .eval = loadConstEval },
+      [I_LOAD_LOCAL]       = { .name = "I_LOAD_LOCAL",      .print = printInstAndIndex,   .eval = loadLocalEval },
+      [I_STORE_LOCAL]      = { .name = "I_STORE_LOCAL",     .print = printInstAndIndex,   .eval = storeLocalEval },
+      [I_INVOKE_DYN]       = { .name = "I_INVOKE_DYN",      .print = printInst,           .eval = invokeDynEval },
+      [I_INVOKE_DYN_TAIL]  = { .name = "I_INVOKE_DYN_TAIL", .print = printInst,           .eval = invokeDynTailEval },
+      [I_RET]              = { .name = "I_RET",             .print = printInst,           .eval = retEval },
+      [I_CMP]              = { .name = "I_CMP",             .print = printInst,           .eval = cmpEval },
+      [I_JMP]              = { .name = "I_JMP",             .print = printInstAndIndex,   .eval = jmpEval },
+      [I_JMP_IF]           = { .name = "I_JMP_IF",          .print = printInstAndIndex,   .eval = jmpIfEval },
+      [I_JMP_IF_NOT]       = { .name = "I_JMP_IF_NOT",      .print = printInstAndIndex,   .eval = jmpIfNotEval },
+      [I_ADD]              = { .name = "I_ADD",             .print = printInst,           .eval = addEval },
+      [I_SUB]              = { .name = "I_SUB",             .print = printInst,           .eval = subEval },
+      [I_DEF_VAR]          = { .name = "I_DEF_VAR",         .print = printInstAndIndex,   .eval = defVarEval },
+      [I_LOAD_VAR]         = { .name = "I_LOAD_VAR",        .print = printInstAndIndex,   .eval = loadVarEval },
+      [I_LOAD_CLOSURE]     = { .name = "I_LOAD_CLOSURE",    .print = printInstAndIndex,   .eval = loadClosureEval },
+      [I_SWAP]             = { .name = "I_SWAP",            .print = printInst,           .eval = swapEval },
+      [I_SET_HANDLER]      = { .name = "I_SET_HANDLER",     .print = printInstAndIndex2x, .eval = setHandlerEval },
+      [I_CLEAR_HANDLER]    = { .name = "I_CLEAR_HANDLER",   .print = printInst,           .eval = clearHandlerEval },
 
-      [I_CONS]             = { .name = "I_CONS",            .print = printInst,           .eval = tryConsEval },
+      [I_CONS]             = { .name = "I_CONS",            .print = printInst,           .eval = consEval },
 
 //      [I_NEW]         = { .name = "I_NEW",         .print = printUnknown},
 //      [I_GET_FIELD]   = { .name = "I_GET_FIELD",   .print = printUnknown},
@@ -2078,7 +2078,7 @@ void prnFn(VM_t vm, Value result, Expr *expr) {
   }
 }
 
-void tryPrnCFn(VM_t vm, Value result, Expr *expr) {
+void prnCFn(VM_t vm, Value result, Expr *expr) {
   expr->type = N_STRING;
   wchar_t function[] = L"<c-function>";
   expr->string.length = wcslen(function);
@@ -2404,7 +2404,7 @@ ValueTypeTable valueTypeTableCreate() {
       [VT_CFN]       = {.name = "cfn",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
-                        .prn = &tryPrnCFn,
+                        .prn = &prnCFn,
                         .equals = NULL}
   };
   memcpy(table.valueTypes, valueTypes, sizeof(valueTypes));
@@ -3074,7 +3074,7 @@ Value stringMakeBlank(VM *vm, uint64_t length) {
  * pop the args list back off the stack, deref and copy each one into the new list
  * push the new string onto the stack
  */
-void tryStrJoinBuiltin(VM *vm, Frame_t frame) {
+void strJoinBuiltin(VM *vm, Frame_t frame) {
 
   Value strings = popOperand(frame);
   ASSERT_SEQ(vm, strings);
@@ -3118,7 +3118,7 @@ void tryStrJoinBuiltin(VM *vm, Frame_t frame) {
   pushOperand(frame, resultRef);
 }
 
-void tryPrStrBuiltinConf(VM *vm, Frame_t frame, bool readable) {
+void prStrBuiltinConf(VM *vm, Frame_t frame, bool readable) {
   Value value = popOperand(frame);
 
   Expr expr;
@@ -3146,15 +3146,15 @@ void tryPrStrBuiltinConf(VM *vm, Frame_t frame, bool readable) {
   pushOperand(frame, resultRef);
 }
 
-void tryPrStrBuiltin(VM *vm, Frame_t frame) {
-  tryPrStrBuiltinConf(vm, frame, true);
+void prStrBuiltin(VM *vm, Frame_t frame) {
+  prStrBuiltinConf(vm, frame, true);
 }
 
-void tryPrintStrBuiltin(VM *vm, Frame_t frame) {
-  tryPrStrBuiltinConf(vm, frame, false);
+void printStrBuiltin(VM *vm, Frame_t frame) {
+  prStrBuiltinConf(vm, frame, false);
 }
 
-void trySymbolBuiltin(VM *vm, Frame_t frame) {
+void symbolBuiltin(VM *vm, Frame_t frame) {
   Value protectedName = popOperand(frame);
   ASSERT_STR(vm, protectedName);
 
@@ -3183,7 +3183,7 @@ Value keywordMakeBlank(VM *vm, uint64_t length) {
   return (Value)kw;
 }
 
-void tryKeywordBuiltin(VM *vm, Frame_t frame) {
+void keywordBuiltin(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
   ASSERT_STR(vm, value);
   pushFrameRoot(vm, &value);
@@ -3258,22 +3258,22 @@ void defineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke 
 
 void initCFns(VM *vm) {
 
-  defineCFn(vm, L"cons", 2, false, tryConsEval);
-  defineCFn(vm, L"first", 1, false, tryFirstEval);
-  defineCFn(vm, L"rest", 1, false, tryRestEval);
-  defineCFn(vm, L"set-macro", 1, false, trySetMacroEval);
-  defineCFn(vm, L"get-macro", 1, false, tryGetMacroEval);
-  defineCFn(vm, L"gc", 0, false, tryGCEval);
-  defineCFn(vm, L"get-type", 1, false, tryGetTypeEval);
-  defineCFn(vm, L"prn", 1, false, tryPrnEval);
-  defineCFn(vm, L"+", 2, false, tryAddEval);
-  defineCFn(vm, L"-", 2, false, trySubEval);
-  defineCFn(vm, L"eq", 2, false, tryCmpEval);
-  defineCFn(vm, L"join", 1, false, tryStrJoinBuiltin);
-  defineCFn(vm, L"pr-str", 1, false, tryPrStrBuiltin);
-  defineCFn(vm, L"print-str", 1, false, tryPrintStrBuiltin);
-  defineCFn(vm, L"symbol", 1, false, trySymbolBuiltin);
-  defineCFn(vm, L"keyword", 1, false, tryKeywordBuiltin);
+  defineCFn(vm, L"cons", 2, false, consEval);
+  defineCFn(vm, L"first", 1, false, firstEval);
+  defineCFn(vm, L"rest", 1, false, restEval);
+  defineCFn(vm, L"set-macro", 1, false, setMacroEval);
+  defineCFn(vm, L"get-macro", 1, false, getMacroEval);
+  defineCFn(vm, L"gc", 0, false, gcEval);
+  defineCFn(vm, L"get-type", 1, false, getTypeEval);
+  defineCFn(vm, L"prn", 1, false, prnEval);
+  defineCFn(vm, L"+", 2, false, addEval);
+  defineCFn(vm, L"-", 2, false, subEval);
+  defineCFn(vm, L"eq", 2, false, cmpEval);
+  defineCFn(vm, L"join", 1, false, strJoinBuiltin);
+  defineCFn(vm, L"pr-str", 1, false, prStrBuiltin);
+  defineCFn(vm, L"print-str", 1, false, printStrBuiltin);
+  defineCFn(vm, L"symbol", 1, false, symbolBuiltin);
+  defineCFn(vm, L"keyword", 1, false, keywordBuiltin);
 }
 
 void vmConfigInitContents(VMConfig *config) {
@@ -3333,46 +3333,6 @@ void printCodeUnit(CodeUnit *unit) {
   InstTable table = instTableCreate();
   _printCodeUnit(&table, unit);
 }
-
-/*
- * TODO: the suffering I'm encountering is because unlike the JVM, I'm directly interacting with gc'd memory rather
- * than interacting with it through a gc-proof layer.
- *
- * Ideally, I'd define objects generically, with a predefined number of 'slots' for fields.
- * I could even embed the number of slots at the front of the object, so the object could be traversed
- * by gc automatically.
- *
- * I'd make defines to describe field name -> field number, and use them to get/set field values.
- * I'd need special array support. The new world would be arrays, objects, and primitives.
- *
- * I'd still need native support for defining functions, though the constants could be built up in an array and referenced.
- *
- *
- * In my actual c functions, I'd still need a way to alias my objects such that I'm not holding direct references
- * to them. I could make a JNI-like registry for each c function call, and expose an API to the c functions that honors
- * the ids from that registry.
- *
- * *But the upshot of this is that my c code is largely library code, and I'm writing it on the wrong side of the fence.*
- */
-
-
-
-/*
- * THINKING ABOUT FFI
- * goal: bind values to vars, that when invoked, invoke c functions directly
- * - c functions must be enumerated and mapped from names to function pointers
- * - once a function has been resolved, it still has to be invoked:
- *
- *     Invoke an extern assembly function, which takes as arguments:
- *       - a pointer to the VM
- *       - a pointer to the C function to be called
- *       - the c function arguments as an array of 64-bit values
- *       - an Error pointer
- *
- *     The assembly function pushes the arguments onto the stack and invokes
- *
- */
-
 
 /*
  * CodeUnit init/free functions

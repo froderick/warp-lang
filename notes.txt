@@ -678,6 +678,44 @@ mid gc 2, pre scanptr:
 
 
 
+/*
+ * TODO: the suffering I'm encountering is because unlike the JVM, I'm directly interacting with gc'd memory rather
+ * than interacting with it through a gc-proof layer.
+ *
+ * Ideally, I'd define objects generically, with a predefined number of 'slots' for fields.
+ * I could even embed the number of slots at the front of the object, so the object could be traversed
+ * by gc automatically.
+ *
+ * I'd make defines to describe field name -> field number, and use them to get/set field values.
+ * I'd need special array support. The new world would be arrays, objects, and primitives.
+ *
+ * I'd still need native support for defining functions, though the constants could be built up in an array and referenced.
+ *
+ *
+ * In my actual c functions, I'd still need a way to alias my objects such that I'm not holding direct references
+ * to them. I could make a JNI-like registry for each c function call, and expose an API to the c functions that honors
+ * the ids from that registry.
+ *
+ * *But the upshot of this is that my c code is largely library code, and I'm writing it on the wrong side of the fence.*
+ */
+
+
+
+/*
+ * THINKING ABOUT FFI
+ * goal: bind values to vars, that when invoked, invoke c functions directly
+ * - c functions must be enumerated and mapped from names to function pointers
+ * - once a function has been resolved, it still has to be invoked:
+ *
+ *     Invoke an extern assembly function, which takes as arguments:
+ *       - a pointer to the VM
+ *       - a pointer to the C function to be called
+ *       - the c function arguments as an array of 64-bit values
+ *       - an Error pointer
+ *
+ *     The assembly function pushes the arguments onto the stack and invokes
+ *
+ */
 
 
 
