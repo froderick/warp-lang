@@ -28,6 +28,8 @@ typedef enum TokenType {
   T_COMMENT,
   T_OBRACKET,
   T_CBRACKET,
+  T_OVEC,
+  T_CVEC,
 } TokenType;
 
 typedef struct Token {

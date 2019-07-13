@@ -34,6 +34,7 @@ typedef enum ValueType {
   VT_LIST,
   VT_CLOSURE,
   VT_CFN,
+  VT_ARRAY,
 } ValueType;
 
 #define W_GC_FORWARDING_BIT      0x8000000000000000L   /* header contains forwarding pointer */
@@ -50,6 +51,7 @@ typedef enum ValueType {
 #define W_LIST_TYPE    0x4u
 #define W_CLOSURE_TYPE 0x5u
 #define W_CFN_TYPE     0x6u
+#define W_ARRAY_TYPE   0x7u
 
 /*
  * This is the first field inside all heap objects. It must come first so that the GC can
@@ -75,6 +77,16 @@ uint64_t objectHeaderSize(ObjectHeader h) {
   return h & W_HEADER_SIZE_MASK;
 }
 
+uint64_t objectHeaderSizeBytes(ObjectHeader h) {
+  if (objectHeaderType(h) == W_ARRAY_TYPE) {
+    return h & W_HEADER_SIZE_MASK;
+  }
+  else {
+    uint64_t size = h & W_HEADER_SIZE_MASK;
+    return sizeof(ObjectHeader) + (size * sizeof(Value));
+  }
+}
+
 ValueType objectHeaderValueType(ObjectHeader header) {
   switch (objectHeaderType(header)) {
     case W_FN_TYPE: return VT_FN;
@@ -84,6 +96,7 @@ ValueType objectHeaderValueType(ObjectHeader header) {
     case W_LIST_TYPE: return VT_LIST;
     case W_CLOSURE_TYPE: return VT_CLOSURE;
     case W_CFN_TYPE: return VT_CFN;
+    case W_ARRAY_TYPE: return VT_ARRAY;
     default:
     explode("unknown type: %u", objectHeaderType(header));
   }
@@ -226,6 +239,10 @@ typedef struct Cons {
   Value value;
   Value next; // this must be a Cons, or Nil
 } Cons;
+
+typedef struct Array {
+  ObjectHeader header;
+} Array;
 
 typedef struct GC {
 
@@ -714,7 +731,7 @@ void relocate(VM *vm, Value *valuePtr) {
     *valuePtr = (*header << 1u);
   }
   else {
-    uint64_t size = objectHeaderSize(*header);
+    uint64_t size = objectHeaderSizeBytes(*header);
 
     void *newPtr = NULL;
     if (_alloc(&vm->gc, size, &newPtr) == R_OOM) {
@@ -821,8 +838,12 @@ void collect(VM *vm) {
   // relocate all the objects this object references
   while (scanptr < vm->gc.allocPtr) {
     ObjectHeader *header = scanptr;
-    relocateChildren(vm, objectHeaderValueType(*header), scanptr);
-    scanptr += objectHeaderSize(*header);
+
+    uint8_t type = objectHeaderValueType(*header);
+    uint64_t sizeBytes = objectHeaderSizeBytes(*header);
+
+    relocateChildren(vm, type, scanptr);
+    scanptr += sizeBytes;
   }
 
   uint64_t newHeapUsed = vm->gc.allocPtr - vm->gc.currentHeap;
@@ -1109,6 +1130,48 @@ Value listHydrate(VM *vm, Fn **protectedFn, ListConstant listConst) {
   return protectedSeq;
 }
 
+void arrayInitContents(Array *array) {
+  array->header = 0;
+}
+
+Value* arrayElements(Array *array) {
+  return ((void*)array) + sizeof(Array);
+}
+
+Array* makeArray(VM *vm, uint64_t size) {
+
+  uint64_t sizeBytes = padAllocSize(sizeof(Array) + (size * sizeof(Value)));
+  Array *array = alloc(vm, sizeBytes);
+
+  arrayInitContents(array);
+  array->header = makeObjectHeader(W_ARRAY_TYPE, size);
+
+  Value *elements = ((void*)array)+ sizeof(Array);
+  for (uint64_t i=0; i<size; i++) {
+    elements[i] = W_NIL_VALUE;
+  }
+
+  return array;
+}
+
+
+/*
+ * `protectedFn` is a alloc-safe pointer to the Fn for which a constant is being hydrated.
+ * This is included so we so that references to already-hydrated values can be resolved by
+ * constant index.
+ */
+Value vecHydrate(VM *vm, Fn **protectedFn, VecConstant vecConst) {
+
+  Array *array = makeArray(vm, vecConst.length);
+  Value* elements = arrayElements(array);
+
+  for (uint16_t i = 0; i < vecConst.length; i++) {
+    elements[i] = fnConstants(*protectedFn)[i];
+  }
+
+  return (Value)array;
+}
+
 // TODO: I had a thought, can we get rid of CodeUnit entirely and just replace it with FnConstant?
 // TODO: I had another thought, can we get rid of the nested graph of constants and flatten it entirely?
 
@@ -1138,6 +1201,9 @@ Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c) {
       break;
     case CT_LIST:
       v = listHydrate(vm, protectedFn, c.list);
+      break;
+    case CT_VEC:
+      v = vecHydrate(vm, protectedFn, c.vec);
       break;
     case CT_NONE:
     default:
@@ -2054,6 +2120,15 @@ void relocateChildrenKeyword(VM_t vm, void *obj) {
   relocate(vm, &k->name);
 }
 
+void relocateChildrenArray(VM_t vm, void *obj) {
+  Array *k = obj;
+  Value *elements = arrayElements(k);
+  uint64_t size = objectHeaderSize(k->header);
+  for (uint64_t i=0; i<size; i++) {
+    relocate(vm, &elements[i]);
+  }
+}
+
 void prnNil(VM_t vm, Value result, Expr *expr) {
   expr->type = N_NIL;
 }
@@ -2243,6 +2318,32 @@ void prnList(VM_t vm, Value result, Expr *expr) {
   }
 }
 
+void prnArray(VM_t vm, Value result, Expr *expr) {
+
+  Array *array = deref(&vm->gc, result);
+  uint64_t size = objectHeaderSize(array->header);
+  Value *elements = arrayElements(array);
+
+  expr->type = N_VEC;
+  vecInitContents(&expr->vec);
+
+  Error error;
+  errorInitContents(&error);
+
+  for (uint64_t i=0; i<size; i++) {
+
+    Expr *elem = NULL;
+    palloc(vm->outputPool, elem, sizeof(Expr), "Expr");
+    exprInitContents(elem);
+
+    vmPrn(vm, elements[i], elem);
+
+    if (tryVecAppend(vm->outputPool, &expr->vec, elem, &error) != R_SUCCESS) {
+      explode("list append");
+    }
+  }
+}
+
 bool equals(VM_t vm, Value this, Value that);
 
 bool equalsStr(VM_t vm, Value this, Value that) {
@@ -2396,6 +2497,11 @@ ValueTypeTable valueTypeTableCreate() {
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
                         .prn = &prnCFn,
+                        .equals = NULL},
+      [VT_ARRAY]     = {.name = "array",
+                        .isTruthy = &isTruthyYes,
+                        .relocateChildren = &relocateChildrenArray,
+                        .prn = &prnArray,
                         .equals = NULL}
   };
   memcpy(table.valueTypes, valueTypes, sizeof(valueTypes));
@@ -3036,6 +3142,18 @@ RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, VMEvalResult *re
   } \
 }
 
+#define ASSERT_UINT(vm, value, ...) {\
+  if (valueType(value) != VT_UINT) { \
+    raise(vm, "expected a uint type: %s", getValueTypeName(vm, valueType(value))); \
+  } \
+}
+
+#define ASSERT_ARRAY(vm, value, ...) {\
+  if (valueType(value) != VT_ARRAY) { \
+    raise(vm, "expected an array type: %s", getValueTypeName(vm, valueType(value))); \
+  } \
+}
+
 Value stringMakeBlank(VM *vm, uint64_t length) {
 
   String *str = NULL;
@@ -3167,6 +3285,95 @@ void keywordBuiltin(VM *vm, Frame_t frame) {
   pushOperand(frame, result);
 }
 
+void arrayBuiltin(VM *vm, Frame_t frame) {
+  Value sizeValue = popOperand(frame);
+  ASSERT_UINT(vm, sizeValue);
+
+  Array *array = makeArray(vm, unwrapUint(sizeValue));
+
+  pushOperand(frame, (Value)array);
+}
+
+void countBuiltin(VM *vm, Frame_t frame) {
+  Value value = popOperand(frame);
+
+  Value result = nil();
+  switch (valueType(value)) {
+    case VT_ARRAY: {
+      Array *k = deref(&vm->gc, value);
+      uint64_t size = objectHeaderSize(k->header);
+      result = wrapUint(size);
+      break;
+    }
+    case VT_STR: {
+      String *s = deref(&vm->gc, value);
+      result = wrapUint(s->length);
+      break;
+    }
+    case VT_LIST: {
+      uint64_t size = 0;
+      Value cursor = value;
+      while (valueType(cursor) != VT_NIL) {
+        size++;
+        Cons *cons = deref(&vm->gc, cursor);
+        cursor = cons->next;
+      }
+      result = wrapUint(size);
+      break;
+    }
+    default:
+      raise(vm, "values of this type have no length: %s", getValueTypeName(vm, valueType(value)));
+  }
+
+  pushOperand(frame, result);
+}
+
+void getBuiltin(VM *vm, Frame_t frame) {
+  Value indexValue = popOperand(frame);
+  Value value = popOperand(frame);
+  ASSERT_UINT(vm, indexValue);
+  uint64_t index = unwrapUint(indexValue);
+
+  Value result = nil();
+  switch (valueType(value)) {
+    case VT_ARRAY: {
+      Array *k = deref(&vm->gc, value);
+      if (index > objectHeaderSize(k->header)) {
+        raise(vm, "index out of bounds: %" PRIu64, index);
+      }
+      Value *elements = arrayElements(k);
+      result = elements[index];
+      break;
+    }
+    default:
+      raise(vm, "values of this type are not indexed: %s", getValueTypeName(vm, valueType(value)));
+  }
+
+  pushOperand(frame, result);
+}
+
+void setBuiltin(VM *vm, Frame_t frame) {
+  Value value = popOperand(frame);
+  Value indexValue = popOperand(frame);
+  Value collValue = popOperand(frame);
+
+  ASSERT_UINT(vm, indexValue);
+  uint64_t index = unwrapUint(indexValue);
+
+  switch (valueType(collValue)) {
+    case VT_ARRAY: {
+      Array *k = deref(&vm->gc, collValue);
+      Value *elements = arrayElements(k);
+      elements[index] = value;
+      break;
+    }
+    default:
+    raise(vm, "values of this type are not indexed: %s", getValueTypeName(vm, valueType(value)));
+  }
+
+  pushOperand(frame, collValue);
+}
+
 void cFnInitContents(CFn *fn) {
   fn->header = 0;
   fn->nameLength = 0;
@@ -3236,6 +3443,10 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"print-str", 1, false, printStrBuiltin);
   defineCFn(vm, L"symbol", 1, false, symbolBuiltin);
   defineCFn(vm, L"keyword", 1, false, keywordBuiltin);
+  defineCFn(vm, L"array", 1, false, arrayBuiltin);
+  defineCFn(vm, L"count", 1, false, countBuiltin);
+  defineCFn(vm, L"get", 2, false, getBuiltin);
+  defineCFn(vm, L"set", 3, false, setBuiltin);
 }
 
 void vmConfigInitContents(VMConfig *config) {

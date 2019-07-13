@@ -618,6 +618,28 @@ RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *erro
 
       break;
     }
+    case N_VEC: {
+      c->type = CT_VEC;
+      c->vec.length = constant->vec.length;
+      tryPalloc(output.pool, c->vec.constants, sizeof(uint16_t) * c->vec.length, "constant vec array");
+
+      ListElement *elem = constant->vec.head;
+      uint16_t elemIndex = 0;
+      while (elem != NULL) {
+
+        Constant child;
+        throws(constInitContents(elem->expr, &child, output, error));
+        throws(tryAppendConstant(output, child, error));
+
+        uint16_t childIndex = output.constants->numUsed - 1;
+        c->vec.constants[elemIndex] = childIndex;
+
+        elem = elem->next;
+        elemIndex = elemIndex + 1;
+      }
+
+      break;
+    }
     case N_MAP: {
 
       c->type = CT_MAP;

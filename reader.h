@@ -47,6 +47,12 @@ typedef struct ExprList {
   ListElement *tail;
 } ExprList;
 
+typedef struct ExprVec {
+  uint64_t length;
+  ListElement *head;
+  ListElement *tail;
+} ExprVec;
+
 typedef struct MapElement {
   struct Expr *key;
   struct Expr *value;
@@ -68,6 +74,7 @@ typedef enum ExprType {
   N_BOOLEAN,
   N_NIL,
   N_LIST,
+  N_VEC,
   N_MAP
 } ExprType;
 
@@ -80,6 +87,7 @@ typedef struct Expr {
     ExprKeyword keyword;
     ExprBoolean boolean;
     ExprList list;
+    ExprVec vec;
     ExprMap map;
   };
   SourceLocation source;
@@ -98,6 +106,9 @@ RetVal tryExprPrn(Pool_t pool, Expr* expr, Error *error);
 
 void listInitContents(ExprList *list);
 RetVal tryListAppend(Pool_t pool, ExprList *list, Expr *expr, Error *error);
+
+void vecInitContents(ExprVec *list);
+RetVal tryVecAppend(Pool_t pool, ExprVec *list, Expr *expr, Error *error);
 
 void mapInitContents(ExprMap *map);
 RetVal tryMapPut(Pool_t pool, ExprMap *map, Expr *key, Expr *value, Error *error);

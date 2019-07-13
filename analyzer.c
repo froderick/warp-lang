@@ -1249,6 +1249,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
     case N_KEYWORD:
     case N_BOOLEAN:
     case N_NIL:
+    case N_VEC:
     case N_MAP: {
       form->type = F_CONST;
       throws(tryConstantAnalyze(ctx->pool, expr, &form->constant, error));

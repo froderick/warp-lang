@@ -430,12 +430,12 @@ RetVal tryTokenRead(Pool_t pool, InputStream_t source, LexerState *s, Token **to
   else if (ch == L')') {
     throws(tryTokenInit(pool, T_CPAREN, L")", s->position, 1, s->lineNumber, s->colNumber, token, error));
   }
-//  else if (ch == L'[') {
-//    ret = tryTokenInit(T_OVEC, L"[", s->position, 1, token, error);
-//  }
-//  else if (ch == L']') {
-//    ret = tryTokenInit(T_CVEC, L"]", s->position, 1, token, error);
-//  }
+  else if (ch == L'[') {
+    ret = tryTokenInit(pool, T_OVEC, L"[", s->position, 1, s->lineNumber, s->colNumber, token, error);
+  }
+  else if (ch == L']') {
+    ret = tryTokenInit(pool, T_CVEC, L"]", s->position, 1, s->lineNumber, s->colNumber, token, error);
+  }
   else if (ch == L'{') {
     throws(tryTokenInit(pool, T_OBRACKET, L"{", s->position, 1, s->lineNumber, s->colNumber, token, error));
   }

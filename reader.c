@@ -349,7 +349,7 @@ RetVal tryListRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) 
   throws(tryStreamNext(pool, stream, &oParen, error));
 
   if (oParen->type != T_OPAREN) {
-    throwSyntaxError(error, oParen->source.position, "List must begin with ')': %u", oParen->type);
+    throwSyntaxError(error, oParen->source.position, "List must begin with '(': %u", oParen->type);
   }
 
   while (true) {
@@ -414,6 +414,118 @@ RetVal tryListAppend(Pool_t pool, ExprList *list, Expr *expr, Error *error) {
 
   failure:
     return ret;
+}
+
+// vectors
+
+RetVal tryVecMake(Pool_t pool, Expr **ptr, Error *error) {
+  RetVal ret;
+
+  Expr *expr;
+  tryPalloc(pool, expr, sizeof(Expr), "Expr");
+
+  expr->type = N_VEC;
+  expr->list.length = 0;
+
+  // valid for zero length list
+  expr->list.head = NULL;
+  expr->list.tail = NULL;
+
+  expr->source.isSet = false;
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+void vecInitContents(ExprVec *vec) {
+  vec->length = 0;
+  vec->head = NULL;
+  vec->tail = NULL;
+}
+
+RetVal tryVecRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+  RetVal ret;
+
+  // these get cleaned up on failure
+  Token *oParen = NULL, *cParen = NULL;
+  Expr *expr = NULL;
+  Expr *subexpr = NULL;
+
+  // convenience
+
+  throws(tryVecMake(pool, &expr, error));
+
+  throws(tryStreamNext(pool, stream, &oParen, error));
+
+  if (oParen->type != T_OVEC) {
+    throwSyntaxError(error, oParen->source.position, "Vector must begin with '[': %u", oParen->type);
+  }
+
+  while (true) {
+
+    ret = tryStreamPeek(pool, stream, &cParen, error);
+    if (ret != R_SUCCESS) {
+      if (ret == R_EOF) { // eof too soon
+        throwSyntaxError(error, oParen->source.position, "Encountered EOF, was expecting ']'");
+      }
+      goto failure;
+    }
+
+    if (cParen->type == T_CVEC) { // found our closed paren
+
+      streamDropPeeked(stream); // consume cParen now that nothing else can fail
+
+      expr->source = oParen->source;
+      expr->source.length = cParen->source.position - oParen->source.position;
+
+      *ptr = expr;
+      break;
+    }
+    else { // read a new expression and add it to the vec
+      cParen = NULL;
+      throws(tryExprRead(pool, stream, &subexpr, error));
+      throws(tryVecAppend(pool, &expr->vec, subexpr, error));
+      subexpr = NULL; // subexpr is part of vec now
+    }
+  }
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryVecAppend(Pool_t pool, ExprVec *vec, Expr *expr, Error *error) {
+  RetVal ret;
+
+  ListElement *elem;
+  tryPalloc(pool, elem, sizeof(ListElement), "ListElement");
+
+  elem->expr = expr;
+  elem->next = NULL;
+
+  if (vec->head == NULL) { // no elements
+    vec->head = elem;
+    vec->tail = elem;
+  }
+  else if (vec->head == vec->tail) { // one element
+    vec->head->next = elem;
+    vec->tail = elem;
+  }
+  else { // more than one element
+    vec->tail->next = elem;
+    vec->tail = elem;
+  }
+
+  vec->length = vec->length + 1;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
 }
 
 // maps
@@ -759,6 +871,11 @@ RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) 
       throws(tryListRead(pool, stream, ptr, error));
       break;
 
+    // vectors
+    case T_OVEC:
+    throws(tryVecRead(pool, stream, ptr, error));
+      break;
+
     // maps
     case T_OBRACKET:
       throws(tryMapRead(pool, stream, ptr, error));
@@ -830,6 +947,20 @@ RetVal tryExprDeepCopy(Pool_t pool, Expr *from, Expr **ptr, Error *error) {
         Expr *listItem = NULL;
         throws(tryExprDeepCopy(pool, elem->expr, &listItem, error));
         throws(tryListAppend(pool, &to->list, listItem, error));
+
+        elem = elem->next;
+      }
+      break;
+    }
+    case N_VEC: {
+      throws(tryVecMake(pool, &to, error));
+
+      ListElement *elem = from->vec.head;
+      while (elem != NULL) {
+
+        Expr *listItem = NULL;
+        throws(tryExprDeepCopy(pool, elem->expr, &listItem, error));
+        throws(tryVecAppend(pool, &to->vec, listItem, error));
 
         elem = elem->next;
       }
@@ -921,6 +1052,24 @@ RetVal tryExprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable, Error *err
       }
 
       throws(tryStringBufferAppendChar(b, L')', error));
+      break;
+    }
+    case N_VEC: {
+      throws(tryStringBufferAppendChar(b, L'[', error));
+
+      ListElement *elem = expr->vec.head;
+      for (int i=0; i<expr->vec.length; i++) {
+
+        throws(tryExprPrnBufConf(elem->expr, b, readable, error));
+
+        if (i + 1 < expr->vec.length) {
+          throws(tryStringBufferAppendChar(b, L' ', error));
+        }
+
+        elem = elem->next;
+      }
+
+      throws(tryStringBufferAppendChar(b, L']', error));
       break;
     }
     case N_MAP: {

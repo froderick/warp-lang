@@ -79,6 +79,7 @@ typedef enum ConstantType {
   CT_SYMBOL,
   CT_KEYWORD,
   CT_LIST,
+  CT_VEC,
   CT_MAP
 } ConstantType;
 
@@ -127,6 +128,11 @@ typedef struct ListConstant {
   ConstantMeta meta;
 } ListConstant;
 
+typedef struct VecConstant {
+  uint16_t length;
+  uint16_t *constants;
+} VecConstant;
+
 typedef struct MapConstant {
   uint16_t length;
   uint16_t *constants;
@@ -143,6 +149,7 @@ typedef struct Constant {
     SymbolConstant symbol;
     KeywordConstant keyword;
     ListConstant list;
+    VecConstant vec;
     MapConstant map;
   };
 } Constant;
