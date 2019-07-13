@@ -1166,7 +1166,8 @@ Value vecHydrate(VM *vm, Fn **protectedFn, VecConstant vecConst) {
   Value* elements = arrayElements(array);
 
   for (uint16_t i = 0; i < vecConst.length; i++) {
-    elements[i] = fnConstants(*protectedFn)[i];
+    uint16_t valueIndex = vecConst.constants[i];
+    elements[i] = fnConstants(*protectedFn)[valueIndex];
   }
 
   return (Value)array;
