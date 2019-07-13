@@ -136,12 +136,12 @@
                           (rest coll)))))
     (_take nil n coll)))
 
-(defn count (seq)
-  (let (_count (fn _count (i remaining)
-                 (if (empty? remaining)
-                   i
-                   (_count (inc i) (rest remaining)))))
-    (_count 0 seq)))
+;; (defn count (seq)
+;;   (let (_count (fn _count (i remaining)
+;;                  (if (empty? remaining)
+;;                    i
+;;                    (_count (inc i) (rest remaining)))))
+;;     (_count 0 seq)))
 
 
 ;; todo: throw exceptions on invalid input
