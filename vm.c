@@ -3393,6 +3393,11 @@ void countBuiltin(VM *vm, Frame_t frame) {
       result = wrapUint(size);
       break;
     }
+    case VT_MAP: {
+      Map *m = deref(&vm->gc, value);
+      result = wrapUint(m->size);
+      break;
+    }
     default:
       raise(vm, "values of this type have no length: %s", getValueTypeName(vm, valueType(value)));
   }
