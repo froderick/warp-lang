@@ -35,6 +35,8 @@ typedef enum ValueType {
   VT_CLOSURE,
   VT_CFN,
   VT_ARRAY,
+  VT_MAP,
+  VT_MAP_ENTRY
 } ValueType;
 
 #define W_GC_FORWARDING_BIT      0x8000000000000000L   /* header contains forwarding pointer */
@@ -44,14 +46,16 @@ typedef enum ValueType {
 #define W_HEADER_TYPE_BITS       0x0f00000000000000L
 #define W_HEADER_SIZE_MASK       0x00ffffffffffffffL
 
-#define W_FN_TYPE      0x0u
-#define W_STR_TYPE     0x1u
-#define W_SYMBOL_TYPE  0x2u
-#define W_KEYWORD_TYPE 0x3u
-#define W_LIST_TYPE    0x4u
-#define W_CLOSURE_TYPE 0x5u
-#define W_CFN_TYPE     0x6u
-#define W_ARRAY_TYPE   0x7u
+#define W_FN_TYPE        0x0u
+#define W_STR_TYPE       0x1u
+#define W_SYMBOL_TYPE    0x2u
+#define W_KEYWORD_TYPE   0x3u
+#define W_LIST_TYPE      0x4u
+#define W_CLOSURE_TYPE   0x5u
+#define W_CFN_TYPE       0x6u
+#define W_ARRAY_TYPE     0x7u
+#define W_MAP_TYPE       0x8u
+#define W_MAP_ENTRY_TYPE 0x9u
 
 /*
  * This is the first field inside all heap objects. It must come first so that the GC can
@@ -78,12 +82,14 @@ uint64_t objectHeaderSize(ObjectHeader h) {
 }
 
 uint64_t objectHeaderSizeBytes(ObjectHeader h) {
-  if (objectHeaderType(h) != W_ARRAY_TYPE) {
-    return h & W_HEADER_SIZE_MASK;
-  }
-  else {
-    uint64_t size = h & W_HEADER_SIZE_MASK;
-    return sizeof(ObjectHeader) + (size * sizeof(Value));
+  uint8_t type = objectHeaderType(h);
+  switch (type) {
+    case W_ARRAY_TYPE: {
+      uint64_t size = h & W_HEADER_SIZE_MASK;
+      return sizeof(ObjectHeader) + (size * sizeof(Value));
+    }
+    default:
+      return h & W_HEADER_SIZE_MASK;
   }
 }
 
@@ -97,6 +103,8 @@ ValueType objectHeaderValueType(ObjectHeader header) {
     case W_CLOSURE_TYPE: return VT_CLOSURE;
     case W_CFN_TYPE: return VT_CFN;
     case W_ARRAY_TYPE: return VT_ARRAY;
+    case W_MAP_TYPE: return VT_MAP;
+    case W_MAP_ENTRY_TYPE: return VT_MAP_ENTRY;
     default:
     explode("unknown type: %u", objectHeaderType(header));
   }
@@ -244,6 +252,20 @@ typedef struct Array {
   ObjectHeader header;
 } Array;
 
+typedef struct MapEntry {
+  ObjectHeader header;
+  bool used;
+  Value key;
+  uint32_t keyHash;
+  Value value;
+} MapEntry;
+
+typedef struct Map {
+  ObjectHeader header;
+  uint64_t size;
+  Value entries;
+} Map;
+
 typedef struct GC {
 
   // the total memory allocated
@@ -287,14 +309,12 @@ typedef struct Invocable {
 
 typedef void (*RelocateChildren)(VM_t vm, void *obj);
 typedef void (*Prn)(VM_t vm, Value result, Expr *expr);
-typedef bool (*Equals)(VM_t vm, Value this, Value that);
 
 typedef struct ValueTypeInfo {
   const char *name;
   bool (*isTruthy)(Value value);
   RelocateChildren relocateChildren;
   Prn prn;
-  Equals equals;
 } ValueTypeInfo;
 
 typedef struct ValueTypeTable {
@@ -1154,6 +1174,53 @@ Array* makeArray(VM *vm, uint64_t size) {
   return array;
 }
 
+void _mapEntryInitContents(MapEntry *e) {
+  e->header = 0;
+  e->used = false;
+  e->key = nil();
+  e->keyHash = 0;
+  e->value = nil();
+}
+
+MapEntry* makeMapEntry(VM *vm) {
+
+  uint64_t sizeBytes = padAllocSize(sizeof(MapEntry));
+  MapEntry *entry = alloc(vm, sizeBytes);
+
+  _mapEntryInitContents(entry);
+  entry->header = makeObjectHeader(W_MAP_ENTRY_TYPE, sizeBytes);
+
+  return entry;
+}
+
+void _mapInitContents(Map *m) {
+  m->header = 0;
+  m->size = 0;
+  m->entries = nil();
+}
+
+Map* makeMap(VM *vm) {
+
+  uint64_t numEntries = SYMBOL_TABLE_MIN_ENTRIES;
+
+  Array *protectedEntries = makeArray(vm, numEntries);
+  pushFrameRoot(vm, (Value*)&protectedEntries);
+
+  for (uint64_t i=0; i<numEntries; i++) {
+    arrayElements(protectedEntries)[i] = (Value)makeMapEntry(vm);
+  }
+
+  uint64_t sizeBytes = padAllocSize(sizeof(Map));
+  Map *map = alloc(vm, sizeBytes);
+
+  _mapInitContents(map);
+  map->header = makeObjectHeader(W_MAP_TYPE, sizeBytes);
+  map->entries = (Value)protectedEntries;
+
+  popFrameRoot(vm); // protectedEntries
+
+  return map;
+}
 
 /*
  * `protectedFn` is a alloc-safe pointer to the Fn for which a constant is being hydrated.
@@ -1171,6 +1238,34 @@ Value vecHydrate(VM *vm, Fn **protectedFn, VecConstant vecConst) {
   }
 
   return (Value)array;
+}
+
+void putMapEntry(VM *vm, Map **protectedMap, Value key, Value insertMe);
+
+/*
+ * `protectedFn` is a alloc-safe pointer to the Fn for which a constant is being hydrated.
+ * This is included so we so that references to already-hydrated values can be resolved by
+ * constant index.
+ */
+Value mapHydrate(VM *vm, Fn **protectedFn, MapConstant mapConst) {
+
+  Map *protectedMap = makeMap(vm);
+  pushFrameRoot(vm, (Value*)&protectedMap);
+
+  for (uint16_t i = 0; i < mapConst.length * 2; i+=2) {
+
+    uint16_t keyIndex = mapConst.constants[i];
+    Value key = fnConstants(*protectedFn)[keyIndex];
+
+    uint16_t valueIndex = mapConst.constants[i+1];
+    Value value = fnConstants(*protectedFn)[valueIndex];
+
+    putMapEntry(vm, &protectedMap, key, value);
+  }
+
+  popFrameRoot(vm); // protectedMap
+
+  return (Value)protectedMap;
 }
 
 // TODO: I had a thought, can we get rid of CodeUnit entirely and just replace it with FnConstant?
@@ -1205,6 +1300,9 @@ Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c) {
       break;
     case CT_VEC:
       v = vecHydrate(vm, protectedFn, c.vec);
+      break;
+    case CT_MAP:
+      v = mapHydrate(vm, protectedFn, c.map);
       break;
     case CT_NONE:
     default:
@@ -1590,20 +1688,33 @@ void invokeCFn(VM *vm, Frame_t frame, Value cFn) {
   fn->ptr(vm, frame);
 }
 
+Value mapLookup(VM *vm, Map *map, Value key);
+
 // (8)              | (objectref, args... -> ...)
 void invokeDynEval(VM *vm, Frame_t frame) {
   Value pop = popOperand(frame);
-  if (valueType(pop) == VT_CFN) {
-    invokeCFn(vm, frame, pop);
-  }
-  else {
-    Invocable invocable;
-    Frame_t parent;
+  switch (valueType(pop)) {
+    case VT_CFN:
+      invokeCFn(vm, frame, pop);
+      break;
+    case VT_KEYWORD: {
+      Value key = pop;
+      preprocessArguments(vm, frame, 1, false);
+      Value coll = popOperand(frame);
+      Map *m = deref(&vm->gc, coll);
+      Value result = mapLookup(vm, m, key);
+      pushOperand(frame, result);
+      break;
+    }
+    default: {
+      Invocable invocable;
+      Frame_t parent;
 
-    makeInvocable(vm, pop, &invocable);
-    frame = pushFrame(vm, (Value)invocable.fn);
-    parent = getParent(frame);
-    invokePopulateLocals(vm, parent, frame, &invocable);
+      makeInvocable(vm, pop, &invocable);
+      frame = pushFrame(vm, (Value) invocable.fn);
+      parent = getParent(frame);
+      invokePopulateLocals(vm, parent, frame, &invocable);
+    }
   }
 }
 
@@ -2130,6 +2241,22 @@ void relocateChildrenArray(VM_t vm, void *obj) {
   }
 }
 
+void relocateChildrenMap(VM_t vm, void *obj) {
+  Map *map = obj;
+  Array *array = deref(&vm->gc, map->entries);
+  Value *elements = arrayElements(array);
+  uint64_t size = objectHeaderSize(array->header);
+  for (uint64_t i=0; i<size; i++) {
+    relocate(vm, &elements[i]);
+  }
+}
+
+void relocateChildrenMapEntry(VM_t vm, void *obj) {
+  MapEntry *mapEntry = obj;
+  relocate(vm, &mapEntry->key);
+  relocate(vm, &mapEntry->value);
+}
+
 void prnNil(VM_t vm, Value result, Expr *expr) {
   expr->type = N_NIL;
 }
@@ -2319,6 +2446,42 @@ void prnList(VM_t vm, Value result, Expr *expr) {
   }
 }
 
+void prnMap(VM_t vm, Value result, Expr *expr) {
+  Map *map = deref(&vm->gc, result);
+  Array *array = deref(&vm->gc, map->entries);
+
+  expr->type = N_MAP;
+  mapInitContents(&expr->map);
+
+  uint64_t size = objectHeaderSize(array->header);
+  for (uint64_t i=0; i<size; i++) {
+    Value entryRef = arrayElements(array)[i];
+
+    if (valueType(entryRef) == VT_MAP_ENTRY) {
+
+      MapEntry *entry = deref(&vm->gc, entryRef);
+      if (entry->used) {
+
+        Expr *keyExpr = NULL;
+        palloc(vm->outputPool, keyExpr, sizeof(Expr), "Expr");
+        exprInitContents(keyExpr);
+        vmPrn(vm, entry->key, keyExpr);
+
+        Expr *valueExpr = NULL;
+        palloc(vm->outputPool, valueExpr, sizeof(Expr), "Expr");
+        exprInitContents(valueExpr);
+        vmPrn(vm, entry->value, valueExpr);
+
+        Error e;
+        errorInitContents(&e);
+        if (tryMapPut(vm->outputPool, &expr->map, keyExpr, valueExpr, &e) != R_SUCCESS) {
+          explode("put");
+        }
+      }
+    }
+  }
+}
+
 void prnArray(VM_t vm, Value result, Expr *expr) {
 
   Array *array = deref(&vm->gc, result);
@@ -2345,96 +2508,6 @@ void prnArray(VM_t vm, Value result, Expr *expr) {
   }
 }
 
-bool equals(VM_t vm, Value this, Value that);
-
-bool equalsStr(VM_t vm, Value this, Value that) {
-
-  if (valueType(this) == valueType(that)) {
-    return false;
-  }
-  else {
-
-    String *a = deref(&vm->gc, this);
-    String *b = deref(&vm->gc, that);
-
-    if (a == b) {
-      return true;
-    }
-
-    if (a->length != b->length) {
-      return false;
-    }
-    else {
-      return wcscmp(stringValue(a), stringValue(b)) == 0;
-    }
-  }
-}
-
-bool equalsSymbol(VM_t vm, Value this, Value that) {
-  if (valueType(this) == valueType(that)) {
-    return false;
-  }
-  else {
-    return this == that;
-  }
-}
-
-bool equalsKeyword(VM_t vm, Value this, Value that) {
-  if (valueType(this) == valueType(that)) {
-    return false;
-  }
-  else {
-    return this == that;
-  }
-}
-
-bool equalsList(VM_t vm, Value this, Value that) {
-
-  if (valueType(this) == valueType(that)) {
-    return false;
-  }
-  else {
-    bool e = true;
-    while (valueType(this) != T_NIL) {
-
-      Cons *a = deref(&vm->gc, this);
-      Cons *b = deref(&vm->gc, that);
-
-      if (a == b) {
-        return true;
-      }
-
-      if (!equals(vm, a->value, b->value)) {
-        e = false;
-        break;
-      }
-
-      bool nextTypesMismatched = valueType(a->next) != valueType(b->next);
-      if (nextTypesMismatched) {
-        e = false;
-        break;
-      }
-
-      this = a->next;
-      that = b->next;
-    }
-
-    return e;
-  }
-}
-
-bool equals(VM_t vm, Value this, Value that) {
-  ValueType thisType = valueType(this);
-  Equals equals = vm->valueTypeTable.valueTypes[thisType].equals;
-  if (equals == NULL) {
-    // assume immediate value
-    return this == that;
-  }
-  else {
-    return equals(vm, this, that);
-  }
-}
-
 ValueTypeTable valueTypeTableCreate() {
   ValueTypeTable table;
 
@@ -2452,58 +2525,56 @@ ValueTypeTable valueTypeTableCreate() {
       [VT_NIL]       = {.name = "nil",
                         .isTruthy = &isTruthyNo,
                         .relocateChildren = NULL,
-                        .prn = &prnNil,
-                        .equals = NULL},
+                        .prn = &prnNil},
       [VT_UINT]      = {.name = "uint",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
-                        .prn = &prnInt,
-                        .equals = NULL},
+                        .prn = &prnInt},
       [VT_BOOL]      = {.name = "bool",
                         .isTruthy = &isTruthyBool,
                         .relocateChildren = NULL,
-                        .prn = &prnBool,
-                        .equals = NULL},
+                        .prn = &prnBool},
       [VT_FN]        = {.name = "fn",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenFn,
-                        .prn = &prnFn,
-                        .equals = NULL},
+                        .prn = &prnFn},
       [VT_STR]       = {.name = "str",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
-                        .prn = &prnStr,
-                        .equals = &equalsStr},
+                        .prn = &prnStr},
       [VT_SYMBOL]    = {.name = "symbol",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenSymbol,
-                        .prn = &prnSymbol,
-                        .equals = &equalsSymbol},
+                        .prn = &prnSymbol},
       [VT_KEYWORD]   = {.name = "keyword",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenKeyword,
-                        .prn = &prnKeyword,
-                        .equals = &equalsKeyword},
+                        .prn = &prnKeyword},
       [VT_LIST]      = {.name = "list",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenList,
-                        .prn = &prnList,
-                        .equals = &equalsList},
+                        .prn = &prnList},
       [VT_CLOSURE]   = {.name = "closure",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenClosure,
-                        .prn = &prnClosure,
-                        .equals = NULL},
+                        .prn = &prnClosure},
       [VT_CFN]       = {.name = "cfn",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = NULL,
-                        .prn = &prnCFn,
-                        .equals = NULL},
+                        .prn = &prnCFn},
       [VT_ARRAY]     = {.name = "array",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenArray,
-                        .prn = &prnArray,
-                        .equals = NULL}
+                        .prn = &prnArray},
+      [VT_MAP]       = {.name = "map",
+                        .isTruthy = &isTruthyYes,
+                        .relocateChildren = &relocateChildrenMap,
+                        .prn = &prnMap},
+      [VT_MAP_ENTRY] = {.name = "map-entry",
+                        .isTruthy = &isTruthyYes,
+                        .relocateChildren = &relocateChildrenMapEntry,
+                        .prn = NULL},
+
   };
   memcpy(table.valueTypes, valueTypes, sizeof(valueTypes));
   table.numValueTypes = sizeof(valueTypes) / sizeof(valueTypes[0]);
@@ -3329,25 +3400,34 @@ void countBuiltin(VM *vm, Frame_t frame) {
   pushOperand(frame, result);
 }
 
+Value mapLookup(VM *vm, Map *map, Value key);
+
 void getBuiltin(VM *vm, Frame_t frame) {
-  Value indexValue = popOperand(frame);
-  Value value = popOperand(frame);
-  ASSERT_UINT(vm, indexValue);
-  uint64_t index = unwrapUint(indexValue);
+  Value key = popOperand(frame);
+  Value coll = popOperand(frame);
 
   Value result = nil();
-  switch (valueType(value)) {
+  switch (valueType(coll)) {
     case VT_ARRAY: {
-      Array *k = deref(&vm->gc, value);
+      ASSERT_UINT(vm, key);
+      uint64_t index = unwrapUint(key);
+
+      Array *k = deref(&vm->gc, coll);
       if (index > objectHeaderSize(k->header)) {
         raise(vm, "index out of bounds: %" PRIu64, index);
       }
+
       Value *elements = arrayElements(k);
       result = elements[index];
       break;
     }
+    case VT_MAP: {
+      Map *m = deref(&vm->gc, coll);
+      result = mapLookup(vm, m, key);
+      break;
+    }
     default:
-      raise(vm, "values of this type are not indexed: %s", getValueTypeName(vm, valueType(value)));
+      raise(vm, "values of this type are not indexed: %s", getValueTypeName(vm, valueType(coll)));
   }
 
   pushOperand(frame, result);
@@ -3355,24 +3435,314 @@ void getBuiltin(VM *vm, Frame_t frame) {
 
 void setBuiltin(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
-  Value indexValue = popOperand(frame);
-  Value collValue = popOperand(frame);
+  Value key = popOperand(frame);
+  Value coll = popOperand(frame);
 
-  ASSERT_UINT(vm, indexValue);
-  uint64_t index = unwrapUint(indexValue);
-
-  switch (valueType(collValue)) {
+  Value result;
+  switch (valueType(coll)) {
     case VT_ARRAY: {
-      Array *k = deref(&vm->gc, collValue);
+      ASSERT_UINT(vm, key);
+      uint64_t index = unwrapUint(key);
+      Array *k = deref(&vm->gc, coll);
       Value *elements = arrayElements(k);
       elements[index] = value;
+      result = coll;
+      break;
+    }
+    case VT_MAP: {
+      Map *protectedMap = deref(&vm->gc, coll);
+      pushFrameRoot(vm, (Value*)&protectedMap);
+
+      putMapEntry(vm, &protectedMap, key, value);
+      result = (Value)protectedMap;
+
+      popFrameRoot(vm); // protectedMap
       break;
     }
     default:
     raise(vm, "values of this type are not indexed: %s", getValueTypeName(vm, valueType(value)));
   }
 
-  pushOperand(frame, collValue);
+  pushOperand(frame, result);
+}
+
+/*
+ * hash map
+ */
+
+uint32_t hashCode(VM *vm, Value v) {
+  switch (valueType(v)) {
+
+    case VT_NIL:  return 0;
+    case VT_UINT: {
+      uint64_t i = unwrapUint(v);
+      return (uint32_t)(i ^ (i >> 32));
+    }
+    case VT_BOOL: {
+      if (unwrapBool(v)) {
+        return 1;
+      }
+      else {
+        return 0;
+      }
+    }
+    case VT_STR: {
+      String *s = deref(&vm->gc, v);
+      return stringHash(s);
+    }
+    case VT_SYMBOL: {
+      Symbol *sym = deref(&vm->gc, v);
+      String *s = deref(&vm->gc, sym->name);
+      return stringHash(s);
+    }
+    case VT_KEYWORD: {
+      Keyword *k = deref(&vm->gc, v);
+      String *s = deref(&vm->gc, k->name);
+      return stringHash(s);
+    }
+    case VT_FN:
+    case VT_LIST:
+    case VT_CLOSURE:
+    case VT_CFN:
+    case VT_ARRAY:
+    case VT_MAP:
+    default:
+      raise(vm, "can't hash this value: %s", getValueTypeName(vm, valueType(v)));
+      return 0;
+  }
+}
+
+bool equals(VM_t vm, Value this, Value that);
+
+bool equalsStr(VM_t vm, Value this, Value that) {
+
+  if (valueType(that) != VT_STR) {
+    return false;
+  }
+  else {
+
+    String *a = deref(&vm->gc, this);
+    String *b = deref(&vm->gc, that);
+
+    if (a == b) {
+      return true;
+    }
+
+    if (a->length != b->length) {
+      return false;
+    }
+    else {
+      return wcscmp(stringValue(a), stringValue(b)) == 0;
+    }
+  }
+}
+
+bool equalsList(VM_t vm, Value this, Value that) {
+
+  if (valueType(that) != VT_LIST) {
+    return false;
+  }
+  else {
+    bool e = true;
+    while (valueType(this) != T_NIL) {
+
+      Cons *a = deref(&vm->gc, this);
+      Cons *b = deref(&vm->gc, that);
+
+      if (a == b) {
+        return true;
+      }
+
+      if (!equals(vm, a->value, b->value)) {
+        e = false;
+        break;
+      }
+
+      bool nextTypesMismatched = valueType(a->next) != valueType(b->next);
+      if (nextTypesMismatched) {
+        e = false;
+        break;
+      }
+
+      this = a->next;
+      that = b->next;
+    }
+
+    return e;
+  }
+}
+
+bool equals(VM_t vm, Value this, Value that) {
+  switch (valueType(this)) {
+
+    case VT_STR: return equalsStr(vm, this, that);
+    case VT_LIST: return equalsList(vm, this, that);
+
+    case VT_NIL:
+    case VT_UINT:
+    case VT_BOOL:
+    case VT_SYMBOL:
+    case VT_KEYWORD:
+    case VT_FN:
+    case VT_CLOSURE:
+    case VT_CFN: {
+      return this == that;
+    }
+
+    case VT_ARRAY:
+    case VT_MAP:
+    default:
+      raise(vm, "can't compare this value: %s", getValueTypeName(vm, valueType(this)));
+      return 0;
+  }
+}
+
+MapEntry* findMapEntry(VM *vm, Map *map, Value key, uint32_t hash) {
+
+  Array *array = deref(&vm->gc, map->entries);
+  uint64_t numEntries = objectHeaderSize(array->header);
+  Value *entries = arrayElements(array);
+
+  uint64_t index = hash % numEntries;
+
+  for (uint64_t i = index; i < numEntries; i++) {
+    MapEntry *entry = deref(&vm->gc, entries[i]);
+    if (!entry->used || equals(vm, key, entry->key)) {
+      return entry;
+    }
+  }
+
+  for (uint64_t i = 0; i < index; i++) {
+    MapEntry *entry = deref(&vm->gc, entries[i]);
+    if (!entry->used || equals(vm, key, entry->key)) {
+      return entry;
+    }
+  }
+
+  explode("could not find an available entry");
+}
+
+Value mapLookup(VM *vm, Map *map, Value key) {
+  uint32_t hash = hashCode(vm, key);
+  MapEntry *found = findMapEntry(vm, map, key, hash);
+  if (found->used) {
+    return found->value;
+  }
+  else {
+    return nil();
+  }
+}
+
+void _putMapEntryWithHash(VM *vm, Map *map, Value insertMe, Value key, uint32_t hash) {
+  MapEntry *found = findMapEntry(vm, map, key, hash);
+  if (!found->used) {
+    map->size++;
+    found->used = true;
+  }
+  found->key = key;
+  found->keyHash = hash;
+  found->value = insertMe;
+}
+
+void _putMapEntry(VM *vm, Map *map, Value key, Value insertMe) {
+  uint32_t hash = hashCode(vm, key);
+  _putMapEntryWithHash(vm, map, insertMe, key, hash);
+}
+
+void mapResize(VM *vm, Map **protectedMap, uint64_t targetEntries) {
+
+  Array *protectedNewEntries = makeArray(vm, targetEntries);
+  pushFrameRoot(vm, (Value*)&protectedNewEntries);
+  for (uint64_t i=0; i<targetEntries; i++) {
+    arrayElements(protectedNewEntries)[i] = (Value)makeMapEntry(vm);
+  }
+  popFrameRoot(vm); // protectedNewEntries
+
+  Map *map = *protectedMap;
+  Array *oldEntries = deref(&vm->gc, map->entries);
+  map->size = 0;
+  map->entries = (Value)protectedNewEntries;
+
+  uint64_t numOldEntries = objectHeaderSize(oldEntries->header);
+  for (uint64_t i=0; i<numOldEntries; i++) {
+    MapEntry *oldEntry = deref(&vm->gc, arrayElements(oldEntries)[i]);
+    if (oldEntry->used) {
+      _putMapEntryWithHash(vm, *protectedMap, oldEntry->value, oldEntry->key, oldEntry->keyHash);
+    }
+  }
+}
+
+void putMapEntry(VM *vm, Map **protectedMap, Value key, Value insertMe) {
+
+  _putMapEntry(vm, *protectedMap, key, insertMe);
+
+  uint64_t numEntries;
+  {
+    Array *entries = deref(&vm->gc, (*protectedMap)->entries);
+    numEntries = objectHeaderSize(entries->header);
+  }
+
+  float load = (float)(*protectedMap)->size / (float)numEntries;
+
+  // resize
+  if (load > SYMBOL_TABLE_MAX_LOAD || (load > SYMBOL_TABLE_MIN_ENTRIES && load < SYMBOL_TABLE_MIN_LOAD)) {
+
+    uint64_t newAllocatedEntries;
+    if (load > SYMBOL_TABLE_MAX_LOAD) {
+      newAllocatedEntries = numEntries * 2;
+    }
+    else {
+      newAllocatedEntries = numEntries / 2;
+      if (newAllocatedEntries < SYMBOL_TABLE_MIN_ENTRIES) {
+        newAllocatedEntries = SYMBOL_TABLE_MIN_ENTRIES;
+      }
+    }
+
+    mapResize(vm, protectedMap, newAllocatedEntries);
+  }
+}
+
+void hashMapBuiltin(VM *vm, Frame_t frame) {
+  Value params = popOperand(frame);
+
+  Value result;
+  switch (valueType(params)) {
+
+    case VT_NIL:
+      result = (Value)makeMap(vm);
+      break;
+
+    case VT_LIST: {
+
+      Value protectedParams = params;
+      pushFrameRoot(vm, &protectedParams);
+
+      Map *protectedMap = makeMap(vm);
+      pushFrameRoot(vm, (Value*)&protectedMap);
+
+      while (protectedParams != W_NIL_VALUE) {
+
+        Cons *keyCons = deref(&vm->gc, protectedParams);
+        if (keyCons->next == W_NIL_VALUE) {
+          raise(vm, "hash-map takes an even number of parameters");
+        }
+
+        Cons *valueCons = deref(&vm->gc, keyCons->next);
+        putMapEntry(vm, &protectedMap, keyCons->value, valueCons->value);
+        protectedParams = valueCons->next;
+      }
+
+      popFrameRoot(vm); // protectedMap
+      popFrameRoot(vm); // protectedParams
+
+      result = (Value)protectedMap;
+      break;
+    }
+    default:
+      explode("var-args, should have been a list");
+  }
+
+  pushOperand(frame, result);
 }
 
 void cFnInitContents(CFn *fn) {
@@ -3448,6 +3818,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"count", 1, false, countBuiltin);
   defineCFn(vm, L"get", 2, false, getBuiltin);
   defineCFn(vm, L"set", 3, false, setBuiltin);
+  defineCFn(vm, L"hash-map", 1, true, hashMapBuiltin);
 }
 
 void vmConfigInitContents(VMConfig *config) {
