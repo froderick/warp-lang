@@ -78,7 +78,7 @@ uint64_t objectHeaderSize(ObjectHeader h) {
 }
 
 uint64_t objectHeaderSizeBytes(ObjectHeader h) {
-  if (objectHeaderType(h) == W_ARRAY_TYPE) {
+  if (objectHeaderType(h) != W_ARRAY_TYPE) {
     return h & W_HEADER_SIZE_MASK;
   }
   else {
