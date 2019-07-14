@@ -366,6 +366,7 @@ typedef struct VM {
   Table keywordTable;
   Pool_t outputPool; // this is mutable, it changes on every eval request
   jmp_buf jumpBuf;
+  VMException *exception;
 } VM;
 
 /*
@@ -585,9 +586,9 @@ bool hasSourceTable(Frame_t frame);
 bool getLineNumber(Frame_t frame, uint64_t *lineNumber);
 bool getFileName(Frame_t frame, Text *fileName);
 
-bool hasException(Frame_t frame);
-void setException(Frame_t frame, VMException *e);
-VMException* getException(Frame_t frame);
+bool hasException(VM *vm);
+void setException(VM *vm, VMException *e);
+VMException* getException(VM *vm);
 
 Frame_t pushFrame(VM *vm, Value newFn);
 Frame_t replaceFrame(VM *vm, Value newFn);
@@ -1370,7 +1371,7 @@ VMException* exceptionMake(VM *vm, Raised *raised) {
   }
 
   uint64_t numFrames = 0;
-  {
+  if (vm->current != NULL) {
     Frame_t current = vm->current;
     while (true) {
       numFrames++;
@@ -1409,33 +1410,34 @@ VMException* exceptionMake(VM *vm, Raised *raised) {
     f->lineNumber = raised->lineNumber;
   }
 
-  Frame_t current = vm->current;
-  for (uint64_t i=1; i<numFrames; i++) {
+  if (vm->current != NULL) {
+    Frame_t current = vm->current;
+    for (uint64_t i = 1; i < numFrames; i++) {
 
-    VMExceptionFrame *f = &exception->frames.elements[i];
-    exFrameInitContents(f);
+      VMExceptionFrame *f = &exception->frames.elements[i];
+      exFrameInitContents(f);
 
-    if (hasFnName(current)) {
-      Text text = getFnName(current);
-      if (tryTextCopy(vm->outputPool, &text, &f->functionName, &error) != R_SUCCESS) {
-        explode("text copy");
+      if (hasFnName(current)) {
+        Text text = getFnName(current);
+        if (tryTextCopy(vm->outputPool, &text, &f->functionName, &error) != R_SUCCESS) {
+          explode("text copy");
+        }
+      } else {
+        wchar_t *name = L"<root>\0";
+        if (tryTextMake(vm->outputPool, name, &f->functionName, wcslen(name), &error) != R_SUCCESS) {
+          explode("text make");
+        }
       }
-    }
-    else {
-      wchar_t *name = L"<root>\0";
-      if (tryTextMake(vm->outputPool, name, &f->functionName, wcslen(name), &error) != R_SUCCESS) {
-        explode("text make");
+
+      if (hasSourceTable(current)) {
+        f->unknownSource = false;
+        getFileName(current, &f->fileName);
+        getLineNumber(current, &f->lineNumber);
       }
-    }
 
-    if (hasSourceTable(current)) {
-      f->unknownSource = false;
-      getFileName(current, &f->fileName);
-      getLineNumber(current, &f->lineNumber);
-    }
-
-    if (hasParent(current)) {
-      current = getParent(current);
+      if (hasParent(current)) {
+        current = getParent(current);
+      }
     }
   }
 
@@ -1505,7 +1507,7 @@ void raisedInitContents(Raised *r) {
 // TODO: exceptions should go on the heap as values
 void handleRaise(VM *vm, Raised *r) {
   VMException *ex = exceptionMake(vm, r);
-  setException(vm->current, ex);
+  setException(vm, ex);
   longjmp(vm->jumpBuf, 1);
 }
 
@@ -2586,30 +2588,27 @@ void frameEval(VM *vm) {
   uint8_t inst;
   Eval eval;
 
-  if (!setjmp(vm->jumpBuf)) {
+  while (true) {
 
-    while (true) {
-
-      if (hasResult(vm->current)) {
-        if (!hasParent(vm->current)) {
-          break;
-        }
-        else {
-          Value result = getResult(vm->current);
-          Frame_t parent = getParent(vm->current);
-          pushOperand(parent, result);
-          popFrame(vm);
-        }
+    if (hasResult(vm->current)) {
+      if (!hasParent(vm->current)) {
+        break;
       }
-
-      inst = readInstruction(vm->current);
-      eval = vm->instTable.instructions[inst].eval;
-      if (eval == NULL) {
-        explode("instruction unimplemented: %s (%u)", getInstName(&vm->instTable, inst), inst);
+      else {
+        Value result = getResult(vm->current);
+        Frame_t parent = getParent(vm->current);
+        pushOperand(parent, result);
+        popFrame(vm);
       }
-
-      eval(vm, vm->current);
     }
+
+    inst = readInstruction(vm->current);
+    eval = vm->instTable.instructions[inst].eval;
+    if (eval == NULL) {
+      explode("instruction unimplemented: %s (%u)", getInstName(&vm->instTable, inst), inst);
+    }
+
+    eval(vm, vm->current);
   }
 }
 
@@ -2784,9 +2783,6 @@ typedef struct Frame {
 
   ExceptionHandler handler;
   bool handlerSet;
-
-  VMException *exception;
-  bool exceptionSet;
 } Frame;
 
 void handlerInitContents(ExceptionHandler *h) {
@@ -2805,8 +2801,6 @@ void frameInitContents(Frame *frame) {
   frame->pc = 0;
   handlerInitContents(&frame->handler);
   frame->handlerSet = false;
-  frame->exception = NULL;
-  frame->exceptionSet = false;
 
   frame->opStackUsedDepth = 0;
   frame->opStackMaxDepth = 0;
@@ -3012,20 +3006,19 @@ bool getFileName(Frame_t frame, Text *fileName) {
   return false;
 }
 
-bool hasException(Frame_t frame) {
-  return frame->exceptionSet;
+bool hasException(VM *vm) {
+  return vm->exception != NULL;
 }
 
-void setException(Frame_t frame, VMException *e) {
-  frame->exception = e;
-  frame->exceptionSet = true;
+void setException(VM *vm, VMException *e) {
+  vm->exception = e;
 }
 
-VMException* getException(Frame_t frame) {
-  if (!frame->exceptionSet) {
+VMException* getException(VM *vm) {
+  if (vm->exception == NULL) {
     explode("handler not set");
   }
-  return frame->exception;
+  return vm->exception;
 }
 
 Frame_t pushFrame(VM *vm, Value newFn) {
@@ -3154,19 +3147,17 @@ void _vmEval(VM *vm, CodeUnit *codeUnit, Value *result, VMException *exception, 
   c.constants = codeUnit->constants;
   c.code = codeUnit->code;
 
-  Value fnRef = fnHydrate(vm, &c);
-  Frame_t frame = pushFrame(vm, fnRef);
-  frameEval(vm);
-
-  if (frame->exceptionSet) {
-    *exceptionThrown = true;
-    *exception = *frame->exception;
+  if (!setjmp(vm->jumpBuf)) {
+    Value fnRef = fnHydrate(vm, &c);
+    Frame_t frame = pushFrame(vm, fnRef);
+    frameEval(vm);
+    *result = frame->result;
+    popFrame(vm);
   }
   else {
-    *result = frame->result;
+    *exceptionThrown = true;
+    *exception = *vm->exception;
   }
-
-  popFrame(vm);
 }
 
 RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, VMEvalResult *result, Error *error) {
@@ -3841,6 +3832,7 @@ void vmInitContents(VM *vm, VMConfig config) {
   initCFns(vm);
   vm->current = NULL;
   vm->outputPool = NULL;
+  vm->exception = NULL;
 }
 
 void vmFreeContents(VM *vm) {
