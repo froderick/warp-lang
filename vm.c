@@ -3829,10 +3829,10 @@ void vmInitContents(VM *vm, VMConfig config) {
   stackInitContents(&vm->stack, 1024 * 1000);
   tableInit(&vm->symbolTable);
   tableInit(&vm->keywordTable);
-  initCFns(vm);
   vm->current = NULL;
   vm->outputPool = NULL;
   vm->exception = NULL;
+  initCFns(vm);
 }
 
 void vmFreeContents(VM *vm) {
