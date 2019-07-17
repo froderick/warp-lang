@@ -1224,11 +1224,43 @@ RetVal tryMapAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error)
   RetVal ret;
 
   if (expr->type != N_MAP) {
-    throwInternalError(error, "the contents of a macro argument must be a list: %u", expr->type);
+    explode("not a map");
   }
 
+  Form *fnCallable = NULL;
+  {
+    wchar_t hashMap[] = L"hash-map";
+    tryPalloc(ctx->pool, fnCallable, sizeof(Form), "hashmap callable");
+    formInitContents(fnCallable);
+    fnCallable->type = F_VAR_REF;
+    throws(tryTextMake(ctx->pool, hashMap, &fnCallable->varRef.name, wcslen(hashMap), error));
+  }
 
+  Forms args;
+  formsInitContents(&args);
+  args.numForms = expr->map.length * 2;
+  tryPalloc(ctx->pool, args.forms, sizeof(Form) * args.numForms, "Form array");
 
+  MapElement *argExpr = expr->map.head;
+  for (int i=0; argExpr != NULL; i+=2) {
+
+    Form *keyArg = args.forms + i;
+    formInitContents(keyArg);
+    throws(tryFormAnalyzeContents(ctx, argExpr->key, keyArg, error));
+
+    Form *valArg = args.forms + i + 1;
+    formInitContents(valArg);
+    throws(tryFormAnalyzeContents(ctx, argExpr->value, valArg, error));
+
+    argExpr = argExpr->next;
+  }
+
+  form->type = F_FN_CALL;
+  fnCallInitContents(&form->fnCall);
+  form->fnCall.fnCallable = fnCallable;
+  form->fnCall.args = args;
+
+  return R_SUCCESS;
 
   failure:
   return ret;
@@ -1249,10 +1281,14 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
     case N_KEYWORD:
     case N_BOOLEAN:
     case N_NIL:
-    case N_VEC:
-    case N_MAP: {
+    case N_VEC: {
       form->type = F_CONST;
       throws(tryConstantAnalyze(ctx->pool, expr, &form->constant, error));
+      break;
+    }
+
+    case N_MAP: {
+      throws(tryMapAnalyze(ctx, expr, form, error));
       break;
     }
 
