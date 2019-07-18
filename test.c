@@ -830,13 +830,22 @@ START_TEST(repl)
     assertEval(L"(= '(1 (2 3) 4) '(1 (4 5) 7))", L"false");
     assertEval(L"(= '(1 (2 3) 4) (list 1 (list 2 3) 4))", L"true");
 
-//    assertEval(L"(hash-map)", L"{}");
-//    assertEval(L"(assoc (hash-map) :x 'y)", L"{:x y}");
-//    assertEval(L"(do "
-//               "   (def n (hash-map))"
-//               "   (assoc n :x 'y)"
-//               "   (get n :x))", L"y");
+    assertEval(L"(hash-map)", L"{}");
+    assertEval(L"{}", L"{}");
+    assertEval(L"(set {} :x 'y)", L"{:x y}");
+    assertEval(L"(do "
+               "   (def n {})"
+               "   (set n :x 'y)"
+               "   (get n :x))", L"y");
+    assertEval(L"(:test {:test \"woah\"})", L"\"woah\"");
 
+    assertEval(L"(vector)", L"[]");
+    assertEval(L"[]", L"[]");
+    assertEval(L"(set [0 0 0] 0 1)", L"[1 0 0]");
+    assertEval(L"(do "
+               "   (def n [0 0])"
+               "   (set n 0 'y)"
+               "   (get n 0))", L"y");
   }
 END_TEST
 
