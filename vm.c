@@ -1685,9 +1685,13 @@ void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invo
 }
 
 void invokeCFn(VM *vm, Frame_t frame, Value cFn) {
-  CFn *fn = deref(&vm->gc, cFn);
-  preprocessArguments(vm, frame, fn->numArgs, fn->usesVarArgs);
-  fn->ptr(vm, frame);
+  CFn *protectedFn = deref(&vm->gc, cFn);
+  pushFrameRoot(vm, (Value*)&protectedFn);
+
+  preprocessArguments(vm, frame, protectedFn->numArgs, protectedFn->usesVarArgs);
+  protectedFn->ptr(vm, frame);
+
+  popFrameRoot(vm);
 }
 
 Value mapLookup(VM *vm, Map *map, Value key);
@@ -2245,18 +2249,15 @@ void relocateChildrenArray(VM_t vm, void *obj) {
 
 void relocateChildrenMap(VM_t vm, void *obj) {
   Map *map = obj;
-  Array *array = deref(&vm->gc, map->entries);
-  Value *elements = arrayElements(array);
-  uint64_t size = objectHeaderSize(array->header);
-  for (uint64_t i=0; i<size; i++) {
-    relocate(vm, &elements[i]);
-  }
+  relocate(vm, &map->entries);
 }
 
 void relocateChildrenMapEntry(VM_t vm, void *obj) {
   MapEntry *mapEntry = obj;
-  relocate(vm, &mapEntry->key);
-  relocate(vm, &mapEntry->value);
+  if (mapEntry->used) {
+    relocate(vm, &mapEntry->key);
+    relocate(vm, &mapEntry->value);
+  }
 }
 
 void prnNil(VM_t vm, Value result, Expr *expr) {
