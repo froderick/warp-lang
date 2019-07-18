@@ -1737,14 +1737,25 @@ void invokeDynEval(VM *vm, Frame_t frame) {
 // (8)              | (objectref, args... -> ...)
 void invokeDynTailEval(VM *vm, Frame_t frame) {
   Value pop = popOperand(frame);
-  if (valueType(pop) == VT_CFN) {
-    invokeCFn(vm, frame, pop);
-  }
-  else {
-    Invocable invocable;
-    makeInvocable(vm, pop, &invocable);
-    replaceFrame(vm, (Value)invocable.fn);
-    invokePopulateLocals(vm, frame, frame, &invocable);
+  switch (valueType(pop)) {
+    case VT_CFN:
+      invokeCFn(vm, frame, pop);
+      break;
+    case VT_KEYWORD: {
+      Value key = pop;
+      preprocessArguments(vm, frame, 1, false);
+      Value coll = popOperand(frame);
+      Map *m = deref(&vm->gc, coll);
+      Value result = mapLookup(vm, m, key);
+      pushOperand(frame, result);
+      break;
+    }
+    default: {
+      Invocable invocable;
+      makeInvocable(vm, pop, &invocable);
+      replaceFrame(vm, (Value) invocable.fn);
+      invokePopulateLocals(vm, frame, frame, &invocable);
+    }
   }
 }
 
