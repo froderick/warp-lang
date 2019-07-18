@@ -3832,6 +3832,7 @@ void vmInitContents(VM *vm, VMConfig config) {
   vm->current = NULL;
   vm->outputPool = NULL;
   vm->exception = NULL;
+  vm->noFrameRoots = NULL;
   initCFns(vm);
 }
 
