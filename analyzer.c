@@ -1220,6 +1220,48 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *err
   return ret;
 }
 
+RetVal tryVecAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error) {
+  RetVal ret;
+
+  if (expr->type != N_VEC) {
+    explode("not a vec");
+  }
+
+  Form *fnCallable = NULL;
+  {
+    wchar_t hashMap[] = L"vector";
+    tryPalloc(ctx->pool, fnCallable, sizeof(Form), "vector callable");
+    formInitContents(fnCallable);
+    fnCallable->type = F_VAR_REF;
+    throws(tryTextMake(ctx->pool, hashMap, &fnCallable->varRef.name, wcslen(hashMap), error));
+  }
+
+  Forms args;
+  formsInitContents(&args);
+  args.numForms = expr->vec.length;
+  tryPalloc(ctx->pool, args.forms, sizeof(Form) * args.numForms, "Form array");
+
+  ListElement *argExpr = expr->list.head;
+  for (int i=0; argExpr != NULL; i++) {
+
+    Form *arg = args.forms + i;
+    formInitContents(arg);
+    throws(tryFormAnalyzeContents(ctx, argExpr->expr, arg, error));
+
+    argExpr = argExpr->next;
+  }
+
+  form->type = F_FN_CALL;
+  fnCallInitContents(&form->fnCall);
+  form->fnCall.fnCallable = fnCallable;
+  form->fnCall.args = args;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 RetVal tryMapAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error) {
   RetVal ret;
 
@@ -1280,10 +1322,14 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
     case N_NUMBER:
     case N_KEYWORD:
     case N_BOOLEAN:
-    case N_NIL:
-    case N_VEC: {
+    case N_NIL: {
       form->type = F_CONST;
       throws(tryConstantAnalyze(ctx->pool, expr, &form->constant, error));
+      break;
+    }
+
+    case N_VEC: {
+      throws(tryVecAnalyze(ctx, expr, form, error));
       break;
     }
 

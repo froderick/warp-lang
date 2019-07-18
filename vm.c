@@ -3741,6 +3741,52 @@ void hashMapBuiltin(VM *vm, Frame_t frame) {
   pushOperand(frame, result);
 }
 
+void vectorBuiltin(VM *vm, Frame_t frame) {
+
+  Value params = popOperand(frame);
+
+  Value result;
+  switch (valueType(params)) {
+
+    case VT_NIL:
+      result = (Value)makeArray(vm, 0);
+      break;
+
+    case VT_LIST: {
+
+      uint64_t length = 0;
+      {
+        Value seq = params;
+        while (seq != W_NIL_VALUE) {
+          Cons *cons = deref(&vm->gc, seq);
+          length++;
+          seq = cons->next;
+        }
+      }
+
+      Value protectedParams = params;
+      pushFrameRoot(vm, &protectedParams);
+
+      Array *array = makeArray(vm, length);
+
+      for (uint64_t i=0; protectedParams != W_NIL_VALUE; i++) {
+        Cons *cons = deref(&vm->gc, protectedParams);
+        arrayElements(array)[i] = cons->value;
+        protectedParams = cons->next;
+      }
+
+      popFrameRoot(vm); // protectedParams
+
+      result = (Value)array;
+      break;
+    }
+    default:
+    explode("var-args, should have been a list");
+  }
+
+  pushOperand(frame, result);
+}
+
 void cFnInitContents(CFn *fn) {
   fn->header = 0;
   fn->nameLength = 0;
@@ -3815,6 +3861,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"get", 2, false, getBuiltin);
   defineCFn(vm, L"set", 3, false, setBuiltin);
   defineCFn(vm, L"hash-map", 1, true, hashMapBuiltin);
+  defineCFn(vm, L"vector", 1, true, vectorBuiltin);
 }
 
 void vmConfigInitContents(VMConfig *config) {
