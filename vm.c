@@ -177,7 +177,6 @@ typedef struct Fn {
   bool hasName;
   uint64_t nameLength;
   size_t nameOffset;
-  uint16_t bindingSlotIndex;
 
   uint16_t numCaptures;
   uint16_t numArgs;
@@ -888,7 +887,6 @@ void fnInitContents(Fn *fn) {
   fn->hasName = false;
   fn->nameLength = 0;
   fn->nameOffset = 0;
-  fn->bindingSlotIndex = 0;
 
   fn->numCaptures = 0;
   fn->numArgs = 0;
@@ -940,8 +938,6 @@ Value fnHydrate(VM *vm, FnConstant *fnConst) {
 
       memcpy(fnName(fn), fnConst->name.value, copySize);
       fnName(fn)[fn->nameLength] = L'\0';
-
-      fn->bindingSlotIndex = fnConst->bindingSlotIndex;
     }
 
     fn->numCaptures = fnConst->numCaptures;
@@ -1678,7 +1674,8 @@ void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invo
   }
 
   if (invocable->fn->hasName) {
-    setLocal(child, invocable->fn->bindingSlotIndex, invocable->ref);
+    uint16_t fnLocalIndex = invocable->fn->numArgs + invocable->fn->numCaptures;
+    setLocal(child, fnLocalIndex, invocable->ref);
   }
 
   unprotectInvocable(vm, invocable);
@@ -3974,7 +3971,6 @@ void constantMetaInit(ConstantMeta *c) {
 void constantFnInitContents(FnConstant *fnConst) {
   fnConst->hasName = 0;
   textInitContents(&fnConst->name);
-  fnConst->bindingSlotIndex = 0;
   fnConst->numArgs = 0;
   fnConst->usesVarArgs = false;
   fnConst->numConstants = 0;

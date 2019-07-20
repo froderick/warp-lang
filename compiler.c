@@ -381,8 +381,6 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   textInitContents(&fnConst.name);
   if (fnConst.hasName) {
     throws(tryTextCopy(output.pool, &form->fn.name, &fnConst.name, error));
-    uint16_t slotIndex = slotsTable[form->fn.bindingIndex];
-    fnConst.bindingSlotIndex = slotIndex;
   }
   fnConst.numArgs = form->fn.numArgs;
   fnConst.usesVarArgs = form->fn.usesVarArgs;
