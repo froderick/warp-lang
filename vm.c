@@ -2883,7 +2883,7 @@ Value* getOperandRef(Frame *frame, uint64_t opIndex) {
 }
 
 void pushOperand(Frame *frame, Value value) {
-  if (frame->opStackMaxDepth == frame->opStackUsedDepth + 1) {
+  if (frame->opStackMaxDepth == frame->opStackUsedDepth) {
     explode("cannot allocate op stack greater than max %" PRIu64, frame->opStackMaxDepth);
   }
   frame->opStack[frame->opStackUsedDepth] = value;
