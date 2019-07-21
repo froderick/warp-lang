@@ -178,7 +178,6 @@ typedef struct Fn {
   uint64_t nameLength;
   size_t nameOffset;
 
-  uint16_t numCaptures;
   uint16_t numArgs;
   bool usesVarArgs;
 
@@ -888,7 +887,6 @@ void fnInitContents(Fn *fn) {
   fn->nameLength = 0;
   fn->nameOffset = 0;
 
-  fn->numCaptures = 0;
   fn->numArgs = 0;
   fn->usesVarArgs = false;
   fn->numConstants = 0;
@@ -940,7 +938,6 @@ Value fnHydrate(VM *vm, FnConstant *fnConst) {
       fnName(fn)[fn->nameLength] = L'\0';
     }
 
-    fn->numCaptures = fnConst->numCaptures;
     fn->numArgs = fnConst->numArgs;
     fn->usesVarArgs = fnConst->usesVarArgs;
 
@@ -1647,26 +1644,19 @@ void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invo
     setLocal(child, idx, arg);
   }
 
-  if (invocable->fn->numCaptures > 0) {
+  uint16_t numCaptures = 0;
 
-    if (!invocable->closure) {
-      explode("cannot invoke this fn without a closure, it captures variables: %u",
-          invocable->fn->numCaptures);
-    }
-    if (invocable->closure->numCaptures < invocable->fn->numCaptures) {
-      explode("closure does not have enough captured variables: %u",
-          invocable->closure->numCaptures);
-    }
-
+  if (invocable->closure != NULL) {
+    numCaptures = invocable->closure->numCaptures;
     uint16_t nextLocalIdx = invocable->fn->numArgs;
-    for (uint16_t i=0; i<invocable->fn->numCaptures; i++) {
+    for (uint16_t i=0; i<invocable->closure->numCaptures; i++) {
       setLocal(child, nextLocalIdx, closureCaptures(invocable->closure)[i]);
       nextLocalIdx = nextLocalIdx + 1;
     }
   }
 
   if (invocable->fn->hasName) {
-    uint16_t fnLocalIndex = invocable->fn->numArgs + invocable->fn->numCaptures;
+    uint16_t fnLocalIndex = invocable->fn->numArgs + numCaptures;
     setLocal(child, fnLocalIndex, invocable->ref);
   }
 
@@ -1894,14 +1884,16 @@ void loadClosureEval(VM *vm, Frame_t frame) {
   }
   pushFrameRoot(vm, (Value*)&protectedFn);
 
-  uint64_t capturesSize = protectedFn->numCaptures * sizeof(Value);
+  uint16_t numCaptures = readIndex(frame);
+
+  uint64_t capturesSize = numCaptures * sizeof(Value);
   uint64_t clSize = padAllocSize(sizeof(Closure) + capturesSize);
   Closure *closure = alloc(vm, clSize);
 
   closureInitContents(closure);
   closure->header = makeObjectHeader(W_CLOSURE_TYPE, clSize);
   closure->fn = (Value)protectedFn;
-  closure->numCaptures = protectedFn->numCaptures;
+  closure->numCaptures = numCaptures;
 
   closure->capturesOffset = sizeof(Closure);
 
@@ -3975,7 +3967,6 @@ void constantFnInitContents(FnConstant *fnConst) {
   fnConst->numArgs = 0;
   fnConst->usesVarArgs = false;
   fnConst->numConstants = 0;
-  fnConst->numCaptures = 0;
   fnConst->constants = NULL;
   codeInitContents(&fnConst->code);
 }

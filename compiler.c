@@ -385,7 +385,6 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   fnConst.numArgs = form->fn.numArgs;
   fnConst.usesVarArgs = form->fn.usesVarArgs;
   fnConst.numConstants = fnConstants.numUsed;
-  fnConst.numCaptures = form->fn.numCaptures;
   fnConst.constants = fnConstants.constants;
   fnConst.code.numLocals = form->fn.table.usedSpace;
   fnConst.code.maxOperandStackSize = 100; // TODO: need to compute this
@@ -419,7 +418,6 @@ RetVal tryCompileFn(Form *form, Output output, Error *error) {
   throws(tryCompileFnConstant(form, output, error));
   uint16_t fnConstIndex = output.constants->numUsed - 1;
 
-  uint8_t loadInst;
   if (form->fn.isClosure) {
 
     for (uint16_t i=0; i<form->fn.table.usedSpace; i++) {
@@ -431,14 +429,19 @@ RetVal tryCompileFn(Form *form, Output output, Error *error) {
       }
     }
 
-    loadInst = I_LOAD_CLOSURE;
+    uint8_t loadInst = I_LOAD_CLOSURE;
+    uint8_t code[] = {
+        loadInst,
+        fnConstIndex >> 8, fnConstIndex & 0xFF,
+        form->fn.numCaptures >> 8, form->fn.numCaptures & 0xFF
+    };
+    throws(tryCodeAppend(output, sizeof(code), code, error));
   }
   else {
-    loadInst = I_LOAD_CONST;
+    uint8_t loadInst = I_LOAD_CONST;
+    uint8_t code[] = { loadInst, fnConstIndex >> 8, fnConstIndex & 0xFF };
+    throws(tryCodeAppend(output, sizeof(code), code, error));
   }
-
-  uint8_t code[] = { loadInst, fnConstIndex >> 8, fnConstIndex & 0xFF };
-  throws(tryCodeAppend(output, sizeof(code), code, error));
 
   return R_SUCCESS;
 

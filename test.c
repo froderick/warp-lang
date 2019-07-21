@@ -599,7 +599,6 @@ START_TEST(vmBasic) {
     fn.constants[0].type = CT_INT;
     fn.constants[0].integer = 100;
     fn.numArgs = 1;
-    fn.numCaptures = 0;
     fn.code.numLocals = 1;
     fn.code.maxOperandStackSize = 100;
     fn.code.codeLength = sizeof(fnCode);
