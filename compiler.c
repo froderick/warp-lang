@@ -82,7 +82,7 @@ RetVal tryCodeAppend(Output output, uint16_t numAdded, uint8_t *added, Error *er
     tryPalloc(output.pool, codes->codes, len * sizeof(uint8_t), "byte array");
     codes->numAllocated = len;
   }
-  else if (codes->numUsed + numAdded < codes->numAllocated) {
+  else if (codes->numUsed + numAdded > codes->numAllocated) {
     uint16_t newAllocatedLength = (codes->numAllocated + numAdded) * 2;
 
     uint8_t *replacement = NULL;
