@@ -1593,15 +1593,7 @@ void unprotectInvocable(VM *vm, Invocable *invocable) {
   }
 }
 
-void preprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarArgs) {
-
-  Value numArgsSuppliedValue = popOperand(parent);
-  if (valueType(numArgsSuppliedValue) != VT_UINT) {
-    explode("first op stack value must be number of arguments supplied: %s",
-        getValueTypeName(vm, valueType(numArgsSuppliedValue)));
-  }
-
-  uint64_t numArgsSupplied = unwrapUint(numArgsSuppliedValue);
+void preprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarArgs, uint64_t numArgsSupplied) {
 
   if (!usesVarArgs) {
     if (numArgsSupplied != numArgs) {
@@ -1642,11 +1634,11 @@ void preprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarA
   }
 }
 
-void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invocable) {
+void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invocable, uint16_t numArgsSupplied) {
 
   protectInvocable(vm, invocable);
 
-  preprocessArguments(vm, parent, invocable->fn->numArgs, invocable->fn->usesVarArgs);
+  preprocessArguments(vm, parent, invocable->fn->numArgs, invocable->fn->usesVarArgs, numArgsSupplied);
 
   for (uint16_t i = 0; i < invocable->fn->numArgs; i++) {
     Value arg = popOperand(parent);
@@ -1681,11 +1673,11 @@ void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invo
   unprotectInvocable(vm, invocable);
 }
 
-void invokeCFn(VM *vm, Frame_t frame, Value cFn) {
+void invokeCFn(VM *vm, Frame_t frame, Value cFn, uint16_t numArgsSupplied) {
   CFn *protectedFn = deref(&vm->gc, cFn);
   pushFrameRoot(vm, (Value*)&protectedFn);
 
-  preprocessArguments(vm, frame, protectedFn->numArgs, protectedFn->usesVarArgs);
+  preprocessArguments(vm, frame, protectedFn->numArgs, protectedFn->usesVarArgs, numArgsSupplied);
   protectedFn->ptr(vm, frame);
 
   popFrameRoot(vm);
@@ -1695,14 +1687,15 @@ Value mapLookup(VM *vm, Map *map, Value key);
 
 // (8)              | (objectref, args... -> ...)
 void invokeDynEval(VM *vm, Frame_t frame) {
+  uint16_t numArgsSupplied = readIndex(frame);
   Value pop = popOperand(frame);
   switch (valueType(pop)) {
     case VT_CFN:
-      invokeCFn(vm, frame, pop);
+      invokeCFn(vm, frame, pop, numArgsSupplied);
       break;
     case VT_KEYWORD: {
       Value key = pop;
-      preprocessArguments(vm, frame, 1, false);
+      preprocessArguments(vm, frame, 1, false, numArgsSupplied);
       Value coll = popOperand(frame);
       Map *m = deref(&vm->gc, coll);
       Value result = mapLookup(vm, m, key);
@@ -1716,7 +1709,7 @@ void invokeDynEval(VM *vm, Frame_t frame) {
       makeInvocable(vm, pop, &invocable);
       frame = pushFrame(vm, (Value) invocable.fn);
       parent = getParent(frame);
-      invokePopulateLocals(vm, parent, frame, &invocable);
+      invokePopulateLocals(vm, parent, frame, &invocable, numArgsSupplied);
     }
   }
 }
@@ -1733,14 +1726,15 @@ void invokeDynEval(VM *vm, Frame_t frame) {
 
 // (8)              | (objectref, args... -> ...)
 void invokeDynTailEval(VM *vm, Frame_t frame) {
+  uint16_t numArgsSupplied = readIndex(frame);
   Value pop = popOperand(frame);
   switch (valueType(pop)) {
     case VT_CFN:
-      invokeCFn(vm, frame, pop);
+      invokeCFn(vm, frame, pop, numArgsSupplied);
       break;
     case VT_KEYWORD: {
       Value key = pop;
-      preprocessArguments(vm, frame, 1, false);
+      preprocessArguments(vm, frame, 1, false, numArgsSupplied);
       Value coll = popOperand(frame);
       Map *m = deref(&vm->gc, coll);
       Value result = mapLookup(vm, m, key);
@@ -1751,7 +1745,7 @@ void invokeDynTailEval(VM *vm, Frame_t frame) {
       Invocable invocable;
       makeInvocable(vm, pop, &invocable);
       replaceFrame(vm, (Value) invocable.fn);
-      invokePopulateLocals(vm, frame, frame, &invocable);
+      invokePopulateLocals(vm, frame, frame, &invocable, numArgsSupplied);
     }
   }
 }
@@ -2125,8 +2119,8 @@ InstTable instTableCreate() {
       [I_LOAD_CONST]       = { .name = "I_LOAD_CONST",      .print = printInstAndIndex,   .eval = loadConstEval },
       [I_LOAD_LOCAL]       = { .name = "I_LOAD_LOCAL",      .print = printInstAndIndex,   .eval = loadLocalEval },
       [I_STORE_LOCAL]      = { .name = "I_STORE_LOCAL",     .print = printInstAndIndex,   .eval = storeLocalEval },
-      [I_INVOKE_DYN]       = { .name = "I_INVOKE_DYN",      .print = printInst,           .eval = invokeDynEval },
-      [I_INVOKE_DYN_TAIL]  = { .name = "I_INVOKE_DYN_TAIL", .print = printInst,           .eval = invokeDynTailEval },
+      [I_INVOKE_DYN]       = { .name = "I_INVOKE_DYN",      .print = printInstAndIndex,   .eval = invokeDynEval },
+      [I_INVOKE_DYN_TAIL]  = { .name = "I_INVOKE_DYN_TAIL", .print = printInstAndIndex,   .eval = invokeDynTailEval },
       [I_RET]              = { .name = "I_RET",             .print = printInst,           .eval = retEval },
       [I_CMP]              = { .name = "I_CMP",             .print = printInst,           .eval = cmpEval },
       [I_JMP]              = { .name = "I_JMP",             .print = printInstAndIndex,   .eval = jmpEval },

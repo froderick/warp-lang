@@ -836,14 +836,6 @@ RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
     throws(tryCompile(&form->fnCall.args.forms[i], output, error));
   }
 
-  // push the number of arguments
-  {
-    uint16_t index;
-    throws(uintConstantGetIndex(form->fnCall.args.numForms, output, &index, error));
-    uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
-    throws(tryCodeAppend(output, sizeof(code), code, error));
-  }
-
   // push the callable
   throws(tryCompile(form->fnCall.fnCallable, output, error));
 
@@ -856,7 +848,8 @@ RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
   else {
     inst = I_INVOKE_DYN;
   }
-  uint8_t code[] = { inst };
+  uint16_t numForms = form->fnCall.args.numForms;
+  uint8_t code[] = { inst, numForms >> 8, numForms & 0xFF };
   throws(tryCodeAppend(output, sizeof(code), code, error));
 
   return R_SUCCESS;
