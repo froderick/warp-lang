@@ -3086,8 +3086,15 @@ Frame* replaceFrame(VM *vm, Value newFn) {
   }
 
   if (fn->maxOperandStackSize > frame->opStackMaxDepth) {
-    frame->opStackMaxDepth = fn->maxOperandStackSize;
-    frame->opStack = stackAllocate(stack, sizeof(Value) * frame->opStackMaxDepth, "opStack");
+
+    uint16_t oldSize = frame->opStackMaxDepth;
+    uint16_t newSize = fn->maxOperandStackSize;
+
+    Value* newOpStack = stackAllocate(stack, sizeof(Value) * newSize, "opStack");
+    memcpy(newOpStack, frame->opStack, oldSize * sizeof(Value));
+
+    frame->opStackMaxDepth = newSize;
+    frame->opStack = newOpStack;
   }
 
   frame->fnRef = newFn;
