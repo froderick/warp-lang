@@ -339,6 +339,107 @@ RetVal trySlotsTableBuild(Pool_t pool, BindingTable *bindingTable, uint16_t **pt
     return ret;
 }
 
+uint64_t computeOpStackSize(uint8_t *code, uint16_t length) {
+
+  uint16_t maxOpStack = 0;
+  uint16_t currentOpStack = 0;
+
+  void *end = (void*)code + (length * sizeof(uint8_t));
+
+  while ( ((void*)code) < end) {
+    uint8_t inst = *code;
+    switch (inst) {
+      case I_LOAD_CONST:
+      case I_LOAD_LOCAL:
+        code += 3;
+        currentOpStack++;
+        break;
+      case I_STORE_LOCAL:
+        code += 3;
+        currentOpStack--;
+        break;
+      case I_INVOKE_DYN: {
+        code++;
+        uint16_t numArgs = (code[0] << 8) | code[1];
+        currentOpStack -= numArgs;
+        code += 2;
+        break;
+      }
+      case I_INVOKE_DYN_TAIL: {
+        code++;
+        uint16_t numArgs = (code[0] << 8) | code[1];
+        currentOpStack -= numArgs;
+        code += 2;
+        // history ends for stack
+        break;
+      }
+      case I_RET:
+        code++;
+        currentOpStack--;
+        break;
+      case I_CMP:
+        code++;
+        currentOpStack--;
+        break;
+      case I_JMP:
+        code += 3;
+        break;
+      case I_JMP_IF:
+        code += 3;
+        currentOpStack--;
+        break;
+      case I_JMP_IF_NOT:
+        code += 3;
+        currentOpStack--;
+        break;
+      case I_ADD:
+        code++;
+        currentOpStack--;
+        break;
+      case I_SUB:
+        code++;
+        currentOpStack--;
+        break;
+      case I_DEF_VAR:
+        code += 3;
+        currentOpStack -= 2;
+        break;
+      case I_LOAD_VAR:
+        code += 3;
+        currentOpStack++;
+        break;
+      case I_LOAD_CLOSURE:
+        code += 3;
+        uint16_t numCaptured = (code[0] << 8) | code[1];
+        code += 2;
+        currentOpStack -= numCaptured;
+        break;
+      case I_SWAP:
+        code++;
+        break;
+      case I_SET_HANDLER:
+        code++;
+        currentOpStack -= 2;
+        break;
+      case I_CLEAR_HANDLER:
+        code++;
+        break;
+      case I_CONS:
+        code++;
+        currentOpStack--;
+        break;
+      default:
+        explode("oops");
+    }
+
+    if (currentOpStack > maxOpStack) {
+      maxOpStack = currentOpStack;
+    }
+  }
+
+  return maxOpStack;
+}
+
 RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   RetVal ret;
 
@@ -387,7 +488,7 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   fnConst.numConstants = fnConstants.numUsed;
   fnConst.constants = fnConstants.constants;
   fnConst.code.numLocals = form->fn.table.usedSpace;
-  fnConst.code.maxOperandStackSize = 100; // TODO: need to compute this
+  fnConst.code.maxOperandStackSize = computeOpStackSize(fnCodes.codes, fnCodes.numUsed);
   fnConst.code.codeLength = fnCodes.numUsed;
   fnConst.code.code = fnCodes.codes;
 
@@ -1024,8 +1125,7 @@ RetVal tryCompileTopLevel(Pool_t pool, FormRoot *root, CodeUnit *codeUnit, Error
     table->lineNumbers = lineNumbers.numbers;
   }
 
-  // TODO: we don't populate these yet
-  codeUnit->code.maxOperandStackSize = 100;
+  codeUnit->code.maxOperandStackSize = computeOpStackSize(codeUnit->code.code, codeUnit->code.codeLength);
 
   return R_SUCCESS;
   failure:
