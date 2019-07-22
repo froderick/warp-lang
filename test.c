@@ -370,7 +370,7 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.constants[1].integer, 2);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 0);
-      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 100);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 2);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t expectedCode[] = {
@@ -392,11 +392,11 @@ START_TEST(compilerBasic) {
 
       // verify fn
 
-      FnConstant fn = codeUnit.constants[3].function;
+      FnConstant fn = codeUnit.constants[2].function;
       ck_assert_int_eq(fn.numArgs, 2);
       ck_assert_int_eq(fn.numConstants, 0);
       ck_assert_int_eq(fn.code.numLocals, 2);
-      ck_assert_int_eq(fn.code.maxOperandStackSize, 100);
+      ck_assert_int_eq(fn.code.maxOperandStackSize, 2);
       ck_assert_int_eq(fn.code.hasSourceTable, false);
 
       uint8_t fnCode[] = {
@@ -411,24 +411,21 @@ START_TEST(compilerBasic) {
 
       // verify fnCall
 
-      ck_assert_int_eq(codeUnit.numConstants, 4);
+      ck_assert_int_eq(codeUnit.numConstants, 3);
       ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
       ck_assert_int_eq(codeUnit.constants[0].integer, 4);
       ck_assert_int_eq(codeUnit.constants[1].type, CT_INT);
       ck_assert_int_eq(codeUnit.constants[1].integer, 5);
-      ck_assert_int_eq(codeUnit.constants[2].type, CT_INT);
-      ck_assert_int_eq(codeUnit.constants[2].integer, 2);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 0);
-      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 100);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 3);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t fnCallCode[] = {
           I_LOAD_CONST, 0, 0,
           I_LOAD_CONST, 0, 1,
           I_LOAD_CONST, 0, 2,
-          I_LOAD_CONST, 0, 3,
-          I_INVOKE_DYN,
+          I_INVOKE_DYN, 0, 2,
           I_RET,
       };
 
@@ -445,7 +442,7 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.constants[0].integer, 12);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 1);
-      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 100);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 1);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t expectedCode[] = {
@@ -476,7 +473,7 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.constants[1].integer, 100);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 3);
-      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 100);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 1);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t expectedCode[] = {
@@ -505,24 +502,21 @@ START_TEST(compilerBasic) {
 
       //printCodeUnit(&codeUnit);
 
-      ck_assert_int_eq(codeUnit.numConstants, 3);
+      ck_assert_int_eq(codeUnit.numConstants, 2);
       ck_assert_int_eq(codeUnit.constants[0].type, CT_FN);
       ck_assert_int_eq(codeUnit.constants[1].type, CT_INT);
       ck_assert_int_eq(codeUnit.constants[1].integer, 100);
-      ck_assert_int_eq(codeUnit.constants[2].type, CT_INT);
-      ck_assert_int_eq(codeUnit.constants[2].integer, 1);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 1);
-      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 100);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 2);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t expectedCode[] = {
           I_LOAD_CONST,  0, 0,
           I_STORE_LOCAL, 0, 0,
           I_LOAD_CONST,  0, 1,
-          I_LOAD_CONST,  0, 2,
           I_LOAD_LOCAL,  0, 0,
-          I_INVOKE_DYN,
+          I_INVOKE_DYN,  0, 1,
           I_RET,
       };
 
@@ -550,7 +544,7 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.constants[2].integer, 50);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 0);
-      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 100);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 3);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t expectedCode[] = {
@@ -607,22 +601,19 @@ START_TEST(vmBasic) {
 
     uint8_t code[] = {
         I_LOAD_CONST, 0, 0,
-        I_LOAD_CONST, 0, 2,
         I_LOAD_CONST, 0, 1,
-        I_INVOKE_DYN,
+        I_INVOKE_DYN, 0, 1,
         I_RET
     };
 
     CodeUnit unit;
     codeUnitInitContents(&unit);
-    unit.numConstants = 3;
+    unit.numConstants = 2;
     unit.constants = malloc(sizeof(Constant) * unit.numConstants);
     unit.constants[0].type = CT_INT;
     unit.constants[0].integer = 10;
     unit.constants[1].type = CT_FN;
     unit.constants[1].function = fn;
-    unit.constants[2].type = CT_INT;
-    unit.constants[2].integer = 1;
     unit.code.numLocals = 0;
     unit.code.maxOperandStackSize = 100;
     unit.code.codeLength = sizeof(code);
@@ -887,8 +878,8 @@ Suite * suite(void) {
   tcase_add_test(tc_core, parser);
   tcase_add_test(tc_core, exprPrn);
   tcase_add_test(tc_core, analyzer);
-//  tcase_add_test(tc_core, compilerBasic);
-//  tcase_add_test(tc_core, vmBasic);
+  tcase_add_test(tc_core, compilerBasic);
+  tcase_add_test(tc_core, vmBasic);
   tcase_add_test(tc_core, repl);
   tcase_add_test(tc_core, gc);
 
