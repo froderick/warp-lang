@@ -2122,7 +2122,7 @@ InstTable instTableCreate() {
       [I_SUB]              = { .name = "I_SUB",             .print = printInst,           .eval = subEval },
       [I_DEF_VAR]          = { .name = "I_DEF_VAR",         .print = printInstAndIndex,   .eval = defVarEval },
       [I_LOAD_VAR]         = { .name = "I_LOAD_VAR",        .print = printInstAndIndex,   .eval = loadVarEval },
-      [I_LOAD_CLOSURE]     = { .name = "I_LOAD_CLOSURE",    .print = printInstAndIndex,   .eval = loadClosureEval },
+      [I_LOAD_CLOSURE]     = { .name = "I_LOAD_CLOSURE",    .print = printInstAndIndex2x,   .eval = loadClosureEval },
       [I_SWAP]             = { .name = "I_SWAP",            .print = printInst,           .eval = swapEval },
       [I_SET_HANDLER]      = { .name = "I_SET_HANDLER",     .print = printInstAndIndex2x, .eval = setHandlerEval },
       [I_CLEAR_HANDLER]    = { .name = "I_CLEAR_HANDLER",   .print = printInst,           .eval = clearHandlerEval },
