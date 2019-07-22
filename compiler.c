@@ -402,7 +402,6 @@ uint64_t computeOpStackSize(uint8_t *code, uint16_t length) {
         break;
       case I_DEF_VAR:
         code += 3;
-        currentOpStack -= 2;
         break;
       case I_LOAD_VAR:
         code += 3;
@@ -412,6 +411,7 @@ uint64_t computeOpStackSize(uint8_t *code, uint16_t length) {
         code += 3;
         uint16_t numCaptured = (code[0] << 8) | code[1];
         code += 2;
+        currentOpStack++; // load
         currentOpStack -= numCaptured;
         break;
       case I_SWAP:
