@@ -1209,7 +1209,7 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *err
     return R_SUCCESS;
   }
   else if (output.type == RT_EXCEPTION) {
-    throws(tryExceptionPrintf(&output.exception, error));
+//    throws(tryExceptionPrintf(&output.exception, error));
     throwInternalError(error, "encountered exception while processing macro: %ls", macroName.value);
   }
   else {

@@ -203,10 +203,7 @@ typedef enum VMEvalResultType {
 
 typedef struct VMEvalResult {
   VMEvalResultType type;
-  union {
-    Expr result;
-    VMException exception;
-  };
+  Expr result;
 } VMEvalResult;
 
 void exceptionInitContents(VMException *e);

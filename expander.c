@@ -77,7 +77,7 @@ RetVal tryIsMacro(Expander *expander, Text sym, bool *isMacro, Error *error) {
     return R_SUCCESS;
   }
   else if (output.type == RT_EXCEPTION) {
-    throws(tryExceptionPrintf(&output.exception, error));
+//    throws(tryExceptionPrintf(&output.exception, error));
     throwInternalError(error, "encountered exception while processing macro: getmacro");
   }
   else {

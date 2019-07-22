@@ -376,7 +376,7 @@ typedef struct VM {
   Table keywordTable;
   Pool_t outputPool; // this is mutable, it changes on every eval request
   jmp_buf jumpBuf;
-  VMException *exception;
+  Value exception;
 } VM;
 
 /*
@@ -597,8 +597,8 @@ bool getLineNumber(Frame_t frame, uint64_t *lineNumber);
 bool getFileName(Frame_t frame, Text *fileName);
 
 bool hasException(VM *vm);
-void setException(VM *vm, VMException *e);
-VMException* getException(VM *vm);
+void setException(VM *vm, Value e);
+Value getException(VM *vm);
 
 Frame_t pushFrame(VM *vm, Value newFn);
 Frame_t replaceFrame(VM *vm, Value newFn);
@@ -811,6 +811,9 @@ void collect(VM *vm) {
   vm->gc.allocPtr = vm->gc.currentHeap;
 
   memset(vm->gc.currentHeap, 0, vm->gc.heapSize);
+
+  // relocate exception, if present
+  relocate(vm, &vm->exception);
 
   // relocate tables
   relocateTable(vm, &vm->symbolTable);
@@ -1384,86 +1387,139 @@ void exFrameInitContents(VMExceptionFrame *f) {
   textInitContents(&f->fileName);
 }
 
-VMException* exceptionMake(VM *vm, Raised *raised) {
+/*
+ * exn:
+ *   message
+ *   frames:
+ *     functionName;
+ *     unknownSource;
+ *     fileName;
+ *     lineNumber;
+ *
+ */
 
-  Error error;
-  errorInitContents(&error);
+Value getKeyword(VM *vm, wchar_t *text) {
+  Value protectedName = stringHydrate(vm, text, wcslen(text));
+  pushFrameRoot(vm, &protectedName);
+  Value kw = keywordIntern(vm, &protectedName);
+  popFrameRoot(vm); // protectedMessageName
+  return kw;
+}
 
-  wchar_t msg[ERROR_MSG_LENGTH];
+Value stringMakeBlank(VM *vm, uint64_t length);
 
-  VMException *exception;
-  palloc(vm->outputPool, exception, sizeof(VMException), "VMException");
-  exceptionInitContents(exception);
+Value exceptionMake(VM *vm, Raised *raised) {
 
-  swprintf(msg, ERROR_MSG_LENGTH, L"unhandled error: %ls", raised->message);
-  if (tryTextMake(vm->outputPool, msg, &exception->message, wcslen(msg), &error) != R_SUCCESS) {
-    explode("make text");
+  String *protectedMessage;
+  {
+    wchar_t msg[ERROR_MSG_LENGTH];
+    swprintf(msg, ERROR_MSG_LENGTH, L"unhandled error: %ls", raised->message);
+    protectedMessage = (String*)stringHydrate(vm, msg, wcslen(msg));
+    memcpy(stringValue(protectedMessage), &msg, wcslen(msg));
+    pushFrameRoot(vm, (Value*)&protectedMessage);
   }
 
-  uint64_t numFrames = 0;
-  if (vm->current != NULL) {
-    Frame_t current = vm->current;
-    while (true) {
-      numFrames++;
-      if (!hasParent(current)) {
-        break;
-      }
-      else {
-        current = getParent(current);
+  Array *protectedFrames;
+  {
+    uint64_t numFrames = 0;
+    if (vm->current != NULL) {
+      Frame_t current = vm->current;
+      while (true) {
+        numFrames++;
+        if (!hasParent(current)) {
+          break;
+        }
+        else {
+          current = getParent(current);
+        }
       }
     }
+
+    // native frame
+    numFrames++;
+
+    protectedFrames = makeArray(vm, numFrames);
+    pushFrameRoot(vm, (Value*)&protectedFrames);
   }
 
-  // native frame
-  numFrames++;
+  Value protectedFunctionKw = getKeyword(vm, L"function-name");
+  pushFrameRoot(vm, (Value*)&protectedFunctionKw);
 
-  exception->frames.length = numFrames;
-  palloc(vm->outputPool, exception->frames.elements, sizeof(VMExceptionFrame) * numFrames, "VMExceptionFrame array");
+  Value protectedUnknownSourceKw = getKeyword(vm, L"unknown-source");
+  pushFrameRoot(vm, (Value*)&protectedUnknownSourceKw);
 
+  Value protectedFileNameKw = getKeyword(vm, L"file-name");
+  pushFrameRoot(vm, (Value*)&protectedFileNameKw);
+
+  Value protectedLineNumberKw = getKeyword(vm, L"line-number");
+  pushFrameRoot(vm, (Value*)&protectedLineNumberKw);
 
   { // native frame
 
-    VMExceptionFrame *f = &exception->frames.elements[0];
-    exFrameInitContents(f);
+    String *protectedFunctionName = (String*)stringMakeBlank(vm, strlen(raised->functionName) + 1);
+    swprintf(stringValue(protectedFunctionName), protectedFunctionName->length, L"%s", raised->functionName);
+    pushFrameRoot(vm, (Value*)&protectedFunctionName);
 
-    f->functionName.length = strlen(raised->functionName) + 1;
-    palloc(vm->outputPool, f->functionName.value, f->functionName.length * sizeof(wchar_t), "wide string");
-    swprintf(f->functionName.value, f->functionName.length, L"%s", raised->functionName);
-
-    f->unknownSource = false;
+    Value unknownSource = wrapBool(false);
 
     char* fileName = basename((char *) raised->fileName);
-    f->fileName.length = strlen(fileName) + 1;
-    palloc(vm->outputPool, f->fileName.value, f->fileName.length * sizeof(wchar_t), "wide string");
-    swprintf(f->fileName.value, f->fileName.length, L"%s", fileName);
+    String *protectedFileName = (String*)stringMakeBlank(vm, strlen(fileName) + 1);
+    swprintf(stringValue(protectedFileName), protectedFileName->length, L"%s", fileName);
+    pushFrameRoot(vm, (Value*)&protectedFileName);
 
-    f->lineNumber = raised->lineNumber;
+    Value lineNumber = wrapUint(raised->lineNumber);
+
+    Map *protectedFrame = makeMap(vm);
+    pushFrameRoot(vm, (Value*)&protectedFrame);
+
+    putMapEntry(vm, &protectedFrame, protectedFunctionKw, (Value)protectedFunctionName);
+    putMapEntry(vm, &protectedFrame, protectedUnknownSourceKw, unknownSource);
+    putMapEntry(vm, &protectedFrame, protectedFileNameKw, (Value)protectedFileName);
+    putMapEntry(vm, &protectedFrame, protectedLineNumberKw, lineNumber);
+
+    arrayElements(protectedFrames)[0] = (Value)protectedFrame;
+
+    popFrameRoot(vm); // protectedFrame
+    popFrameRoot(vm); // protectedFileName
+    popFrameRoot(vm); // protectedFunctionName
   }
 
   if (vm->current != NULL) {
     Frame_t current = vm->current;
+    uint64_t numFrames = objectHeaderSize(protectedFrames->header);
     for (uint64_t i = 1; i < numFrames; i++) {
 
-      VMExceptionFrame *f = &exception->frames.elements[i];
-      exFrameInitContents(f);
+      Map *protectedFrame = makeMap(vm);
+      pushFrameRoot(vm, (Value*)&protectedFrame);
 
+      wchar_t *fnName;
       if (hasFnName(current)) {
-        Text text = getFnName(current);
-        if (tryTextCopy(vm->outputPool, &text, &f->functionName, &error) != R_SUCCESS) {
-          explode("text copy");
-        }
-      } else {
-        wchar_t *name = L"<root>\0";
-        if (tryTextMake(vm->outputPool, name, &f->functionName, wcslen(name), &error) != R_SUCCESS) {
-          explode("text make");
-        }
+        fnName = getFnName(current).value;
       }
+      else {
+        fnName = L"<root>\0";
+      }
+
+      putMapEntry(vm, &protectedFrame, protectedFunctionKw, stringHydrate(vm, fnName, wcslen(fnName)));
 
       if (hasSourceTable(current)) {
-        f->unknownSource = false;
-        getFileName(current, &f->fileName);
-        getLineNumber(current, &f->lineNumber);
+
+        Text fileName;
+        getFileName(current, &fileName);
+
+        uint64_t lineNumber;
+        getLineNumber(current, &lineNumber);
+
+        putMapEntry(vm, &protectedFrame, protectedUnknownSourceKw, wrapBool(false));
+        putMapEntry(vm, &protectedFrame, protectedFileNameKw, stringHydrate(vm, fileName.value, wcslen(fileName.value)));
+        putMapEntry(vm, &protectedFrame, protectedLineNumberKw, wrapUint(lineNumber));
       }
+      else {
+        putMapEntry(vm, &protectedFrame, protectedUnknownSourceKw, wrapBool(true));
+      }
+
+      arrayElements(protectedFrames)[i] = (Value)protectedFrame;
+      popFrameRoot(vm); // protectedFrame
 
       if (hasParent(current)) {
         current = getParent(current);
@@ -1471,7 +1527,22 @@ VMException* exceptionMake(VM *vm, Raised *raised) {
     }
   }
 
-  return exception;
+  Map *protectedExn = makeMap(vm);
+  pushFrameRoot(vm, (Value*)&protectedExn);
+
+  putMapEntry(vm, &protectedExn, getKeyword(vm, L"message"), (Value)protectedMessage);
+  putMapEntry(vm, &protectedExn, getKeyword(vm, L"frames"), (Value)protectedFrames);
+
+  popFrameRoot(vm); // protectedExn
+
+  popFrameRoot(vm); // protectedLineNumberKw
+  popFrameRoot(vm); // protectedFileNameKw
+  popFrameRoot(vm); // protectedUnknownSourceKw
+  popFrameRoot(vm); // protectedFunctionKw
+  popFrameRoot(vm); // protectedFrames
+  popFrameRoot(vm); // protectedMessage
+
+  return (Value)protectedExn;
 }
 
 RetVal tryExceptionPrint(Pool_t pool, VMException *e, wchar_t **ptr, Error *error) {
@@ -1536,8 +1607,8 @@ void raisedInitContents(Raised *r) {
 
 // TODO: exceptions should go on the heap as values
 void handleRaise(VM *vm, Raised *r) {
-  VMException *ex = exceptionMake(vm, r);
-  setException(vm, ex);
+  Value value = exceptionMake(vm, r);
+  setException(vm, value);
   longjmp(vm->jumpBuf, 1);
 }
 
@@ -1552,7 +1623,7 @@ void handleRaise(VM *vm, Raised *r) {
   char msg[len]; \
   snprintf(msg, len, str, ##__VA_ARGS__); \
   \
-  swprintf(r.message, ERROR_MSG_LENGTH, L"vm raised an exception: %s\n", msg); \
+  swprintf(r.message, ERROR_MSG_LENGTH, L"vm raised an exception: %s", msg); \
   handleRaise(vm, &r); \
 }
 
@@ -3088,15 +3159,15 @@ bool getFileName(Frame_t frame, Text *fileName) {
 }
 
 bool hasException(VM *vm) {
-  return vm->exception != NULL;
+  return vm->exception != W_NIL_VALUE;
 }
 
-void setException(VM *vm, VMException *e) {
-  vm->exception = e;
+void setException(VM *vm, Value value) {
+  vm->exception = value;
 }
 
-VMException* getException(VM *vm) {
-  if (vm->exception == NULL) {
+Value getException(VM *vm) {
+  if (vm->exception == W_NIL_VALUE) {
     explode("handler not set");
   }
   return vm->exception;
@@ -3227,7 +3298,7 @@ void popFrameRoot(VM *vm) {
  *
  */
 
-void _vmEval(VM *vm, CodeUnit *codeUnit, Value *result, VMException *exception, bool *exceptionThrown) {
+Value _vmEval(VM *vm, CodeUnit *codeUnit, bool *exceptionThrown) {
 
   FnConstant c;
   constantFnInitContents(&c);
@@ -3236,45 +3307,40 @@ void _vmEval(VM *vm, CodeUnit *codeUnit, Value *result, VMException *exception, 
   c.code = codeUnit->code;
 
   if (!setjmp(vm->jumpBuf)) {
+    *exceptionThrown = false;
     Value fnRef = fnHydrate(vm, &c);
     Frame_t frame = pushFrame(vm, fnRef);
     frameEval(vm);
-    *result = frame->result;
+    Value result = frame->result;
     popFrame(vm);
+    return result;
   }
   else {
     *exceptionThrown = true;
-    *exception = *vm->exception;
+    return vm->exception;
   }
 }
 
 RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, VMEvalResult *result, Error *error) {
 
-  RetVal ret;
-
   Value value;
-  VMException exception;
   bool exceptionThrown = false;
 
   vm->outputPool = outputPool;
 
-  _vmEval(vm, codeUnit, &value, &exception, &exceptionThrown);
+  value = _vmEval(vm, codeUnit, &exceptionThrown);
 
   if (exceptionThrown) {
     result->type = RT_EXCEPTION;
-    result->exception = exception;
   }
   else {
     result->type = RT_RESULT;
-    vmPrn(vm, value, &result->result);
   }
+  vmPrn(vm, value, &result->result);
 
   vm->outputPool = NULL;
 
   return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
 /*
@@ -4023,7 +4089,7 @@ void vmInitContents(VM *vm, VMConfig config) {
   tableInit(&vm->keywordTable);
   vm->current = NULL;
   vm->outputPool = NULL;
-  vm->exception = NULL;
+  vm->exception = nil();
   vm->noFrameRoots = NULL;
   initCFns(vm);
 }

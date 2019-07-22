@@ -67,7 +67,8 @@ int main(void) {
     }
     else if (result.type == RT_EXCEPTION) {
       printf("> encountered exception:\n\n");
-      throws(tryExceptionPrintf(&result.exception, &error));
+      throws(tryExprPrn(sessionPool, &result.result, &error));
+//      throws(tryExceptionPrintf(&result.exception, &error));
     }
     else {
       printf("> encountered unhandled eval result type\n\n");
