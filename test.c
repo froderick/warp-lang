@@ -836,6 +836,12 @@ START_TEST(repl)
                "   (def n [0 0])"
                "   (set n 0 'y)"
                "   (get n 0))", L"y");
+
+    assertEval(L"(record 'cheese 1)", L"\"#cheese[]\"");
+    assertEval(L"(do "
+               "   (def n (record 'cheese 1))"
+               "   (set n 0 'y)"
+               "   (get n 0))", L"y");
   }
 END_TEST
 

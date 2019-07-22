@@ -36,7 +36,8 @@ typedef enum ValueType {
   VT_CFN,
   VT_ARRAY,
   VT_MAP,
-  VT_MAP_ENTRY
+  VT_MAP_ENTRY,
+  VT_RECORD,
 } ValueType;
 
 #define W_GC_FORWARDING_BIT      0x8000000000000000L   /* header contains forwarding pointer */
@@ -56,6 +57,7 @@ typedef enum ValueType {
 #define W_ARRAY_TYPE     0x7u
 #define W_MAP_TYPE       0x8u
 #define W_MAP_ENTRY_TYPE 0x9u
+#define W_RECORD_TYPE    0xau
 
 /*
  * This is the first field inside all heap objects. It must come first so that the GC can
@@ -81,12 +83,21 @@ uint64_t objectHeaderSize(ObjectHeader h) {
   return h & W_HEADER_SIZE_MASK;
 }
 
+typedef struct Record {
+  ObjectHeader header;
+  Value symbol;
+} Record;
+
 uint64_t objectHeaderSizeBytes(ObjectHeader h) {
   uint8_t type = objectHeaderType(h);
   switch (type) {
     case W_ARRAY_TYPE: {
       uint64_t size = h & W_HEADER_SIZE_MASK;
       return sizeof(ObjectHeader) + (size * sizeof(Value));
+    }
+    case W_RECORD_TYPE: {
+      uint64_t size = h & W_HEADER_SIZE_MASK;
+      return sizeof(Record) + (size * sizeof(Value));
     }
     default:
       return h & W_HEADER_SIZE_MASK;
@@ -105,6 +116,7 @@ ValueType objectHeaderValueType(ObjectHeader header) {
     case W_ARRAY_TYPE: return VT_ARRAY;
     case W_MAP_TYPE: return VT_MAP;
     case W_MAP_ENTRY_TYPE: return VT_MAP_ENTRY;
+    case W_RECORD_TYPE: return VT_RECORD;
     default:
     explode("unknown type: %u", objectHeaderType(header));
   }
@@ -1216,6 +1228,31 @@ Map* makeMap(VM *vm) {
   return map;
 }
 
+void recordInitContents(Record *record) {
+  record->header = 0;
+  record->symbol = nil();
+}
+
+Value* recordFields(Record *record) {
+  return ((void*)record) + sizeof(Record);
+}
+
+Record* makeRecord(VM *vm, uint64_t numFields) {
+
+  uint64_t sizeBytes = padAllocSize(sizeof(Record) + (numFields * sizeof(Value)));
+  Record *record = alloc(vm, sizeBytes);
+
+  recordInitContents(record);
+  record->header = makeObjectHeader(W_RECORD_TYPE, numFields);
+
+  Value *fields = ((void*)record) + sizeof(Record);
+  for (uint64_t i=0; i<numFields; i++) {
+    fields[i] = W_NIL_VALUE;
+  }
+
+  return record;
+}
+
 /*
  * `protectedFn` is a alloc-safe pointer to the Fn for which a constant is being hydrated.
  * This is included so we so that references to already-hydrated values can be resolved by
@@ -2254,6 +2291,16 @@ void relocateChildrenMapEntry(VM_t vm, void *obj) {
   }
 }
 
+void relocateChildrenRecord(VM_t vm, void *obj) {
+  Record *record = obj;
+  relocate(vm, &record->symbol);
+  Value *fields = recordFields(record);
+  uint64_t size = objectHeaderSize(record->header);
+  for (uint64_t i=0; i<size; i++) {
+    relocate(vm, &fields[i]);
+  }
+}
+
 void prnNil(VM_t vm, Value result, Expr *expr) {
   expr->type = N_NIL;
 }
@@ -2505,6 +2552,41 @@ void prnArray(VM_t vm, Value result, Expr *expr) {
   }
 }
 
+void prnRecord(VM_t vm, Value result, Expr *expr) {
+  Record *record = deref(&vm->gc, result);
+
+  Error error;
+  errorInitContents(&error);
+
+  StringBuffer_t b = NULL;
+  if (tryStringBufferMake(vm->outputPool, &b, &error) != R_SUCCESS) {
+    explode("sbmake");
+  }
+
+  if (tryStringBufferAppendStr(b, L"#", &error) != R_SUCCESS) {
+    explode("append");
+  }
+
+  Symbol *symbol = deref(&vm->gc, record->symbol);
+  String *name = deref(&vm->gc, symbol->name);
+
+  if (tryStringBufferAppendStr(b, stringValue(name), &error) != R_SUCCESS) {
+    explode("append");
+  }
+
+  if (tryStringBufferAppendStr(b, L"[", &error) != R_SUCCESS) {
+    explode("append");
+  }
+
+  if (tryStringBufferAppendStr(b, L"]", &error) != R_SUCCESS) {
+    explode("append");
+  }
+
+  expr->type = N_STRING;
+  expr->string.length = stringBufferLength(b);
+  expr->string.value = stringBufferText(b);
+}
+
 ValueTypeTable valueTypeTableCreate() {
   ValueTypeTable table;
 
@@ -2571,6 +2653,10 @@ ValueTypeTable valueTypeTableCreate() {
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenMapEntry,
                         .prn = NULL},
+      [VT_RECORD]    = {.name = "record",
+                        .isTruthy = &isTruthyYes,
+                        .relocateChildren = &relocateChildrenRecord,
+                        .prn = &prnRecord},
 
   };
   memcpy(table.valueTypes, valueTypes, sizeof(valueTypes));
@@ -3411,7 +3497,7 @@ void getBuiltin(VM *vm, Frame_t frame) {
       uint64_t index = unwrapUint(key);
 
       Array *k = deref(&vm->gc, coll);
-      if (index > objectHeaderSize(k->header)) {
+      if (index >= objectHeaderSize(k->header)) {
         raise(vm, "index out of bounds: %" PRIu64, index);
       }
 
@@ -3422,6 +3508,19 @@ void getBuiltin(VM *vm, Frame_t frame) {
     case VT_MAP: {
       Map *m = deref(&vm->gc, coll);
       result = mapLookup(vm, m, key);
+      break;
+    }
+    case VT_RECORD: {
+      ASSERT_UINT(vm, key);
+      uint64_t index = unwrapUint(key);
+
+      Record *record = deref(&vm->gc, coll);
+      if (index >= objectHeaderSize(record->header)) {
+        raise(vm, "index out of bounds: %" PRIu64, index);
+      }
+
+      Value *fields = recordFields(record);
+      result = fields[index];
       break;
     }
     default:
@@ -3441,7 +3540,12 @@ void setBuiltin(VM *vm, Frame_t frame) {
     case VT_ARRAY: {
       ASSERT_UINT(vm, key);
       uint64_t index = unwrapUint(key);
+
       Array *k = deref(&vm->gc, coll);
+      if (index >= objectHeaderSize(k->header)) {
+        raise(vm, "index out of bounds: %" PRIu64, index);
+      }
+
       Value *elements = arrayElements(k);
       elements[index] = value;
       result = coll;
@@ -3455,6 +3559,20 @@ void setBuiltin(VM *vm, Frame_t frame) {
       result = (Value)protectedMap;
 
       popFrameRoot(vm); // protectedMap
+      break;
+    }
+    case VT_RECORD: {
+      ASSERT_UINT(vm, key);
+      uint64_t index = unwrapUint(key);
+
+      Record *record = deref(&vm->gc, coll);
+      if (index >= objectHeaderSize(record->header)) {
+        raise(vm, "index out of bounds: %" PRIu64, index);
+      }
+
+      Value *fields = recordFields(record);
+      fields[index] = value;
+      result = coll;
       break;
     }
     default:
@@ -3789,6 +3907,30 @@ void vectorBuiltin(VM *vm, Frame_t frame) {
   pushOperand(frame, result);
 }
 
+void recordBuiltin(VM *vm, Frame_t frame) {
+
+  uint16_t numFields;
+  {
+    Value fieldsValue = popOperand(frame);
+    if (valueType(fieldsValue) != VT_UINT) {
+      explode("numFields must be a uint: %s", getValueTypeName(vm, valueType(fieldsValue)));
+    }
+    numFields = unwrapUint(fieldsValue);
+  }
+
+  Value protectedSymbol = popOperand(frame);
+  if (valueType(protectedSymbol) != VT_SYMBOL) {
+    explode("a symbol is required to identify a record: %s", getValueTypeName(vm, valueType(protectedSymbol)));
+  }
+  pushFrameRoot(vm, &protectedSymbol);
+
+  Record *record = makeRecord(vm, numFields);
+  record->symbol = protectedSymbol;
+
+  popFrameRoot(vm); // protectedSymbol
+  pushOperand(frame, (Value)record);
+}
+
 void cFnInitContents(CFn *fn) {
   fn->header = 0;
   fn->nameLength = 0;
@@ -3864,6 +4006,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"set", 3, false, setBuiltin);
   defineCFn(vm, L"hash-map", 1, true, hashMapBuiltin);
   defineCFn(vm, L"vector", 1, true, vectorBuiltin);
+  defineCFn(vm, L"record", 2, false, recordBuiltin);
 }
 
 void vmConfigInitContents(VMConfig *config) {
