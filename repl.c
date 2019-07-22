@@ -80,7 +80,8 @@ RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputTe
     throws(tryExprPrnStr(outputPool, &result.result, outputText, error));
   }
   else {
-    throws(tryExprPrnStr(outputPool, &result.result, outputText, error));
+    exceptionPrintf(vm);
+//    throws(tryExprPrnStr(outputPool, &result.result, outputText, error));
 //    throws(tryExceptionPrintf(&result.exception, error));
   }
 

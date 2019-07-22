@@ -1380,24 +1380,6 @@ typedef struct Raised {
   const char *functionName;
 } Raised;
 
-void exFrameInitContents(VMExceptionFrame *f) {
-  textInitContents(&f->functionName);
-  f->unknownSource = true;
-  f->lineNumber = 0;
-  textInitContents(&f->fileName);
-}
-
-/*
- * exn:
- *   message
- *   frames:
- *     functionName;
- *     unknownSource;
- *     fileName;
- *     lineNumber;
- *
- */
-
 Value getKeyword(VM *vm, wchar_t *text) {
   Value protectedName = stringHydrate(vm, text, wcslen(text));
   pushFrameRoot(vm, &protectedName);
@@ -1545,58 +1527,78 @@ Value exceptionMake(VM *vm, Raised *raised) {
   return (Value)protectedExn;
 }
 
-RetVal tryExceptionPrint(Pool_t pool, VMException *e, wchar_t **ptr, Error *error) {
-  RetVal ret;
+Value mapLookup(VM *vm, Map *map, Value key);
 
-  // clean up on exit always
+wchar_t* exceptionPrint(VM *vm, Pool_t pool, Value e) {
+
+  Map *exn = deref(&vm->gc, e);
+
+  String *message = (String*)mapLookup(vm, exn, getKeyword(vm, L"message"));
+  Array *frames = (Array*)mapLookup(vm, exn, getKeyword(vm, L"frames"));
+
+  Error error;
+  errorInitContents(&error);
+
   StringBuffer_t b = NULL;
 
-  throws(tryStringBufferMake(pool, &b, error));
+  if (tryStringBufferMake(pool, &b, &error) != R_SUCCESS) {
+    explode("oops");
+  }
 
-  throws(tryStringBufferAppendStr(b, e->message.value, error));
+  if (tryStringBufferAppendStr(b, stringValue(message), &error) != R_SUCCESS) {
+    explode("oops");
+  }
 
-  wchar_t msg[ERROR_MSG_LENGTH];
+  if (tryStringBufferAppendStr(b, L"\n", &error) != R_SUCCESS) {
+    explode("oops");
+  }
 
-  for (uint64_t i=0; i<e->frames.length; i++) {
-    VMExceptionFrame *f = &e->frames.elements[i];
+  uint64_t numFrames = objectHeaderSize(frames->header);
+  Value* elements = arrayElements(frames);
 
-    if (f->unknownSource) {
-      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(Unknown Source)\n", f->functionName.value);
+  for (uint64_t i=0; i<numFrames; i++) {
+    Map *frame = deref(&vm->gc, elements[i]);
+
+    String *functionName = (String*)mapLookup(vm, frame, getKeyword(vm, L"function-name"));
+    bool unknownSource = unwrapBool(mapLookup(vm, frame, getKeyword(vm, L"unknown-source")));
+
+    wchar_t msg[ERROR_MSG_LENGTH];
+    if (unknownSource) {
+      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(Unknown Source)\n", stringValue(functionName));
     }
     else {
-      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(%ls:%" PRIu64 ")\n", f->functionName.value, f->fileName.value,
-               f->lineNumber);
+      String *fileName = (String*)mapLookup(vm, frame, getKeyword(vm, L"file-name"));
+      uint64_t lineNumber = unwrapUint(mapLookup(vm, frame, getKeyword(vm, L"line-number")));
+      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(%ls:%" PRIu64 ")\n",
+          stringValue(functionName), stringValue(fileName), lineNumber);
     }
-    throws(tryStringBufferAppendStr(b, msg, error));
+
+    if (tryStringBufferAppendStr(b, msg, &error) != R_SUCCESS) {
+      explode("oops");
+    }
   }
 
   wchar_t *output;
-  throws(tryCopyText(pool, stringBufferText(b), &output, stringBufferLength(b), error));
+  if (tryCopyText(pool, stringBufferText(b), &output, stringBufferLength(b), &error) != R_SUCCESS) {
+    explode("oops");
+  }
 
-  *ptr = output;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  return output;
 }
 
-RetVal tryExceptionPrintf(VMException *e, Error *error) {
-  RetVal ret;
+void exceptionPrintf(VM *vm) {
+  Error error;
+  errorInitContents(&error);
 
   Pool_t pool = NULL;
-  throws(tryPoolCreate(&pool, ONE_KB, error));
+  if (tryPoolCreate(&pool, ONE_KB, &error) != R_SUCCESS) {
+    explode("oops");
+  }
 
-  wchar_t *msg;
-  throws(tryExceptionPrint(pool, e, &msg, error));
+  wchar_t *msg = exceptionPrint(vm, pool, vm->exception);
   printf("%ls\n", msg);
 
-  ret = R_SUCCESS;
-  goto done;
-
-  failure:
-  done:
   poolFree(pool);
-  return ret;
 }
 
 void raisedInitContents(Raised *r) {
@@ -4184,23 +4186,6 @@ void codeUnitInitContents(CodeUnit *codeUnit) {
   codeUnit->constants = NULL;
   codeUnit->numConstants = 0;
   codeInitContents(&codeUnit->code);
-}
-
-void framesInitContents(VMExceptionFrames *f) {
-  f->length = 0;
-  f->elements = NULL;
-}
-
-void _frameInitContents(VMExceptionFrame *f) {
-  textInitContents(&f->functionName);
-  f->unknownSource = true;
-  f->lineNumber = 0;
-  textInitContents(&f->fileName);
-}
-
-void exceptionInitContents(VMException *e) {
-  textInitContents(&e->message);
-  framesInitContents(&e->frames);
 }
 
 void evalResultInitContents(VMEvalResult *r) {

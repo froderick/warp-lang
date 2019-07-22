@@ -77,8 +77,9 @@ RetVal tryIsMacro(Expander *expander, Text sym, bool *isMacro, Error *error) {
     return R_SUCCESS;
   }
   else if (output.type == RT_EXCEPTION) {
-//    throws(tryExceptionPrintf(&output.exception, error));
+    exceptionPrintf(expander->vm);
     throwInternalError(error, "encountered exception while processing macro: getmacro");
+
   }
   else {
     throwInternalError(error, "unhandled eval result type");
@@ -129,6 +130,10 @@ RetVal tryExpand(Expander *expander, Text sym, Expr *input, VMEvalResult *output
 
   throws(tryCompileTopLevel(expander->pool, &root, &codeUnit, error));
   throws(tryVMEval(expander->vm, &codeUnit, expander->pool, output, error));
+
+  if (output->type == RT_EXCEPTION) {
+    exceptionPrintf(expander->vm);
+  }
 
   return R_SUCCESS;
 

@@ -178,23 +178,6 @@ void vmFreeContents(VM_t vm);
 RetVal tryVMMake(VM_t *ptr, VMConfig config, Error *error);
 void vmFree(VM_t vm);
 
-typedef struct VMExceptionFrame {
-  Text functionName;
-  bool unknownSource;
-  Text fileName;
-  uint64_t lineNumber;
-} VMExceptionFrame;
-
-typedef struct VMExceptionFrames {
-  uint64_t length;
-  VMExceptionFrame *elements;
-} VMExceptionFrames;
-
-typedef struct VMException {
-  Text message;
-  VMExceptionFrames frames;
-} VMException;
-
 typedef enum VMEvalResultType {
   RT_NONE,
   RT_RESULT,
@@ -206,11 +189,7 @@ typedef struct VMEvalResult {
   Expr result;
 } VMEvalResult;
 
-void exceptionInitContents(VMException *e);
-void evalResultInitContents(VMEvalResult *r);
-
-RetVal tryExceptionPrint(Pool_t pool, VMException *e, wchar_t **ptr, Error *error);
-RetVal tryExceptionPrintf(VMException *e, Error *error);
+void exceptionPrintf(VM_t vm);
 
 RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, Pool_t pool, VMEvalResult *result, Error *error);
 
