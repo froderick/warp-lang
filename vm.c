@@ -88,6 +88,30 @@ ValueType valueType(Value v) {
   explode("unknown type: %" PRIu64, v);
 }
 
+#define ASSERT_SEQ(vm, value, ...) {\
+  if (valueType(value) != VT_LIST && valueType(value) != VT_NIL) { \
+    raise(vm, "expected a list type: %s", getValueTypeName(vm, valueType(value))); \
+  } \
+}
+
+#define ASSERT_STR(vm, value, ...) {\
+  if (valueType(value) != VT_STR) { \
+    raise(vm, "expected a string type: %s", getValueTypeName(vm, valueType(value))); \
+  } \
+}
+
+#define ASSERT_UINT(vm, value, ...) {\
+  if (valueType(value) != VT_UINT) { \
+    raise(vm, "expected a uint type: %s", getValueTypeName(vm, valueType(value))); \
+  } \
+}
+
+#define ASSERT_ARRAY(vm, value, ...) {\
+  if (valueType(value) != VT_ARRAY) { \
+    raise(vm, "expected an array type: %s", getValueTypeName(vm, valueType(value))); \
+  } \
+}
+
 Value wrapBool(bool b) {
   return (((uint8_t)b & 1u) << 4u) | W_BOOLEAN_BITS;
 }
@@ -2758,30 +2782,6 @@ VMEvalResult vmEval(VM *vm, CodeUnit *codeUnit) {
 /*
  * builtin procedures
  */
-
-#define ASSERT_SEQ(vm, value, ...) {\
-  if (valueType(value) != VT_LIST && valueType(value) != VT_NIL) { \
-    raise(vm, "expected a list type: %s", getValueTypeName(vm, valueType(value))); \
-  } \
-}
-
-#define ASSERT_STR(vm, value, ...) {\
-  if (valueType(value) != VT_STR) { \
-    raise(vm, "expected a string type: %s", getValueTypeName(vm, valueType(value))); \
-  } \
-}
-
-#define ASSERT_UINT(vm, value, ...) {\
-  if (valueType(value) != VT_UINT) { \
-    raise(vm, "expected a uint type: %s", getValueTypeName(vm, valueType(value))); \
-  } \
-}
-
-#define ASSERT_ARRAY(vm, value, ...) {\
-  if (valueType(value) != VT_ARRAY) { \
-    raise(vm, "expected an array type: %s", getValueTypeName(vm, valueType(value))); \
-  } \
-}
 
 /*
  * joins a sequence of strings together into one big string
