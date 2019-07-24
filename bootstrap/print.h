@@ -2,7 +2,7 @@
 #define WARP_LANG_PRINT_H
 
 #include "reader.h"
-#include "vm.h"
+#include "../vm/vm.h"
 
 Expr* printToReader(VM_t vm, Pool_t pool, Value result);
 

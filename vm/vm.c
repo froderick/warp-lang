@@ -5,7 +5,7 @@
 #include <inttypes.h>
 #include <setjmp.h>
 #include "vm.h"
-#include "errors.h"
+#include "../errors.h"
 
 /*
  * VM Data Structures

@@ -1,7 +1,7 @@
 #ifndef WARP_LANG_VM_H
 #define WARP_LANG_VM_H
 
-#include "bytecode.h"
+#include "../bytecode.h"
 
 /*
  * VM runtime data structures

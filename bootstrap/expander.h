@@ -2,7 +2,7 @@
 #define WARP_LANG_EXPANDER_H
 
 #include "reader.h"
-#include "vm.h"
+#include "../vm/vm.h"
 #include "pool.h"
 
 /*

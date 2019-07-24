@@ -5,11 +5,11 @@
 #include <execinfo.h>
 #include <check.h>
 #include <errno.h>
-#include "reader.h"
-#include "analyzer.h"
-#include "compiler.h"
-#include "vm.h"
-#include "repl.h"
+#include "bootstrap/reader.h"
+#include "bootstrap/analyzer.h"
+#include "bootstrap/compiler.h"
+#include "vm/vm.h"
+#include "bootstrap/repl.h"
 
 #define ONE_KB (1024)
 #define ONE_MB (1024 * 1000)

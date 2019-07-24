@@ -1,8 +1,8 @@
 #include <stdlib.h>
 #include <inttypes.h>
 #include "print.h"
-#include "vm.h"
-#include "errors.h"
+#include "../vm/vm.h"
+#include "../errors.h"
 
 /*
  * Create a reader representation of a vm Value (an Expr).

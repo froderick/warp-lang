@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include "pool.h"
-#include "errors.h"
+#include "../errors.h"
 
 /*
  * This is a really basic implementation of memory pooling. Mainly, I did this

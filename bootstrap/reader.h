@@ -5,7 +5,7 @@
 #include <wchar.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include "errors.h"
+#include "../errors.h"
 #include "utils.h"
 #include "source.h"
 #include "lexer.h"

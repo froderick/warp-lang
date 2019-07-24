@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "errors.h"
+#include "../errors.h"
 #include "reader.h"
 #include "expander.h"
 #include "pool.h"

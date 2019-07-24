@@ -2,7 +2,7 @@
 #define WARP_LANG_UTILS_H
 
 #include <wctype.h>
-#include "errors.h"
+#include "../errors.h"
 #include "pool.h"
 
 /*

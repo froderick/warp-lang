@@ -15,7 +15,7 @@ find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 pkg_check_modules(check REQUIRED check)
 
-add_library(compiler errors.c reader.c analyzer.c vm.c utils.c compiler.c lexer.c repl.c source.c expander.c pool.c bytecode.c print.c print.h)
+add_library(compiler errors.c bootstrap/reader.c bootstrap/analyzer.c vm/vm.c bootstrap/utils.c bootstrap/compiler.c bootstrap/lexer.c bootstrap/repl.c bootstrap/source.c bootstrap/expander.c bootstrap/pool.c bytecode.c bootstrap/print.c bootstrap/print.h)
 
 add_executable(tests test.c)
 target_link_libraries(tests check compiler)
@@ -26,10 +26,10 @@ endif()
 
 target_compile_options(tests PRIVATE -g)
 
-add_executable(lexer-repl lexer-repl.c)
+add_executable(lexer-repl bootstrap/lexer-repl.c)
 target_link_libraries(lexer-repl compiler)
 
-add_executable(repl-main repl-main.c)
+add_executable(repl-main bootstrap/repl-main.c)
 target_link_libraries(repl-main compiler)
 target_compile_options(repl-main PRIVATE -g)
 
