@@ -130,6 +130,7 @@ uint64_t unwrapUint(Value v) {
 
 typedef struct Frame *Frame_t;
 typedef struct FrameRoot *FrameRoot_t;
+typedef struct FrameHandler *FrameHandler_t;
 
 wchar_t* fnName(Fn *fn) { return (void*)fn + fn->nameOffset; }
 Value* fnConstants(Fn *fn) { return (void*)fn + fn->constantsOffset; }
@@ -232,6 +233,7 @@ typedef struct VM {
   ValueTypeTable valueTypeTable;
   Stack stack;
   FrameRoot_t noFrameRoots;
+  FrameHandler_t noFrameHandlers;
   Frame_t current;
   Table symbolTable;
   Table keywordTable;
@@ -738,11 +740,6 @@ typedef struct ExceptionHandler {
   uint16_t localIndex;
 } ExceptionHandler;
 
-bool hasHandler(Frame_t frame);
-ExceptionHandler getHandler(Frame_t frame);
-void setHandler(Frame_t frame, ExceptionHandler handler);
-void clearHandler(Frame_t frame);
-
 bool hasFnName(Frame_t frame);
 wchar_t* getFnName(Frame_t frame);
 
@@ -761,6 +758,13 @@ Frame_t popFrame(VM *vm);
 FrameRoot_t frameRoots(Frame_t frame);
 Value* frameRootValue(FrameRoot_t root);
 FrameRoot_t frameRootNext(FrameRoot_t root);
+
+FrameHandler_t frameHandlers(Frame_t frame);
+Value* frameHandlerValue(FrameHandler_t root);
+uint16_t frameHandlerJumpAddr(FrameHandler_t handler);
+FrameHandler_t frameHandlerNext(FrameHandler_t root);
+void pushFrameHandler(VM *vm, Value value, uint16_t jumpAddr);
+void popFrameHandler(VM *vm);
 
 /*
  * value type protocols
@@ -980,6 +984,14 @@ void collect(VM *vm) {
     noFrameRoot = frameRootNext(noFrameRoot);
   }
 
+  // relocate noFrameHandlers
+  FrameHandler_t noFrameHandler = vm->noFrameHandlers;
+  while (noFrameHandler != NULL) {
+    Value *valuePtr = frameHandlerValue(noFrameHandler);
+    relocate(vm, valuePtr);
+    noFrameHandler = frameHandlerNext(noFrameHandler);
+  }
+
   // relocate call stack roots
   Frame_t current = vm->current;
   if (current != NULL) {
@@ -1010,6 +1022,13 @@ void collect(VM *vm) {
         Value *valuePtr = frameRootValue(root);
         relocate(vm, valuePtr);
         root = frameRootNext(root);
+      }
+
+      FrameHandler_t handler = frameHandlers(current);
+      while (handler != NULL) {
+        Value *valuePtr = frameHandlerValue(handler);
+        relocate(vm, valuePtr);
+        handler = frameHandlerNext(handler);
       }
 
       if (!hasParent(current)) {
@@ -1443,10 +1462,64 @@ void raisedInitContents(Raised *r) {
   r->fileName = NULL;
 }
 
+Frame_t popSpecificFrame(VM *vm, Frame_t popped);
+
+void makeInvocable(VM *vm, Value pop, Invocable *invocable);
+void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invocable, uint16_t numArgsSupplied);
+
 void handleRaise(VM *vm, Raised *r) {
-  Value value = exceptionMake(vm, r);
-  setException(vm, value);
-  longjmp(vm->jumpBuf, 1);
+  Value exception = exceptionMake(vm, r);
+  setException(vm, exception);
+
+  Frame_t handlerFrame = NULL;
+  Frame_t frameToPop = NULL;
+  if (vm->current != NULL) {
+    Frame_t current = vm->current;
+    while (true) {
+
+      if (frameHandlers(current) != NULL) {
+        handlerFrame = current;
+        break;
+      }
+      else { // no handler, this frame will get popped
+        frameToPop = current;
+      }
+
+      if (!hasParent(current)) {
+        break;
+      }
+      else {
+        current = getParent(current);
+      }
+    }
+  }
+
+  if (handlerFrame != NULL) { // found a handler
+
+    // pop all the frames off the stack until we are on the frame we're jumping to
+    if (frameToPop != NULL) {
+      popSpecificFrame(vm, frameToPop);
+    }
+
+    FrameHandler_t handler = frameHandlers(vm->current);
+
+    {
+      pushOperand(handlerFrame, exception);
+
+      Invocable invocable;
+      makeInvocable(vm, *frameHandlerValue(handler), &invocable);
+
+      Frame_t frame = pushFrame(vm, (Value) invocable.fn);
+      Frame_t parent = getParent(frame);
+      invokePopulateLocals(vm, parent, frame, &invocable, 1);
+    }
+
+    uint16_t jumpAddr = frameHandlerJumpAddr(handler);
+    setPc(handlerFrame, jumpAddr);
+  }
+  else { // bomb out
+    longjmp(vm->jumpBuf, 1);
+  }
 }
 
 #define raise(vm, str, ...) {\
@@ -1861,15 +1934,18 @@ void swapEval(VM *vm, Frame_t frame) {
 
 // (8)        | (jumpAddr, handler ->)
 void setHandlerEval(VM *vm, Frame_t frame) {
-  ExceptionHandler handler;
-  handler.jumpAddress = readIndex(frame);
-  handler.localIndex = readIndex(frame);
-  setHandler(frame, handler);
+  Value handler = popOperand(frame);
+  ValueType handlerType = valueType(handler);
+  if (handlerType != VT_FN) {
+    raise(vm, "cannot cons onto a value of type %s", getValueTypeName(vm, handlerType));
+  }
+//  pushFrameHandler(vm, handler);
+  explode("oops");
 }
 
 // (8)        | (->)
 void clearHandlerEval(VM *vm, Frame_t frame) {
-  clearHandler(frame);
+  popFrameHandler(vm);
 }
 
 // (8),             | (x, seq -> newseq)
@@ -2429,6 +2505,20 @@ void frameRootInitContents(FrameRoot *root) {
   root->next = NULL;
 }
 
+typedef struct FrameHandler FrameHandler;
+
+typedef struct FrameHandler {
+  Value value;
+  uint16_t jumpAddr;
+  FrameHandler *next;
+} FrameHandler;
+
+void frameHandlerInitContents(FrameHandler *handler) {
+  handler->value = W_NIL_VALUE;
+  handler->jumpAddr = 0;
+  handler->next = NULL;
+}
+
 typedef struct Frame {
   Frame *parent;
 
@@ -2442,13 +2532,11 @@ typedef struct Frame {
   Value *opStack;
 
   FrameRoot *roots;
+  FrameHandler *handlers;
 
   Value result;
   bool resultAvailable;
   uint16_t pc;
-
-  ExceptionHandler handler;
-  bool handlerSet;
 } Frame;
 
 void handlerInitContents(ExceptionHandler *h) {
@@ -2465,14 +2553,13 @@ void frameInitContents(Frame *frame) {
   frame->resultAvailable = 0;
   frame->result = W_NIL_VALUE;
   frame->pc = 0;
-  handlerInitContents(&frame->handler);
-  frame->handlerSet = false;
 
   frame->opStackUsedDepth = 0;
   frame->opStackMaxDepth = 0;
   frame->opStack = NULL;
 
   frame->roots = NULL;
+  frame->handlers = NULL;
 }
 
 uint8_t readInstruction(Frame *frame) {
@@ -2608,27 +2695,6 @@ Value getResult(Frame *frame) {
   return frame->result;
 }
 
-bool hasHandler(Frame *frame) {
-  return frame->handlerSet;
-}
-
-ExceptionHandler getHandler(Frame_t frame) {
-  if (!frame->handlerSet) {
-    explode("handler not set");
-  }
-  return frame->handler;
-}
-
-void setHandler(Frame_t frame, ExceptionHandler handler) {
-  frame->handler = handler;
-  frame->handlerSet = true;
-}
-
-void clearHandler(Frame_t frame) {
-  handlerInitContents(&frame->handler);
-  frame->handlerSet = false;
-}
-
 bool hasFnName(Frame *frame) {
   return frame->fn->hasName;
 }
@@ -2711,15 +2777,21 @@ Frame_t pushFrame(VM *vm, Value newFn) {
 }
 
 Frame* popFrame(VM *vm) {
-
   if (vm->current == NULL) {
     explode("no frames on stack");
   }
-
   Frame *popped = vm->current;
   vm->current = vm->current->parent;
   stackFree(&vm->stack, popped);
+  return vm->current;
+}
 
+Frame* popSpecificFrame(VM *vm, Frame_t popped) {
+  if (vm->current == NULL) {
+    explode("no frames on stack");
+  }
+  vm->current = vm->current->parent;
+  stackFree(&vm->stack, popped);
   return vm->current;
 }
 
@@ -2796,6 +2868,70 @@ void popFrameRoot(VM *vm) {
     frame->roots = frame->roots->next;
   }
 }
+
+FrameHandler_t frameHandlers(Frame_t frame) {
+  return frame->handlers;
+}
+
+Value* frameHandlerValue(FrameHandler_t handler) {
+  return &handler->value;
+}
+
+uint16_t frameHandlerJumpAddr(FrameHandler_t handler) {
+  return handler->jumpAddr;
+}
+
+FrameHandler_t frameHandlerNext(FrameHandler_t handler) {
+  return handler->next;
+}
+
+void pushFrameHandler(VM *vm, Value value, uint16_t jumpAddr) {
+  Stack *stack = &vm->stack;
+  Frame *frame = vm->current;
+
+  FrameHandler *handler = stackAllocate(stack, sizeof(FrameHandler), "FrameHandler");
+  frameHandlerInitContents(handler);
+  handler->value = value;
+  handler->jumpAddr = jumpAddr;
+
+  if (frame == NULL) {
+    handler->next = vm->noFrameHandlers;
+    vm->noFrameHandlers = handler;
+  }
+  else {
+    handler->next = frame->handlers;
+    frame->handlers = handler;
+  }
+}
+
+void popFrameHandler(VM *vm) {
+  Frame *frame = vm->current;
+  if (frame == NULL) {
+    vm->noFrameHandlers = vm->noFrameHandlers->next;
+  }
+  else {
+    frame->handlers = frame->handlers->next;
+  }
+}
+
+//bool hasHandler(VM *vm) {
+//  Frame *frame = vm->current;
+//  if (frame == NULL) {
+//    return vm->noFrameHandlers != NULL;
+//  }
+//  else {
+//    return vm->current->handlers != NULL;
+//    frame->handlers = frame->handlers->next;
+//  }
+//  if (frame == NULL) {
+//}
+//
+//Value getHandler(Frame_t frame) {
+//  if (frame->handlers == NULL) {
+//    explode("handler not set");
+//  }
+//  return frame->handlers->value;
+//}
 
 /*
  * The top level frame could just be a regular frame
@@ -3429,6 +3565,20 @@ void toStringBuiltin(VM *vm, Frame_t frame) {
   }
 }
 
+void pushHandlerBuiltin(VM *vm, Frame_t frame) {
+  Value fn = popOperand(frame);
+  if (valueType(fn) != VT_FN) {
+    explode("handler must be a fn: %s", getValueTypeName(vm, valueType(fn)));
+  }
+  pushFrameHandler(vm, fn, 0);
+  pushOperand(frame, W_NIL_VALUE);
+}
+
+void popHandlerBuiltin(VM *vm, Frame_t frame) {
+  popFrameHandler(vm);
+  pushOperand(frame, W_NIL_VALUE);
+}
+
 void initCFns(VM *vm) {
 
   defineCFn(vm, L"cons", 2, false, consEval);
@@ -3452,6 +3602,8 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"vector", 1, true, vectorBuiltin);
   defineCFn(vm, L"record", 2, false, recordBuiltin);
   defineCFn(vm, L"to-string", 1, false, toStringBuiltin);
+  defineCFn(vm, L"push-handler", 1, false, pushHandlerBuiltin);
+  defineCFn(vm, L"pop-handler", 0, false, popHandlerBuiltin);
 }
 
 void vmConfigInitContents(VMConfig *config) {
@@ -3469,6 +3621,7 @@ void vmInitContents(VM *vm, VMConfig config) {
   vm->current = NULL;
   vm->exception = W_NIL_VALUE;
   vm->noFrameRoots = NULL;
+  vm->noFrameHandlers = NULL;
   initCFns(vm);
 }
 
