@@ -250,6 +250,17 @@ void popFrameRoot(VM *vm);
 Value tableLookup(VM *vm, Table *table, Value name);
 void putEntry(VM *vm, Table *table, Value name, Value insertMe);
 
+void cFnInitContents(CFn *fn) {
+  fn->header = 0;
+  fn->nameLength = 0;
+  fn->nameOffset = 0;
+  fn->numArgs = 0;
+  fn->ptr = NULL;
+  fn->usesVarArgs = false;
+}
+
+wchar_t* cFnName(CFn *fn) { return (void*)fn + fn->nameOffset; }
+
 void fnInitContents(Fn *fn) {
 
   fn->header = 0;
@@ -298,6 +309,12 @@ Value makeString(VM *vm, uint64_t length) {
   str->valueOffset = sizeof(String);
   stringValue(str)[length] = L'\0';
 
+  return (Value)str;
+}
+
+Value makeStringValue(VM *vm, wchar_t *text, uint64_t length) {
+  String *str = (String*)makeString(vm, length);
+  memcpy(stringValue(str), text, length * sizeof(wchar_t));
   return (Value)str;
 }
 
@@ -472,6 +489,50 @@ Record* makeRecord(VM *vm, uint64_t numFields) {
   }
 
   return record;
+}
+
+typedef void (*CFnInvoke) (VM_t vm, Frame_t frame);
+
+Value makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
+  CFn *fn = NULL;
+
+  uint64_t nameLength = wcslen(name);
+  uint64_t nameSize = (nameLength + 1) * sizeof(wchar_t);
+  uint64_t fnSize = padAllocSize(sizeof(CFn) + nameSize);
+
+  fn = alloc(vm, fnSize);
+  Value value = (Value)fn;
+
+  cFnInitContents(fn);
+  fn->header = makeObjectHeader(W_CFN_TYPE, fnSize);
+  fn->nameLength = nameLength;
+  fn->numArgs = numArgs;
+  fn->ptr = ptr;
+  fn->usesVarArgs = varArgs;
+
+  fn->nameOffset = sizeof(CFn);
+  memcpy(cFnName(fn), name, nameLength * sizeof(wchar_t));
+  cFnName(fn)[nameLength] = L'\0';
+
+  return value;
+}
+
+void defineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
+
+  Value protectedName = makeStringValue(vm, name, wcslen(name));
+  pushFrameRoot(vm, &protectedName);
+
+  Value protectedSymbol = symbolIntern(vm, &protectedName);
+  pushFrameRoot(vm, &protectedSymbol);
+
+  Value value = makeCFn(vm, name, numArgs, varArgs, ptr);
+
+  Symbol *symbol = deref(vm, protectedSymbol);
+  symbol->valueDefined = true;
+  symbol->topLevelValue = value;
+
+  popFrameRoot(vm);
+  popFrameRoot(vm);
 }
 
 /*
@@ -1067,15 +1128,9 @@ Value fnHydrate(VM *vm, FnConstant *fnConst) {
   return (Value)fn;
 }
 
-Value stringHydrate(VM *vm, wchar_t *text, uint64_t length) {
-  String *str = (String*)makeString(vm, length);
-  memcpy(stringValue(str), text, length * sizeof(wchar_t));
-  return (Value)str;
-}
-
 Value symbolHydrate(VM *vm, SymbolConstant symConst) {
 
-  Value protectedName = stringHydrate(vm, symConst.value, symConst.length);
+  Value protectedName = makeStringValue(vm, symConst.value, symConst.length);
   pushFrameRoot(vm, &protectedName);
 
   Value value = symbolIntern(vm, &protectedName);
@@ -1085,7 +1140,7 @@ Value symbolHydrate(VM *vm, SymbolConstant symConst) {
 }
 
 Value keywordHydrate(VM *vm, KeywordConstant kwConst) {
-  Value protectedName = stringHydrate(vm, kwConst.value, kwConst.length);
+  Value protectedName = makeStringValue(vm, kwConst.value, kwConst.length);
   pushFrameRoot(vm, &protectedName);
 
   Value value = keywordIntern(vm, &protectedName);
@@ -1205,7 +1260,7 @@ Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c) {
       v = fnHydrate(vm, &c.function);
       break;
     case CT_STR:
-      v = stringHydrate(vm, c.string.value, c.string.length);
+      v = makeStringValue(vm, c.string.value, c.string.length);
       break;
     case CT_SYMBOL:
       v = symbolHydrate(vm, c.symbol);
@@ -1239,7 +1294,7 @@ typedef struct Raised {
 } Raised;
 
 Value getKeyword(VM *vm, wchar_t *text) {
-  Value protectedName = stringHydrate(vm, text, wcslen(text));
+  Value protectedName = makeStringValue(vm, text, wcslen(text));
   pushFrameRoot(vm, &protectedName);
   Value kw = keywordIntern(vm, &protectedName);
   popFrameRoot(vm); // protectedMessageName
@@ -1252,7 +1307,7 @@ Value exceptionMake(VM *vm, Raised *raised) {
   {
     wchar_t msg[ERROR_MSG_LENGTH];
     swprintf(msg, ERROR_MSG_LENGTH, L"unhandled error: %ls", raised->message);
-    protectedMessage = (String*)stringHydrate(vm, msg, wcslen(msg));
+    protectedMessage = (String*)makeStringValue(vm, msg, wcslen(msg));
     memcpy(stringValue(protectedMessage), &msg, wcslen(msg));
     pushFrameRoot(vm, (Value*)&protectedMessage);
   }
@@ -1338,7 +1393,7 @@ Value exceptionMake(VM *vm, Raised *raised) {
         fnName = L"<root>\0";
       }
 
-      putMapEntry(vm, &protectedFrame, protectedFunctionKw, stringHydrate(vm, fnName, wcslen(fnName)));
+      putMapEntry(vm, &protectedFrame, protectedFunctionKw, makeStringValue(vm, fnName, wcslen(fnName)));
 
       if (hasSourceTable(current)) {
 
@@ -1348,7 +1403,7 @@ Value exceptionMake(VM *vm, Raised *raised) {
         getLineNumber(current, &lineNumber);
 
         putMapEntry(vm, &protectedFrame, protectedUnknownSourceKw, wrapBool(false));
-        putMapEntry(vm, &protectedFrame, protectedFileNameKw, stringHydrate(vm, fileName, wcslen(fileName)));
+        putMapEntry(vm, &protectedFrame, protectedFileNameKw, makeStringValue(vm, fileName, wcslen(fileName)));
         putMapEntry(vm, &protectedFrame, protectedLineNumberKw, wrapUint(lineNumber));
       }
       else {
@@ -1552,8 +1607,6 @@ void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invo
 
   unprotectInvocable(vm, invocable);
 }
-
-typedef void (*CFnInvoke) (VM_t vm, Frame_t frame);
 
 void invokeCFn(VM *vm, Frame_t frame, Value cFn, uint16_t numArgsSupplied) {
   CFn *protectedFn = deref(vm, cFn);
@@ -3370,63 +3423,10 @@ void toStringBuiltin(VM *vm, Frame_t frame) {
     wchar_t s[30];
     uint64_t number = unwrapUint(value);
     swprintf(s, 20, L"%" PRIu64, number);
-    Value str = stringHydrate(vm, s, wcslen(s));
+    Value str = makeStringValue(vm, s, wcslen(s));
 
     pushOperand(frame, str);
   }
-}
-
-void cFnInitContents(CFn *fn) {
-  fn->header = 0;
-  fn->nameLength = 0;
-  fn->nameOffset = 0;
-  fn->numArgs = 0;
-  fn->ptr = NULL;
-  fn->usesVarArgs = false;
-}
-
-wchar_t* cFnName(CFn *fn) { return (void*)fn + fn->nameOffset; }
-
-Value makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
-  CFn *fn = NULL;
-
-  uint64_t nameLength = wcslen(name);
-  uint64_t nameSize = (nameLength + 1) * sizeof(wchar_t);
-  uint64_t fnSize = padAllocSize(sizeof(CFn) + nameSize);
-
-  fn = alloc(vm, fnSize);
-  Value value = (Value)fn;
-
-  cFnInitContents(fn);
-  fn->header = makeObjectHeader(W_CFN_TYPE, fnSize);
-  fn->nameLength = nameLength;
-  fn->numArgs = numArgs;
-  fn->ptr = ptr;
-  fn->usesVarArgs = varArgs;
-
-  fn->nameOffset = sizeof(CFn);
-  memcpy(cFnName(fn), name, nameLength * sizeof(wchar_t));
-  cFnName(fn)[nameLength] = L'\0';
-
-  return value;
-}
-
-void defineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
-
-  Value protectedName = stringHydrate(vm, name, wcslen(name));
-  pushFrameRoot(vm, &protectedName);
-
-  Value protectedSymbol = symbolIntern(vm, &protectedName);
-  pushFrameRoot(vm, &protectedSymbol);
-
-  Value value = makeCFn(vm, name, numArgs, varArgs, ptr);
-
-  Symbol *symbol = deref(vm, protectedSymbol);
-  symbol->valueDefined = true;
-  symbol->topLevelValue = value;
-
-  popFrameRoot(vm);
-  popFrameRoot(vm);
 }
 
 void initCFns(VM *vm) {
