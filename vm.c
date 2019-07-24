@@ -88,10 +88,6 @@ ValueType valueType(Value v) {
   explode("unknown type: %" PRIu64, v);
 }
 
-Value nil() {
-  return W_NIL_VALUE;
-}
-
 Value wrapBool(bool b) {
   return (((uint8_t)b & 1u) << 4u) | W_BOOLEAN_BITS;
 }
@@ -220,6 +216,241 @@ typedef struct VM {
 } VM;
 
 /*
+ * Manipulating Heap Values
+ */
+
+uint64_t padAllocSize(uint64_t length);
+void* alloc(VM *vm, uint64_t length);
+void pushFrameRoot(VM *vm, Value *rootPtr);
+void popFrameRoot(VM *vm);
+Value tableLookup(VM *vm, Table *table, Value name);
+void putEntry(VM *vm, Table *table, Value name, Value insertMe);
+
+void fnInitContents(Fn *fn) {
+
+  fn->header = 0;
+
+  fn->hasName = false;
+  fn->nameLength = 0;
+  fn->nameOffset = 0;
+
+  fn->numArgs = 0;
+  fn->usesVarArgs = false;
+  fn->numConstants = 0;
+  fn->constantsOffset = 0;
+
+  fn->numLocals = 0;
+  fn->maxOperandStackSize = 0;
+  fn->codeLength = 0;
+  fn->codeOffset = 0;
+
+  fn->hasSourceTable = false;
+  fn->sourceFileNameLength = 0;
+  fn->sourceFileNameOffset = 0;
+  fn->numLineNumbers = 0;
+  fn->lineNumbersOffset = 0;
+}
+
+void stringInitContents(String *s) {
+  s->header = 0;
+  s->length = 0;
+  s->valueOffset = 0;
+  s->hash = 0;
+}
+
+Value makeString(VM *vm, uint64_t length) {
+
+  String *str = NULL;
+
+  uint64_t textSize = (length + 1) * sizeof(wchar_t);
+  uint64_t strSize = padAllocSize(sizeof(String) + textSize);
+
+  str = alloc(vm, strSize);
+
+  stringInitContents(str);
+  str->header = makeObjectHeader(W_STR_TYPE, strSize);
+  str->length = length;
+
+  str->valueOffset = sizeof(String);
+  stringValue(str)[length] = L'\0';
+
+  return (Value)str;
+}
+
+void symbolInitContents(Symbol *s) {
+  s->header = 0;
+  s->topLevelValue = W_NIL_VALUE;
+  s->valueDefined = false;
+  s->name = W_NIL_VALUE;
+  s->isMacro = false;
+}
+
+Value symbolIntern(VM *vm, Value *protectedName) {
+
+  Table *table = &vm->symbolTable;
+  Value result = tableLookup(vm, table, *protectedName);
+  if (valueType(result) == VT_NIL) {
+
+    uint64_t size = padAllocSize(sizeof(Symbol));
+    Symbol *symbol = alloc(vm, size);
+
+    symbolInitContents(symbol);
+    symbol->header = makeObjectHeader(W_SYMBOL_TYPE, size);
+    symbol->name = *protectedName;
+
+    putEntry(vm, table, *protectedName, (Value) symbol);
+    result = (Value)symbol;
+  }
+
+  return result;
+}
+
+void keywordInitContents(Keyword *k) {
+  k->header = 0;
+  k->name = W_NIL_VALUE;
+}
+
+Value keywordIntern(VM *vm, Value *protectedName) {
+
+  Table *table = &vm->keywordTable;
+  Value result = tableLookup(vm, table, *protectedName);
+  if (valueType(result) == VT_NIL) {
+
+    uint64_t size = padAllocSize(sizeof(Keyword));
+    Keyword *kw = alloc(vm, size);
+
+    keywordInitContents(kw);
+    kw->header = makeObjectHeader(W_KEYWORD_TYPE, size);
+    kw->name = *protectedName;
+
+    putEntry(vm, table, *protectedName, (Value)kw);
+    result = (Value)kw;
+  }
+
+  return result;
+}
+
+void consInitContents(Cons *c) {
+  c->header = 0;
+  c->metadata = W_NIL_VALUE;
+  c->value = W_NIL_VALUE;
+  c->next = W_NIL_VALUE;
+}
+
+Cons* makeCons(VM *vm) {
+
+  Cons *cons = NULL;
+  uint64_t size = padAllocSize(sizeof(Cons));
+  cons = alloc(vm, size);
+
+  consInitContents(cons);
+  cons->header = makeObjectHeader(W_LIST_TYPE, size);
+
+  return cons;
+}
+
+void arrayInitContents(Array *array) {
+  array->header = 0;
+}
+
+Value* arrayElements(Array *array) {
+  return ((void*)array) + sizeof(Array);
+}
+
+Array* makeArray(VM *vm, uint64_t size) {
+
+  uint64_t sizeBytes = padAllocSize(sizeof(Array) + (size * sizeof(Value)));
+  Array *array = alloc(vm, sizeBytes);
+
+  arrayInitContents(array);
+  array->header = makeObjectHeader(W_ARRAY_TYPE, size);
+
+  Value *elements = ((void*)array)+ sizeof(Array);
+  for (uint64_t i=0; i<size; i++) {
+    elements[i] = W_NIL_VALUE;
+  }
+
+  return array;
+}
+
+void _mapEntryInitContents(MapEntry *e) {
+  e->header = 0;
+  e->used = false;
+  e->key = W_NIL_VALUE;
+  e->keyHash = 0;
+  e->value = W_NIL_VALUE;
+}
+
+MapEntry* makeMapEntry(VM *vm) {
+
+  uint64_t sizeBytes = padAllocSize(sizeof(MapEntry));
+  MapEntry *entry = alloc(vm, sizeBytes);
+
+  _mapEntryInitContents(entry);
+  entry->header = makeObjectHeader(W_MAP_ENTRY_TYPE, sizeBytes);
+
+  return entry;
+}
+
+void _mapInitContents(Map *m) {
+  m->header = 0;
+  m->size = 0;
+  m->entries = W_NIL_VALUE;
+}
+
+#define W_MAP_MIN_ENTRIES 16
+#define W_MAP_MIN_LOAD .40
+#define W_MAP_MAX_LOAD .70
+
+Map* makeMap(VM *vm) {
+
+  uint64_t numEntries = W_MAP_MIN_ENTRIES;
+
+  Array *protectedEntries = makeArray(vm, numEntries);
+  pushFrameRoot(vm, (Value*)&protectedEntries);
+
+  for (uint64_t i=0; i<numEntries; i++) {
+    arrayElements(protectedEntries)[i] = (Value)makeMapEntry(vm);
+  }
+
+  uint64_t sizeBytes = padAllocSize(sizeof(Map));
+  Map *map = alloc(vm, sizeBytes);
+
+  _mapInitContents(map);
+  map->header = makeObjectHeader(W_MAP_TYPE, sizeBytes);
+  map->entries = (Value)protectedEntries;
+
+  popFrameRoot(vm); // protectedEntries
+
+  return map;
+}
+
+void recordInitContents(Record *record) {
+  record->header = 0;
+  record->symbol = W_NIL_VALUE;
+}
+
+Value* recordFields(Record *record) {
+  return ((void*)record) + sizeof(Record);
+}
+
+Record* makeRecord(VM *vm, uint64_t numFields) {
+
+  uint64_t sizeBytes = padAllocSize(sizeof(Record) + (numFields * sizeof(Value)));
+  Record *record = alloc(vm, sizeBytes);
+
+  recordInitContents(record);
+  record->header = makeObjectHeader(W_RECORD_TYPE, numFields);
+
+  Value *fields = ((void*)record) + sizeof(Record);
+  for (uint64_t i=0; i<numFields; i++) {
+    fields[i] = W_NIL_VALUE;
+  }
+
+  return record;
+}
+
+/*
  * SymbolTable
  */
 
@@ -243,9 +474,9 @@ uint32_t stringHash(String *s) {
 
 void tableEntryInitContents(TableEntry *e) {
   e->used = false;
-  e->name = nil();
+  e->name = W_NIL_VALUE;
   e->nameHash = 0;
-  e->value = nil();
+  e->value = W_NIL_VALUE;
 }
 
 void tableInitContents(Table *t) {
@@ -325,7 +556,7 @@ Value tableLookup(VM *vm, Table *table, Value name) {
     return found->value;
   }
   else {
-    return nil();
+    return W_NIL_VALUE;
   }
 }
 
@@ -442,8 +673,6 @@ Frame_t pushFrame(VM *vm, Value newFn);
 Frame_t replaceFrame(VM *vm, Value newFn);
 Frame_t popFrame(VM *vm);
 
-void pushFrameRoot(VM *vm, Value *rootPtr);
-void popFrameRoot(VM *vm);
 FrameRoot_t frameRoots(Frame_t frame);
 Value* frameRootValue(FrameRoot_t root);
 FrameRoot_t frameRootNext(FrameRoot_t root);
@@ -733,31 +962,6 @@ void collect(VM *vm) {
 
 Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c);
 
-void fnInitContents(Fn *fn) {
-
-  fn->header = 0;
-
-  fn->hasName = false;
-  fn->nameLength = 0;
-  fn->nameOffset = 0;
-
-  fn->numArgs = 0;
-  fn->usesVarArgs = false;
-  fn->numConstants = 0;
-  fn->constantsOffset = 0;
-
-  fn->numLocals = 0;
-  fn->maxOperandStackSize = 0;
-  fn->codeLength = 0;
-  fn->codeOffset = 0;
-
-  fn->hasSourceTable = false;
-  fn->sourceFileNameLength = 0;
-  fn->sourceFileNameOffset = 0;
-  fn->numLineNumbers = 0;
-  fn->lineNumbersOffset = 0;
-}
-
 Value fnHydrate(VM *vm, FnConstant *fnConst) {
 
   Fn *fn = NULL;
@@ -826,7 +1030,7 @@ Value fnHydrate(VM *vm, FnConstant *fnConst) {
   }
 
   for (uint16_t i=0; i<fn->numConstants; i++) {
-    fnConstants(fn)[i] = nil();
+    fnConstants(fn)[i] = W_NIL_VALUE;
   }
 
   pushFrameRoot(vm, (Value*)&fn);
@@ -839,57 +1043,10 @@ Value fnHydrate(VM *vm, FnConstant *fnConst) {
   return (Value)fn;
 }
 
-void stringInitContents(String *s) {
-  s->header = 0;
-  s->length = 0;
-  s->valueOffset = 0;
-  s->hash = 0;
-}
-
 Value stringHydrate(VM *vm, wchar_t *text, uint64_t length) {
-
-  uint64_t textSize = (length + 1) * sizeof(wchar_t);
-  uint64_t strSize = padAllocSize(sizeof(String) + textSize);
-
-  String *str = alloc(vm, strSize);
-  stringInitContents(str);
-
-  str->header = makeObjectHeader(W_STR_TYPE, strSize);
-  str->length = length;
-
-  str->valueOffset = sizeof(String);
+  String *str = (String*)makeString(vm, length);
   memcpy(stringValue(str), text, length * sizeof(wchar_t));
-  stringValue(str)[length] = L'\0';
-
   return (Value)str;
-}
-
-void symbolInitContents(Symbol *s) {
-  s->header = 0;
-  s->topLevelValue = nil();
-  s->valueDefined = false;
-  s->name = nil();
-  s->isMacro = false;
-}
-
-Value symbolIntern(VM *vm, Value *protectedName) {
-
-  Table *table = &vm->symbolTable;
-  Value result = tableLookup(vm, table, *protectedName);
-  if (valueType(result) == VT_NIL) {
-
-    uint64_t size = padAllocSize(sizeof(Symbol));
-    Symbol *symbol = alloc(vm, size);
-
-    symbolInitContents(symbol);
-    symbol->header = makeObjectHeader(W_SYMBOL_TYPE, size);
-    symbol->name = *protectedName;
-
-    putEntry(vm, table, *protectedName, (Value) symbol);
-    result = (Value)symbol;
-  }
-
-  return result;
 }
 
 Value symbolHydrate(VM *vm, SymbolConstant symConst) {
@@ -903,31 +1060,6 @@ Value symbolHydrate(VM *vm, SymbolConstant symConst) {
   return value;
 }
 
-void keywordInitContents(Keyword *k) {
-  k->header = 0;
-  k->name = nil();
-}
-
-Value keywordIntern(VM *vm, Value *protectedName) {
-
-  Table *table = &vm->keywordTable;
-  Value result = tableLookup(vm, table, *protectedName);
-  if (valueType(result) == VT_NIL) {
-
-    uint64_t size = padAllocSize(sizeof(Keyword));
-    Keyword *kw = alloc(vm, size);
-
-    keywordInitContents(kw);
-    kw->header = makeObjectHeader(W_KEYWORD_TYPE, size);
-    kw->name = *protectedName;
-
-    putEntry(vm, table, *protectedName, (Value)kw);
-    result = (Value)kw;
-  }
-
-  return result;
-}
-
 Value keywordHydrate(VM *vm, KeywordConstant kwConst) {
   Value protectedName = stringHydrate(vm, kwConst.value, kwConst.length);
   pushFrameRoot(vm, &protectedName);
@@ -938,25 +1070,6 @@ Value keywordHydrate(VM *vm, KeywordConstant kwConst) {
   return value;
 }
 
-void consInitContents(Cons *c) {
-  c->header = 0;
-  c->metadata = nil();
-  c->value = nil();
-  c->next = nil();
-}
-
-Cons* makeCons(VM *vm) {
-
-  Cons *cons = NULL;
-  uint64_t size = padAllocSize(sizeof(Cons));
-  cons = alloc(vm, size);
-
-  consInitContents(cons);
-  cons->header = makeObjectHeader(W_LIST_TYPE, size);
-
-  return cons;
-}
-
 /*
  * `protectedFn` is a alloc-safe pointer to the Fn for which a constant is being hydrated.
  * This is included so we so that references to already-hydrated values can be resolved by
@@ -965,7 +1078,7 @@ Cons* makeCons(VM *vm) {
 Value listHydrate(VM *vm, Fn **protectedFn, ListConstant listConst) {
 
   // build up meta property list with conses
-  Value protectedMeta = nil();
+  Value protectedMeta = W_NIL_VALUE;
   pushFrameRoot(vm, &protectedMeta);
 
   for (uint64_t i=0; i<listConst.meta.numProperties; i++) {
@@ -983,7 +1096,7 @@ Value listHydrate(VM *vm, Fn **protectedFn, ListConstant listConst) {
   }
 
   // build up list with conses, each cons gets the same meta
-  Value protectedSeq = nil();
+  Value protectedSeq = W_NIL_VALUE;
   pushFrameRoot(vm, &protectedSeq);
 
   for (uint16_t i = 0; i < listConst.length; i++) {
@@ -1002,103 +1115,6 @@ Value listHydrate(VM *vm, Fn **protectedFn, ListConstant listConst) {
   popFrameRoot(vm);
 
   return protectedSeq;
-}
-
-void arrayInitContents(Array *array) {
-  array->header = 0;
-}
-
-Value* arrayElements(Array *array) {
-  return ((void*)array) + sizeof(Array);
-}
-
-Array* makeArray(VM *vm, uint64_t size) {
-
-  uint64_t sizeBytes = padAllocSize(sizeof(Array) + (size * sizeof(Value)));
-  Array *array = alloc(vm, sizeBytes);
-
-  arrayInitContents(array);
-  array->header = makeObjectHeader(W_ARRAY_TYPE, size);
-
-  Value *elements = ((void*)array)+ sizeof(Array);
-  for (uint64_t i=0; i<size; i++) {
-    elements[i] = W_NIL_VALUE;
-  }
-
-  return array;
-}
-
-void _mapEntryInitContents(MapEntry *e) {
-  e->header = 0;
-  e->used = false;
-  e->key = nil();
-  e->keyHash = 0;
-  e->value = nil();
-}
-
-MapEntry* makeMapEntry(VM *vm) {
-
-  uint64_t sizeBytes = padAllocSize(sizeof(MapEntry));
-  MapEntry *entry = alloc(vm, sizeBytes);
-
-  _mapEntryInitContents(entry);
-  entry->header = makeObjectHeader(W_MAP_ENTRY_TYPE, sizeBytes);
-
-  return entry;
-}
-
-void _mapInitContents(Map *m) {
-  m->header = 0;
-  m->size = 0;
-  m->entries = nil();
-}
-
-Map* makeMap(VM *vm) {
-
-  uint64_t numEntries = SYMBOL_TABLE_MIN_ENTRIES;
-
-  Array *protectedEntries = makeArray(vm, numEntries);
-  pushFrameRoot(vm, (Value*)&protectedEntries);
-
-  for (uint64_t i=0; i<numEntries; i++) {
-    arrayElements(protectedEntries)[i] = (Value)makeMapEntry(vm);
-  }
-
-  uint64_t sizeBytes = padAllocSize(sizeof(Map));
-  Map *map = alloc(vm, sizeBytes);
-
-  _mapInitContents(map);
-  map->header = makeObjectHeader(W_MAP_TYPE, sizeBytes);
-  map->entries = (Value)protectedEntries;
-
-  popFrameRoot(vm); // protectedEntries
-
-  return map;
-}
-
-void recordInitContents(Record *record) {
-  record->header = 0;
-  record->symbol = nil();
-}
-
-Value* recordFields(Record *record) {
-  return ((void*)record) + sizeof(Record);
-}
-
-Record* makeRecord(VM *vm, uint64_t numFields) {
-
-  uint64_t sizeBytes = padAllocSize(sizeof(Record) + (numFields * sizeof(Value)));
-  Record *record = alloc(vm, sizeBytes);
-
-  recordInitContents(record);
-  record->header = makeObjectHeader(W_RECORD_TYPE, numFields);
-
-  Value *fields = ((void*)record) + sizeof(Record);
-  for (uint64_t i=0; i<numFields; i++) {
-    fields[i] = W_NIL_VALUE;
-  }
-
-  return record;
 }
 
 /*
@@ -1147,7 +1163,6 @@ Value mapHydrate(VM *vm, Fn **protectedFn, MapConstant mapConst) {
   return (Value)protectedMap;
 }
 
-// TODO: I had a thought, can we get rid of CodeUnit entirely and just replace it with FnConstant?
 // TODO: I had another thought, can we get rid of the nested graph of constants and flatten it entirely?
 
 Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c) {
@@ -1160,7 +1175,7 @@ Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c) {
       v = wrapUint(c.integer);
       break;
     case CT_NIL:
-      v = nil();
+      v = W_NIL_VALUE;
       break;
     case CT_FN:
       v = fnHydrate(vm, &c.function);
@@ -1206,8 +1221,6 @@ Value getKeyword(VM *vm, wchar_t *text) {
   popFrameRoot(vm); // protectedMessageName
   return kw;
 }
-
-Value stringMakeBlank(VM *vm, uint64_t length);
 
 Value exceptionMake(VM *vm, Raised *raised) {
 
@@ -1257,14 +1270,14 @@ Value exceptionMake(VM *vm, Raised *raised) {
 
   { // native frame
 
-    String *protectedFunctionName = (String*)stringMakeBlank(vm, strlen(raised->functionName) + 1);
+    String *protectedFunctionName = (String*) makeString(vm, strlen(raised->functionName) + 1);
     swprintf(stringValue(protectedFunctionName), protectedFunctionName->length, L"%s", raised->functionName);
     pushFrameRoot(vm, (Value*)&protectedFunctionName);
 
     Value unknownSource = wrapBool(false);
 
     char* fileName = basename((char *) raised->fileName);
-    String *protectedFileName = (String*)stringMakeBlank(vm, strlen(fileName) + 1);
+    String *protectedFileName = (String*) makeString(vm, strlen(fileName) + 1);
     swprintf(stringValue(protectedFileName), protectedFileName->length, L"%s", fileName);
     pushFrameRoot(vm, (Value*)&protectedFileName);
 
@@ -1345,15 +1358,12 @@ Value exceptionMake(VM *vm, Raised *raised) {
   return (Value)protectedExn;
 }
 
-Value mapLookup(VM *vm, Map *map, Value key);
-
 void raisedInitContents(Raised *r) {
   r->lineNumber = 0;
   r->functionName = NULL;
   r->fileName = NULL;
 }
 
-// TODO: exceptions should go on the heap as values
 void handleRaise(VM *vm, Raised *r) {
   Value value = exceptionMake(vm, r);
   setException(vm, value);
@@ -1401,7 +1411,7 @@ void storeLocalEval(VM *vm, Frame_t frame) {
 }
 
 void invocableInitContents(Invocable *i) {
-  i->ref = nil();    // the reference to the initially invoked value (could be closure or fn)
+  i->ref = W_NIL_VALUE;    // the reference to the initially invoked value (could be closure or fn)
   i->fn = NULL;      // always points to the actual fn
   i->closure = NULL; // points to the closure, if there is one
 }
@@ -1471,7 +1481,7 @@ void preprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarA
                         numArgs - 1, numArgsSupplied);
     }
 
-    Value seq = nil();
+    Value seq = W_NIL_VALUE;
     pushFrameRoot(vm, &seq);
 
     // read the extra args into that sequence, push it back on the stack
@@ -1530,8 +1540,6 @@ void invokeCFn(VM *vm, Frame_t frame, Value cFn, uint16_t numArgsSupplied) {
 
   popFrameRoot(vm);
 }
-
-Value mapLookup(VM *vm, Map *map, Value key);
 
 // (8)              | (objectref, args... -> ...)
 void invokeDynEval(VM *vm, Frame_t frame) {
@@ -1685,7 +1693,7 @@ void defVarEval(VM *vm, Frame_t frame) {
   symbol->valueDefined = true;
   symbol->topLevelValue = value;
 
-  pushOperand(frame, nil());
+  pushOperand(frame, W_NIL_VALUE);
 }
 
 // (8), offset 16  | (-> value)
@@ -1721,7 +1729,7 @@ void loadVarEval(VM *vm, Frame_t frame) {
 
 void closureInitContents(Closure *cl) {
   cl->header = 0;
-  cl->fn = nil();
+  cl->fn = W_NIL_VALUE;
   cl->numCaptures = 0;
   cl->capturesOffset = 0;
 }
@@ -1814,7 +1822,7 @@ void firstEval(VM *vm, Frame_t frame) {
 
   Value result;
   if (seqType == VT_NIL) {
-    result = nil();
+    result = W_NIL_VALUE;
   }
   else if (seqType == VT_LIST) {
     Cons *cons = deref(vm, seq);
@@ -1835,7 +1843,7 @@ void restEval(VM *vm, Frame_t frame) {
 
   Value result;
   if (seqType == VT_NIL) {
-    result = nil();
+    result = W_NIL_VALUE;
   }
   else if (seqType == VT_LIST) {
     Cons *cons = deref(vm, seq);
@@ -1883,7 +1891,7 @@ void setMacroEval(VM *vm, Frame_t frame) {
     s->isMacro = true;
   }
 
-  pushOperand(frame, nil());
+  pushOperand(frame, W_NIL_VALUE);
 }
 
 // (8),             | (name -> bool)
@@ -1903,7 +1911,7 @@ void getMacroEval(VM *vm, Frame_t frame) {
 // (8),             | (name -> bool)
 void gcEval(VM *vm, Frame_t frame) {
   collect(vm);
-  pushOperand(frame, nil());
+  pushOperand(frame, W_NIL_VALUE);
 }
 
 // (8),             | (value -> value)
@@ -1912,8 +1920,6 @@ void getTypeEval(VM *vm, Frame_t frame) {
   Value typeId = wrapUint(valueType(value));
   pushOperand(frame, typeId);
 }
-
-
 
 void printInst(int *i, const char* name, uint8_t *code) {
   printf("%i:\t%s\n", *i, name);
@@ -2375,12 +2381,12 @@ void handlerInitContents(ExceptionHandler *h) {
 
 void frameInitContents(Frame *frame) {
   frame->parent = NULL;
-  frame->fnRef = nil();
+  frame->fnRef = W_NIL_VALUE;
   frame->fn = NULL;
   frame->locals = NULL;
   frame->opStack = NULL;
   frame->resultAvailable = 0;
-  frame->result = nil();
+  frame->result = W_NIL_VALUE;
   frame->pc = 0;
   handlerInitContents(&frame->handler);
   frame->handlerSet = false;
@@ -2614,7 +2620,7 @@ Frame_t pushFrame(VM *vm, Value newFn) {
 
   frame->locals = stackAllocate(stack, sizeof(Value) * frame->fn->numLocals, "locals");
   for (uint16_t i = 0; i < frame->fn->numLocals; i++) {
-    frame->locals[i] = nil();
+    frame->locals[i] = W_NIL_VALUE;
   }
 
   frame->opStackMaxDepth = frame->fn->maxOperandStackSize;
@@ -2650,7 +2656,7 @@ Frame* replaceFrame(VM *vm, Value newFn) {
     frame->locals = stackAllocate(stack, sizeof(Value) * fn->numLocals, "locals");
   }
   for (uint16_t i = 0; i < fn->numLocals; i++) {
-    frame->locals[i] = nil();
+    frame->locals[i] = W_NIL_VALUE;
   }
 
   if (fn->maxOperandStackSize > frame->opStackMaxDepth) {
@@ -2667,7 +2673,7 @@ Frame* replaceFrame(VM *vm, Value newFn) {
 
   frame->fnRef = newFn;
   frame->fn = fn;
-  frame->result = nil();
+  frame->result = W_NIL_VALUE;
   frame->resultAvailable = false;
   frame->pc = 0;
 
@@ -2723,7 +2729,7 @@ void popFrameRoot(VM *vm) {
  *
  */
 
-Value _vmEval(VM *vm, CodeUnit *codeUnit, bool *exceptionThrown) {
+VMEvalResult vmEval(VM *vm, CodeUnit *codeUnit) {
 
   FnConstant c;
   constantFnInitContents(&c);
@@ -2731,36 +2737,20 @@ Value _vmEval(VM *vm, CodeUnit *codeUnit, bool *exceptionThrown) {
   c.constants = codeUnit->constants;
   c.code = codeUnit->code;
 
+  VMEvalResult result;
   if (!setjmp(vm->jumpBuf)) {
-    *exceptionThrown = false;
     Value fnRef = fnHydrate(vm, &c);
     Frame_t frame = pushFrame(vm, fnRef);
     frameEval(vm);
-    Value result = frame->result;
+    Value value = frame->result;
     popFrame(vm);
-    return result;
-  }
-  else {
-    *exceptionThrown = true;
-    return vm->exception;
-  }
-}
-
-VMEvalResult vmEval(VM *vm, CodeUnit *codeUnit) {
-
-  Value value;
-  bool exceptionThrown = false;
-
-  value = _vmEval(vm, codeUnit, &exceptionThrown);
-
-  VMEvalResult result;
-  if (exceptionThrown) {
-    result.type = RT_EXCEPTION;
-  }
-  else {
     result.type = RT_RESULT;
+    result.value = value;
   }
-  result.value = value;
+  else {
+    result.type = RT_EXCEPTION;
+    result.value = vm->exception;
+  }
 
   return result;
 }
@@ -2791,25 +2781,6 @@ VMEvalResult vmEval(VM *vm, CodeUnit *codeUnit) {
   if (valueType(value) != VT_ARRAY) { \
     raise(vm, "expected an array type: %s", getValueTypeName(vm, valueType(value))); \
   } \
-}
-
-Value stringMakeBlank(VM *vm, uint64_t length) {
-
-  String *str = NULL;
-
-  uint64_t textSize = (length + 1) * sizeof(wchar_t);
-  uint64_t strSize = padAllocSize(sizeof(String) + textSize);
-
-  str = alloc(vm, strSize);
-
-  stringInitContents(str);
-  str->header = makeObjectHeader(W_STR_TYPE, strSize);
-  str->length = length;
-
-  str->valueOffset = sizeof(String);
-  stringValue(str)[length] = L'\0';
-
-  return (Value)str;
 }
 
 /*
@@ -2843,7 +2814,7 @@ void strJoinBuiltin(VM *vm, Frame_t frame) {
     cursor = seq->next;
   }
 
-  Value resultRef = stringMakeBlank(vm, totalLength);
+  Value resultRef = makeString(vm, totalLength);
   String *result = deref(vm, resultRef);
 
   uint64_t totalSizeWritten = 0;
@@ -2900,7 +2871,7 @@ void arrayBuiltin(VM *vm, Frame_t frame) {
 void countBuiltin(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
 
-  Value result = nil();
+  Value result = W_NIL_VALUE;
   switch (valueType(value)) {
     case VT_ARRAY: {
       Array *k = deref(vm, value);
@@ -2942,7 +2913,7 @@ void getBuiltin(VM *vm, Frame_t frame) {
   Value key = popOperand(frame);
   Value coll = popOperand(frame);
 
-  Value result = nil();
+  Value result = W_NIL_VALUE;
   switch (valueType(coll)) {
     case VT_ARRAY: {
       ASSERT_UINT(vm, key);
@@ -3197,7 +3168,7 @@ Value mapLookup(VM *vm, Map *map, Value key) {
     return found->value;
   }
   else {
-    return nil();
+    return W_NIL_VALUE;
   }
 }
 
@@ -3253,16 +3224,16 @@ void putMapEntry(VM *vm, Map **protectedMap, Value key, Value insertMe) {
   float load = (float)(*protectedMap)->size / (float)numEntries;
 
   // resize
-  if (load > SYMBOL_TABLE_MAX_LOAD || (load > SYMBOL_TABLE_MIN_ENTRIES && load < SYMBOL_TABLE_MIN_LOAD)) {
+  if (load > W_MAP_MAX_LOAD || (load > W_MAP_MIN_ENTRIES && load < W_MAP_MIN_LOAD)) {
 
     uint64_t newAllocatedEntries;
-    if (load > SYMBOL_TABLE_MAX_LOAD) {
+    if (load > W_MAP_MAX_LOAD) {
       newAllocatedEntries = numEntries * 2;
     }
     else {
       newAllocatedEntries = numEntries / 2;
-      if (newAllocatedEntries < SYMBOL_TABLE_MIN_ENTRIES) {
-        newAllocatedEntries = SYMBOL_TABLE_MIN_ENTRIES;
+      if (newAllocatedEntries < W_MAP_MIN_ENTRIES) {
+        newAllocatedEntries = W_MAP_MIN_ENTRIES;
       }
     }
 
@@ -3496,7 +3467,7 @@ void vmInitContents(VM *vm, VMConfig config) {
   tableInit(&vm->symbolTable);
   tableInit(&vm->keywordTable);
   vm->current = NULL;
-  vm->exception = nil();
+  vm->exception = W_NIL_VALUE;
   vm->noFrameRoots = NULL;
   initCFns(vm);
 }

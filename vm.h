@@ -66,8 +66,6 @@ uint64_t objectHeaderSize(ObjectHeader h);
 ValueType objectHeaderValueType(ObjectHeader header);
 ValueType valueType(Value v);
 
-Value nil();
-
 Value wrapBool(bool b);
 bool unwrapBool(Value v);
 
@@ -221,46 +219,5 @@ void* deref(VM_t vm, Value value);
 const char* getValueTypeName(VM_t vm, uint8_t type);
 
 #endif //WARP_LANG_VM_H
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
