@@ -8,7 +8,7 @@ void lineNumberInitContents(LineNumber *n) {
 void sourceTableInitContents(SourceTable *t) {
   t->lineNumbers = NULL;
   t->numLineNumbers = 0;
-  textInitContents(&t->fileName);
+  t->fileName = NULL;
 }
 
 void codeInitContents(Code *code) {
@@ -32,7 +32,7 @@ void constantMetaInit(ConstantMeta *c) {
 
 void constantFnInitContents(FnConstant *fnConst) {
   fnConst->hasName = 0;
-  textInitContents(&fnConst->name);
+  fnConst->name = NULL;
   fnConst->numArgs = 0;
   fnConst->usesVarArgs = false;
   fnConst->numConstants = 0;

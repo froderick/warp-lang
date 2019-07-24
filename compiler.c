@@ -479,9 +479,9 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   constantFnInitContents(&fnConst);
 
   fnConst.hasName = form->fn.hasName;
-  textInitContents(&fnConst.name);
+  fnConst.name = NULL;
   if (fnConst.hasName) {
-    throws(tryTextCopy(output.pool, &form->fn.name, &fnConst.name, error));
+    throws(tryCopyText(output.pool, form->fn.name.value, &fnConst.name, form->fn.name.length, error));
   }
   fnConst.numArgs = form->fn.numArgs;
   fnConst.usesVarArgs = form->fn.usesVarArgs;
@@ -497,7 +497,7 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
 
     SourceTable *table = &fnConst.code.sourceTable;
     sourceTableInitContents(table);
-    throws(tryTextCopy(output.pool, &output.fileName, &table->fileName, error));
+    throws(tryCopyText(output.pool, output.fileName.value, &table->fileName, output.fileName.length, error));
     table->numLineNumbers = lineNumbers.numUsed;
     table->lineNumbers = lineNumbers.numbers;
   }
@@ -1120,7 +1120,7 @@ RetVal tryCompileTopLevel(Pool_t pool, FormRoot *root, CodeUnit *codeUnit, Error
     SourceTable *table = &codeUnit->code.sourceTable;
     sourceTableInitContents(table);
 
-    throws(tryTextCopy(pool, &root->fileName, &table->fileName, error));
+    throws(tryCopyText(pool, root->fileName.value, &table->fileName, root->fileName.length, error));
     table->numLineNumbers = lineNumbers.numUsed;
     table->lineNumbers = lineNumbers.numbers;
   }

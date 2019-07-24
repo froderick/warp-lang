@@ -5,6 +5,7 @@
 #include <inttypes.h>
 #include <setjmp.h>
 #include "vm.h"
+#include "errors.h"
 
 /*
  * VM Data Structures
@@ -427,11 +428,11 @@ void setHandler(Frame_t frame, ExceptionHandler handler);
 void clearHandler(Frame_t frame);
 
 bool hasFnName(Frame_t frame);
-Text getFnName(Frame_t frame);
+wchar_t* getFnName(Frame_t frame);
 
 bool hasSourceTable(Frame_t frame);
 bool getLineNumber(Frame_t frame, uint64_t *lineNumber);
-bool getFileName(Frame_t frame, Text *fileName);
+wchar_t* getFileName(Frame_t frame);
 
 bool hasException(VM *vm);
 void setException(VM *vm, Value e);
@@ -761,10 +762,16 @@ Value fnHydrate(VM *vm, FnConstant *fnConst) {
 
   Fn *fn = NULL;
   {
-    uint64_t nameSize = (fnConst->name.length + 1) * sizeof(wchar_t);
+    uint64_t nameSize = 0;
+    if (fnConst->hasName) {
+      nameSize = wcslen(fnConst->name) * sizeof(wchar_t);
+    }
     uint64_t constantsSize = fnConst->numConstants * sizeof(Value);
     uint64_t codeSize = fnConst->code.codeLength * sizeof(uint8_t);
-    uint64_t sourceFileNameSize = (fnConst->code.sourceTable.fileName.length + 1) * sizeof(wchar_t);
+    uint64_t sourceFileNameSize = 0;
+    if (fnConst->code.hasSourceTable) {
+      sourceFileNameSize = wcslen(fnConst->code.sourceTable.fileName) * sizeof(wchar_t);
+    }
     uint64_t lineNumbersSize = fnConst->code.sourceTable.numLineNumbers * sizeof(LineNumber);
 
     uint64_t fnSize = padAllocSize(
@@ -784,10 +791,10 @@ Value fnHydrate(VM *vm, FnConstant *fnConst) {
 
     fn->hasName = fnConst->hasName;
     if (fn->hasName) {
-      fn->nameLength = fnConst->name.length;
-      size_t copySize = fnConst->name.length * sizeof(wchar_t);
+      fn->nameLength = wcslen(fnConst->name);
+      size_t copySize = fn->nameLength * sizeof(wchar_t);
 
-      memcpy(fnName(fn), fnConst->name.value, copySize);
+      memcpy(fnName(fn), fnConst->name, copySize);
       fnName(fn)[fn->nameLength] = L'\0';
     }
 
@@ -807,10 +814,10 @@ Value fnHydrate(VM *vm, FnConstant *fnConst) {
     fn->hasSourceTable = fnConst->code.hasSourceTable;
     if (fn->hasSourceTable) {
 
-      fn->sourceFileNameLength = fnConst->code.sourceTable.fileName.length;
-      size_t copySize = fnConst->code.sourceTable.fileName.length * sizeof(wchar_t);
+      fn->sourceFileNameLength = wcslen(fnConst->code.sourceTable.fileName);
+      size_t copySize = fn->sourceFileNameLength * sizeof(wchar_t);
 
-      memcpy(fnSourceFileName(fn), fnConst->code.sourceTable.fileName.value, copySize);
+      memcpy(fnSourceFileName(fn), fnConst->code.sourceTable.fileName, copySize);
       fnSourceFileName(fn)[fn->sourceFileNameLength] = L'\0';
 
       fn->numLineNumbers = fnConst->code.sourceTable.numLineNumbers;
@@ -1183,7 +1190,6 @@ Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c) {
   return v;
 }
 
-
 #define RAISE_MSG_LENGTH 1023
 
 typedef struct Raised {
@@ -1289,7 +1295,7 @@ Value exceptionMake(VM *vm, Raised *raised) {
 
       wchar_t *fnName;
       if (hasFnName(current)) {
-        fnName = getFnName(current).value;
+        fnName = getFnName(current);
       }
       else {
         fnName = L"<root>\0";
@@ -1299,14 +1305,13 @@ Value exceptionMake(VM *vm, Raised *raised) {
 
       if (hasSourceTable(current)) {
 
-        Text fileName;
-        getFileName(current, &fileName);
+        wchar_t *fileName = getFileName(current);
 
         uint64_t lineNumber;
         getLineNumber(current, &lineNumber);
 
         putMapEntry(vm, &protectedFrame, protectedUnknownSourceKw, wrapBool(false));
-        putMapEntry(vm, &protectedFrame, protectedFileNameKw, stringHydrate(vm, fileName.value, wcslen(fileName.value)));
+        putMapEntry(vm, &protectedFrame, protectedFileNameKw, stringHydrate(vm, fileName, wcslen(fileName)));
         putMapEntry(vm, &protectedFrame, protectedLineNumberKw, wrapUint(lineNumber));
       }
       else {
@@ -2545,15 +2550,11 @@ bool hasFnName(Frame *frame) {
   return frame->fn->hasName;
 }
 
-Text getFnName(Frame_t frame) {
+wchar_t* getFnName(Frame_t frame) {
   if (!frame->fn->hasName) {
     explode("no fn name found");
   }
-  Text name;
-  textInitContents(&name);
-  name.value = fnName(frame->fn);
-  name.length = frame->fn->nameLength;
-  return name;
+  return fnName(frame->fn);
 }
 
 bool hasSourceTable(Frame *frame) {
@@ -2575,13 +2576,11 @@ bool getLineNumber(Frame *frame, uint64_t *lineNumber) {
   return false;
 }
 
-bool getFileName(Frame_t frame, Text *fileName) {
+wchar_t* getFileName(Frame_t frame) {
   if (frame->fn->hasSourceTable) {
-    fileName->value = fnSourceFileName(frame->fn);
-    fileName->length = frame->fn->sourceFileNameLength;
-    return true;
+    return fnSourceFileName(frame->fn);
   }
-  return false;
+  return NULL;
 }
 
 bool hasException(VM *vm) {

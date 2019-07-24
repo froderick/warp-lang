@@ -1,9 +1,11 @@
 #ifndef WARP_LANG_BYTECODE_H
 #define WARP_LANG_BYTECODE_H
 
-#include "stdint.h"
-#include "stdbool.h"
-#include "utils.h"
+#include <wctype.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <wchar.h>
+#include <stdio.h>
 
 //
 // Bytecode
@@ -16,7 +18,7 @@ typedef struct LineNumber {
 } LineNumber;
 
 typedef struct SourceTable {
-  Text fileName;
+  wchar_t *fileName;
   uint64_t numLineNumbers;
   LineNumber *lineNumbers;
 } SourceTable;
@@ -101,7 +103,7 @@ typedef struct StringConstant {
 
 typedef struct FnConstant {
   bool hasName;
-  Text name;
+  wchar_t *name;
   uint64_t numArgs;
   bool usesVarArgs;
   uint16_t numConstants;
