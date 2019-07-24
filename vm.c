@@ -5,65 +5,10 @@
 #include <inttypes.h>
 #include <setjmp.h>
 #include "vm.h"
-#include "utils.h"
 
 /*
  * VM Data Structures
  */
-
-typedef uint64_t Value;
-
-#define W_UINT_MASK      0x01u
-#define W_UINT_BITS      0x01u
-#define W_PTR_MASK       0x03u
-#define W_IMMEDIATE_MASK 0x0fu
-#define W_BOOLEAN_BITS   0x06u
-#define W_SPECIAL_MASK   0xf0u
-#define W_NIL_BITS       0x00u
-#define W_SPECIAL_BITS   0x0eu // 1110
-#define W_NIL_VALUE      0x0eu
-
-typedef enum ValueType {
-  VT_NIL,
-  VT_UINT,
-  VT_BOOL,
-  VT_FN,
-  VT_STR,
-  VT_SYMBOL,
-  VT_KEYWORD,
-  VT_LIST,
-  VT_CLOSURE,
-  VT_CFN,
-  VT_ARRAY,
-  VT_MAP,
-  VT_MAP_ENTRY,
-  VT_RECORD,
-} ValueType;
-
-#define W_GC_FORWARDING_BIT      0x8000000000000000L   /* header contains forwarding pointer */
-#define W_BYTEBLOCK_BIT          0x4000000000000000L   /* block contains bytes instead of slots */
-#define W_SPECIALBLOCK_BIT       0x2000000000000000L   /* 1st item is a non-value */
-#define W_8ALIGN_BIT             0x1000000000000000L   /* data is aligned to 8-byte boundary */
-#define W_HEADER_TYPE_BITS       0x0f00000000000000L
-#define W_HEADER_SIZE_MASK       0x00ffffffffffffffL
-
-#define W_FN_TYPE        0x0u
-#define W_STR_TYPE       0x1u
-#define W_SYMBOL_TYPE    0x2u
-#define W_KEYWORD_TYPE   0x3u
-#define W_LIST_TYPE      0x4u
-#define W_CLOSURE_TYPE   0x5u
-#define W_CFN_TYPE       0x6u
-#define W_ARRAY_TYPE     0x7u
-#define W_MAP_TYPE       0x8u
-#define W_MAP_ENTRY_TYPE 0x9u
-#define W_RECORD_TYPE    0xau
-
-/*
- * This is the first field inside all heap objects. It must come first so that the GC can
- * scan through the heap, for which it needs to determine object sizes and object types.
- */
-typedef uint64_t ObjectHeader;
 
 ObjectHeader makeObjectHeader(uint8_t objectType, uint64_t size) {
   if (objectType > 0xf) {
@@ -82,11 +27,6 @@ uint8_t objectHeaderType(ObjectHeader h) {
 uint64_t objectHeaderSize(ObjectHeader h) {
   return h & W_HEADER_SIZE_MASK;
 }
-
-typedef struct Record {
-  ObjectHeader header;
-  Value symbol;
-} Record;
 
 uint64_t objectHeaderSizeBytes(ObjectHeader h) {
   uint8_t type = objectHeaderType(h);
@@ -169,112 +109,14 @@ uint64_t unwrapUint(Value v) {
 
 typedef struct Frame *Frame_t;
 typedef struct FrameRoot *FrameRoot_t;
-typedef void (*CFnInvoke) (VM_t vm, Frame_t frame);
-
-typedef struct CFn {
-  ObjectHeader header;
-
-  uint64_t nameLength;
-  size_t nameOffset;
-  CFnInvoke ptr;
-  uint16_t numArgs;
-  bool usesVarArgs;
-} CFn;
-
-wchar_t* cFnName(CFn *fn) { return (void*)fn + fn->nameOffset; }
-
-typedef struct Fn {
-  ObjectHeader header;
-
-  bool hasName;
-  uint64_t nameLength;
-  size_t nameOffset;
-
-  uint16_t numArgs;
-  bool usesVarArgs;
-
-  uint16_t numConstants;
-  size_t constantsOffset;
-
-  uint16_t numLocals;           // the number of local bindings this code unit uses
-  uint64_t maxOperandStackSize; // the maximum number of items this code pushes onto the operand stack at one time
-  uint64_t codeLength;          // the number of bytes in this code block
-  size_t codeOffset;
-
-  bool hasSourceTable;
-  uint64_t sourceFileNameLength;
-  size_t sourceFileNameOffset;
-  uint64_t numLineNumbers;
-  size_t lineNumbersOffset;
-
-} Fn;
 
 wchar_t* fnName(Fn *fn) { return (void*)fn + fn->nameOffset; }
 Value* fnConstants(Fn *fn) { return (void*)fn + fn->constantsOffset; }
 uint8_t* fnCode(Fn *fn) { return (void*)fn + fn->codeOffset; }
 wchar_t* fnSourceFileName(Fn *fn) { return (void*)fn + fn->sourceFileNameOffset; }
 LineNumber* fnLineNumbers(Fn *fn) { return (void*)fn + fn->lineNumbersOffset; }
-
-typedef struct Closure {
-  ObjectHeader header;
-
-  Value fn;
-  uint16_t numCaptures;
-  size_t capturesOffset;
-} Closure;
-
 Value* closureCaptures(Closure *closure) { return (void*)closure + closure->capturesOffset; }
-
-typedef struct String {
-  ObjectHeader header;
-
-  uint64_t length;
-  size_t valueOffset;
-  uint32_t hash;
-} String;
-
 wchar_t* stringValue(String *x) { return (void*)x + x->valueOffset; }
-
-typedef struct Symbol {
-  ObjectHeader header;
-
-  Value topLevelValue;
-  bool valueDefined;
-  Value name;
-  bool isMacro;
-} Symbol;
-
-typedef struct Keyword {
-  ObjectHeader header;
-
-  Value name;
-} Keyword;
-
-typedef struct Cons {
-  ObjectHeader header;
-
-  Value metadata;
-  Value value;
-  Value next; // this must be a Cons, or Nil
-} Cons;
-
-typedef struct Array {
-  ObjectHeader header;
-} Array;
-
-typedef struct MapEntry {
-  ObjectHeader header;
-  bool used;
-  Value key;
-  uint32_t keyHash;
-  Value value;
-} MapEntry;
-
-typedef struct Map {
-  ObjectHeader header;
-  uint64_t size;
-  Value entries;
-} Map;
 
 typedef struct GC {
 
@@ -318,13 +160,11 @@ typedef struct Invocable {
 } Invocable;
 
 typedef void (*RelocateChildren)(VM_t vm, void *obj);
-typedef void (*Prn)(VM_t vm, Value result, Expr *expr);
 
 typedef struct ValueTypeInfo {
   const char *name;
   bool (*isTruthy)(Value value);
   RelocateChildren relocateChildren;
-  Prn prn;
 } ValueTypeInfo;
 
 typedef struct ValueTypeTable {
@@ -374,7 +214,6 @@ typedef struct VM {
   Frame_t current;
   Table symbolTable;
   Table keywordTable;
-  Pool_t outputPool; // this is mutable, it changes on every eval request
   jmp_buf jumpBuf;
   Value exception;
 } VM;
@@ -437,8 +276,6 @@ void tableInit(Table *table) {
   }
 }
 
-void* deref(GC *gc, Value value);
-
 TableEntry* findEntry(VM *vm, Table *table, String* name, uint32_t hash) {
 
   uint64_t index = hash % table->numAllocatedEntries;
@@ -449,7 +286,7 @@ TableEntry* findEntry(VM *vm, Table *table, String* name, uint32_t hash) {
     if (!entry->used) {
       return entry;
     } else {
-      String *thisName = deref(&vm->gc, entry->name);
+      String *thisName = deref(vm, entry->name);
       if (wcscmp(stringValue(name), stringValue(thisName)) == 0) {
         return entry;
       }
@@ -462,7 +299,7 @@ TableEntry* findEntry(VM *vm, Table *table, String* name, uint32_t hash) {
     if (!entry->used) {
       return entry;
     } else {
-      String *thisName = deref(&vm->gc, entry->name);
+      String *thisName = deref(vm, entry->name);
       if (wcscmp(stringValue(name), stringValue(thisName)) == 0) {
         return entry;
       }
@@ -478,7 +315,7 @@ Value tableLookup(VM *vm, Table *table, Value name) {
     explode("names must be strings");
   }
 
-  String *s = deref(&vm->gc, name);
+  String *s = deref(vm, name);
   uint32_t hash = stringHash(s);
 
   TableEntry *found = findEntry(vm, table, s, hash);
@@ -492,7 +329,7 @@ Value tableLookup(VM *vm, Table *table, Value name) {
 }
 
 void _putEntryWithHash(VM *vm, Table *table, Value insertMe, Value name, uint32_t hash) {
-  TableEntry *found = findEntry(vm, table, deref(&vm->gc, name), hash);
+  TableEntry *found = findEntry(vm, table, deref(vm, name), hash);
   if (!found ->used) {
     table->size++;
     found->used = true;
@@ -503,7 +340,7 @@ void _putEntryWithHash(VM *vm, Table *table, Value insertMe, Value name, uint32_
 }
 
 void _putEntry(VM *vm, Table *table, Value name, Value insertMe) {
-  String *s = deref(&vm->gc, name);
+  String *s = deref(vm, name);
   uint32_t hash = stringHash(s);
   _putEntryWithHash(vm, table, insertMe, name, hash);
 }
@@ -740,7 +577,8 @@ uint64_t padAllocSize(uint64_t length) {
 }
 
 // keeping this *for now*, it makes things slower but safer
-void* deref(GC *gc, Value value) {
+void* deref(VM *vm, Value value) {
+  GC *gc = &vm->gc;
   void *ptr = (void*)value;
   if (ptr < gc->currentHeap || ptr >= gc->allocPtr) {
     explode("invalid memory address: %p", ptr);
@@ -1345,31 +1183,6 @@ Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c) {
   return v;
 }
 
-/*
- * Create a reader representation of a Value (an Expr).
- *
- * Some representations are approximate and cannot be round-tripped through eval, such as functions and closures.
- */
-void vmPrn(VM *vm, Value result, Expr *expr) {
-  ValueType resultType = valueType(result);
-  exprInitContents(expr);
-  Prn prn = vm->valueTypeTable.valueTypes[resultType].prn;
-  prn(vm, result, expr);
-}
-
-#define ONE_KB 1024
-
-void doPr(VM *vm, Value v) {
-
-  Error error;
-  errorInitContents(&error);
-
-  Expr expr;
-  vmPrn(vm, v, &expr);
-  if (tryExprPrn(vm->outputPool, &expr, &error) != R_SUCCESS) {
-    explode("failed to other prn");
-  }
-}
 
 #define RAISE_MSG_LENGTH 1023
 
@@ -1529,78 +1342,6 @@ Value exceptionMake(VM *vm, Raised *raised) {
 
 Value mapLookup(VM *vm, Map *map, Value key);
 
-wchar_t* exceptionPrint(VM *vm, Pool_t pool, Value e) {
-
-  Map *exn = deref(&vm->gc, e);
-
-  String *message = (String*)mapLookup(vm, exn, getKeyword(vm, L"message"));
-  Array *frames = (Array*)mapLookup(vm, exn, getKeyword(vm, L"frames"));
-
-  Error error;
-  errorInitContents(&error);
-
-  StringBuffer_t b = NULL;
-
-  if (tryStringBufferMake(pool, &b, &error) != R_SUCCESS) {
-    explode("oops");
-  }
-
-  if (tryStringBufferAppendStr(b, stringValue(message), &error) != R_SUCCESS) {
-    explode("oops");
-  }
-
-  if (tryStringBufferAppendStr(b, L"\n", &error) != R_SUCCESS) {
-    explode("oops");
-  }
-
-  uint64_t numFrames = objectHeaderSize(frames->header);
-  Value* elements = arrayElements(frames);
-
-  for (uint64_t i=0; i<numFrames; i++) {
-    Map *frame = deref(&vm->gc, elements[i]);
-
-    String *functionName = (String*)mapLookup(vm, frame, getKeyword(vm, L"function-name"));
-    bool unknownSource = unwrapBool(mapLookup(vm, frame, getKeyword(vm, L"unknown-source")));
-
-    wchar_t msg[ERROR_MSG_LENGTH];
-    if (unknownSource) {
-      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(Unknown Source)\n", stringValue(functionName));
-    }
-    else {
-      String *fileName = (String*)mapLookup(vm, frame, getKeyword(vm, L"file-name"));
-      uint64_t lineNumber = unwrapUint(mapLookup(vm, frame, getKeyword(vm, L"line-number")));
-      swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(%ls:%" PRIu64 ")\n",
-          stringValue(functionName), stringValue(fileName), lineNumber);
-    }
-
-    if (tryStringBufferAppendStr(b, msg, &error) != R_SUCCESS) {
-      explode("oops");
-    }
-  }
-
-  wchar_t *output;
-  if (tryCopyText(pool, stringBufferText(b), &output, stringBufferLength(b), &error) != R_SUCCESS) {
-    explode("oops");
-  }
-
-  return output;
-}
-
-void exceptionPrintf(VM *vm) {
-  Error error;
-  errorInitContents(&error);
-
-  Pool_t pool = NULL;
-  if (tryPoolCreate(&pool, ONE_KB, &error) != R_SUCCESS) {
-    explode("oops");
-  }
-
-  wchar_t *msg = exceptionPrint(vm, pool, vm->exception);
-  printf("%ls\n", msg);
-
-  poolFree(pool);
-}
-
 void raisedInitContents(Raised *r) {
   r->lineNumber = 0;
   r->functionName = NULL;
@@ -1668,13 +1409,13 @@ void makeInvocable(VM *vm, Value pop, Invocable *invocable) {
   ValueType fnRefType = valueType(invocable->ref);
   switch (fnRefType) {
     case VT_FN: {
-      invocable->fn = deref(&vm->gc, invocable->ref);
+      invocable->fn = deref(vm, invocable->ref);
       invocable->closure = NULL;
       break;
     }
     case VT_CLOSURE: {
-      invocable->closure = deref(&vm->gc, invocable->ref);
-      invocable->fn = deref(&vm->gc, invocable->closure->fn);
+      invocable->closure = deref(vm, invocable->ref);
+      invocable->fn = deref(vm, invocable->closure->fn);
       break;
     }
     default:
@@ -1773,12 +1514,14 @@ void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invo
   unprotectInvocable(vm, invocable);
 }
 
+typedef void (*CFnInvoke) (VM_t vm, Frame_t frame);
+
 void invokeCFn(VM *vm, Frame_t frame, Value cFn, uint16_t numArgsSupplied) {
-  CFn *protectedFn = deref(&vm->gc, cFn);
+  CFn *protectedFn = deref(vm, cFn);
   pushFrameRoot(vm, (Value*)&protectedFn);
 
   preprocessArguments(vm, frame, protectedFn->numArgs, protectedFn->usesVarArgs, numArgsSupplied);
-  protectedFn->ptr(vm, frame);
+  ((CFnInvoke)protectedFn->ptr)(vm, frame);
 
   popFrameRoot(vm);
 }
@@ -1797,7 +1540,7 @@ void invokeDynEval(VM *vm, Frame_t frame) {
       Value key = pop;
       preprocessArguments(vm, frame, 1, false, numArgsSupplied);
       Value coll = popOperand(frame);
-      Map *m = deref(&vm->gc, coll);
+      Map *m = deref(vm, coll);
       Value result = mapLookup(vm, m, key);
       pushOperand(frame, result);
       break;
@@ -1836,7 +1579,7 @@ void invokeDynTailEval(VM *vm, Frame_t frame) {
       Value key = pop;
       preprocessArguments(vm, frame, 1, false, numArgsSupplied);
       Value coll = popOperand(frame);
-      Map *m = deref(&vm->gc, coll);
+      Map *m = deref(vm, coll);
       Value result = mapLookup(vm, m, key);
       pushOperand(frame, result);
       break;
@@ -1929,9 +1672,9 @@ void defVarEval(VM *vm, Frame_t frame) {
   uint16_t constantIndex = readIndex(frame);
   Value varName = getConst(frame, constantIndex);
 
-  Symbol *symbol = deref(&vm->gc, varName);
+  Symbol *symbol = deref(vm, varName);
 
-  String *name = deref(&vm->gc, symbol->name);
+  String *name = deref(vm, symbol->name);
   printf("defining %ls\n", stringValue(name));
 
   symbol->valueDefined = true;
@@ -1951,20 +1694,20 @@ void loadVarEval(VM *vm, Frame_t frame) {
     explode("expected a symbol: %s", getValueTypeName(vm, varNameType));
   }
 
-  Symbol *symbol = deref(&vm->gc, value);
+  Symbol *symbol = deref(vm, value);
 
   if (!symbol->valueDefined) {
 
     for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
       TableEntry *e = &vm->symbolTable.entries[i];
       if (e->used) {
-        Symbol *s = deref(&vm->gc, e->value);
-        String *name = deref(&vm->gc, s->name);
+        Symbol *s = deref(vm, e->value);
+        String *name = deref(vm, s->name);
         printf("symbol-table: %ls (defined=%u)\n", stringValue(name), s->valueDefined);
       }
     }
 
-    String *name = deref(&vm->gc, symbol->name);
+    String *name = deref(vm, symbol->name);
     raise(vm, "no value defined for : '%ls'", stringValue(name));
   }
 
@@ -1990,7 +1733,7 @@ void loadClosureEval(VM *vm, Frame_t frame) {
       raise(vm, "cannot create a closure from this value type: %s", getValueTypeName(vm, fnValueType));
     }
 
-    protectedFn = deref(&vm->gc, fnValue);
+    protectedFn = deref(vm, fnValue);
   }
   pushFrameRoot(vm, (Value*)&protectedFn);
 
@@ -2069,7 +1812,7 @@ void firstEval(VM *vm, Frame_t frame) {
     result = nil();
   }
   else if (seqType == VT_LIST) {
-    Cons *cons = deref(&vm->gc, seq);
+    Cons *cons = deref(vm, seq);
     result = cons->value;
   }
   else {
@@ -2090,7 +1833,7 @@ void restEval(VM *vm, Frame_t frame) {
     result = nil();
   }
   else if (seqType == VT_LIST) {
-    Cons *cons = deref(&vm->gc, seq);
+    Cons *cons = deref(vm, seq);
     result = cons->next;
   }
   else {
@@ -2110,16 +1853,16 @@ void setMacroEval(VM *vm, Frame_t frame) {
     raise(vm, "only symbols can identify vars: %s", getValueTypeName(vm, type));
   }
 
-  Symbol *s = deref(&vm->gc, value);
-  String *name = deref(&vm->gc, s->name);
+  Symbol *s = deref(vm, value);
+  String *name = deref(vm, s->name);
 
   if (!s->valueDefined) {
 
     for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
       TableEntry *e = &vm->symbolTable.entries[i];
       if (e->used) {
-        Symbol *sym = deref(&vm->gc, e->value);
-        String *symName = deref(&vm->gc, sym->name);
+        Symbol *sym = deref(vm, e->value);
+        String *symName = deref(vm, sym->name);
         printf("symbol-table: %ls (defined=%u)\n", stringValue(symName), s->valueDefined);
       }
     }
@@ -2147,7 +1890,7 @@ void getMacroEval(VM *vm, Frame_t frame) {
     raise(vm, "only symbols can identify vars: %s", getValueTypeName(vm, type));
   }
 
-  Symbol *s = deref(&vm->gc, value);
+  Symbol *s = deref(vm, value);
   Value result = wrapBool(s->isMacro);
   pushOperand(frame, result);
 }
@@ -2165,25 +1908,7 @@ void getTypeEval(VM *vm, Frame_t frame) {
   pushOperand(frame, typeId);
 }
 
-void vmPrn(VM *vm, Value result, Expr *expr);
 
-#define ONE_KB 1024
-
-// (8),             | (value -> value)
-void prnEval(VM *vm, Frame_t frame) {
-  Value value = popOperand(frame);
-
-  Error error;
-  errorInitContents(&error);
-  Expr expr;
-  vmPrn(vm, value, &expr);
-  if (tryExprPrn(vm->outputPool, &expr, &error) != R_SUCCESS) {
-    explode("expr prn");
-  }
-  printf("\n");
-
-  pushOperand(frame, nil());
-}
 
 void printInst(int *i, const char* name, uint8_t *code) {
   printf("%i:\t%s\n", *i, name);
@@ -2374,292 +2099,6 @@ void relocateChildrenRecord(VM_t vm, void *obj) {
   }
 }
 
-void prnNil(VM_t vm, Value result, Expr *expr) {
-  expr->type = N_NIL;
-}
-
-void prnInt(VM_t vm, Value result, Expr *expr) {
-  expr->type = N_NUMBER;
-  expr->number.value = unwrapUint(result);
-}
-
-void prnBool(VM_t vm, Value result, Expr *expr) {
-  expr->type = N_BOOLEAN;
-  expr->boolean.value = unwrapBool(result);
-}
-
-void prnFn(VM_t vm, Value result, Expr *expr) {
-  expr->type = N_STRING;
-  wchar_t function[] = L"<function>";
-  expr->string.length = wcslen(function);
-
-  Error error;
-  errorInitContents(&error);
-  if (tryCopyText(vm->outputPool, function, &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
-}
-
-void prnCFn(VM_t vm, Value result, Expr *expr) {
-  expr->type = N_STRING;
-  wchar_t function[] = L"<c-function>";
-  expr->string.length = wcslen(function);
-
-  Error error;
-  errorInitContents(&error);
-  if (tryCopyText(vm->outputPool, function, &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
-}
-
-void prnClosure(VM_t vm, Value result, Expr *expr) {
-  expr->type = N_STRING;
-  wchar_t function[] = L"<closure>";
-  expr->string.length = wcslen(function);
-
-  Error error;
-  errorInitContents(&error);
-  if (tryCopyText(vm->outputPool, function, &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
-}
-
-void prnStr(VM_t vm, Value result, Expr *expr) {
-  String *str = deref(&vm->gc, result);
-  expr->type = N_STRING;
-  expr->string.length = str->length;
-
-  Error error;
-  errorInitContents(&error);
-  if(tryCopyText(vm->outputPool, stringValue(str), &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
-}
-
-void prnSymbol(VM_t vm, Value result, Expr *expr) {
-  Symbol *sym = deref(&vm->gc, result);
-  String *str = deref(&vm->gc, sym->name);
-  expr->type = N_SYMBOL;
-  expr->symbol.length = str->length;
-
-  Error error;
-  errorInitContents(&error);
-  if(tryCopyText(vm->outputPool, stringValue(str), &expr->symbol.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
-}
-
-void prnKeyword(VM_t vm, Value result, Expr *expr) {
-  Keyword *kw = deref(&vm->gc, result);
-  String *str = deref(&vm->gc, kw->name);
-  expr->type = N_KEYWORD;
-  expr->keyword.length = str->length;
-
-  Error error;
-  errorInitContents(&error);
-  if (tryCopyText(vm->outputPool, stringValue(str), &expr->keyword.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
-}
-
-bool isEmpty(Value value) {
-  return valueType(value) == VT_NIL;
-}
-
-typedef struct Property {
-  Keyword *key;
-  Value value;
-} Property;
-
-void readProperty(VM *vm, Value *ptr, Property *p) {
-
-  if (valueType(*ptr) != VT_LIST) {
-    raise(vm, "expected property list: %s",
-              getValueTypeName(vm, valueType(*ptr)));
-  }
-
-  Cons *properties = deref(&vm->gc, *ptr);
-
-  if (valueType(properties->value) != VT_KEYWORD) {
-    raise(vm, "expected keyword for property key: %s",
-              getValueTypeName(vm, valueType(properties->value)));
-  }
-
-  p->key = deref(&vm->gc, properties->value);
-
-  if (isEmpty(properties->next)) {
-    String *str = deref(&vm->gc, p->key->name);
-    raise(vm, "expected value for property but only found a key: %ls", stringValue(str));
-  }
-
-  properties = deref(&vm->gc, properties->next);
-  p->value = properties->value;
-
-  *ptr = properties->next;
-}
-
-void prnMetadata(VM_t vm, Value metadata, Expr *expr) {
-  while (!isEmpty(metadata)) {
-
-    Property p;
-    readProperty(vm, &metadata, &p);
-
-    String *str = deref(&vm->gc, p.key->name);
-
-    if (wcscmp(L"line-number", stringValue(str)) == 0) {
-
-      if (valueType(p.value) != VT_UINT) {
-        raise(vm, "expected line-number property value to be an int: %s",
-                          getValueTypeName(vm, valueType(p.value)));
-      }
-
-      expr->source.isSet = true;
-      expr->source.lineNumber = unwrapUint(p.value);
-    }
-    else {
-      // ignore property
-    }
-  }
-}
-
-void prnList(VM_t vm, Value result, Expr *expr) {
-  Cons *cons = deref(&vm->gc, result);
-
-  expr->type = N_LIST;
-
-  prnMetadata(vm, cons->metadata, expr);
-
-  listInitContents(&expr->list);
-  Expr *elem;
-
-  palloc(vm->outputPool, elem, sizeof(Expr), "Expr");
-  exprInitContents(elem);
-
-  vmPrn(vm, cons->value, elem);
-
-  Error error;
-  errorInitContents(&error);
-  if (tryListAppend(vm->outputPool, &expr->list, elem, &error) != R_SUCCESS) {
-    explode("list append");
-  }
-
-  while (valueType(cons->next) != VT_NIL) {
-
-    if (valueType(cons->next) != VT_LIST) {
-      raise(vm, "this should always be a type of VT_LIST: %s",
-                getValueTypeName(vm, valueType(cons->next)));
-    }
-
-    cons = deref(&vm->gc, cons->next);
-
-    palloc(vm->outputPool, elem, sizeof(Expr), "Expr");
-    exprInitContents(elem);
-
-    vmPrn(vm, cons->value, elem);
-
-    if (tryListAppend(vm->outputPool, &expr->list, elem, &error) != R_SUCCESS) {
-      explode("list append");
-    }
-  }
-}
-
-void prnMap(VM_t vm, Value result, Expr *expr) {
-  Map *map = deref(&vm->gc, result);
-  Array *array = deref(&vm->gc, map->entries);
-
-  expr->type = N_MAP;
-  mapInitContents(&expr->map);
-
-  uint64_t size = objectHeaderSize(array->header);
-  for (uint64_t i=0; i<size; i++) {
-    Value entryRef = arrayElements(array)[i];
-
-    if (valueType(entryRef) == VT_MAP_ENTRY) {
-
-      MapEntry *entry = deref(&vm->gc, entryRef);
-      if (entry->used) {
-
-        Expr *keyExpr = NULL;
-        palloc(vm->outputPool, keyExpr, sizeof(Expr), "Expr");
-        exprInitContents(keyExpr);
-        vmPrn(vm, entry->key, keyExpr);
-
-        Expr *valueExpr = NULL;
-        palloc(vm->outputPool, valueExpr, sizeof(Expr), "Expr");
-        exprInitContents(valueExpr);
-        vmPrn(vm, entry->value, valueExpr);
-
-        Error e;
-        errorInitContents(&e);
-        if (tryMapPut(vm->outputPool, &expr->map, keyExpr, valueExpr, &e) != R_SUCCESS) {
-          explode("put");
-        }
-      }
-    }
-  }
-}
-
-void prnArray(VM_t vm, Value result, Expr *expr) {
-
-  Array *array = deref(&vm->gc, result);
-  uint64_t size = objectHeaderSize(array->header);
-  Value *elements = arrayElements(array);
-
-  expr->type = N_VEC;
-  vecInitContents(&expr->vec);
-
-  Error error;
-  errorInitContents(&error);
-
-  for (uint64_t i=0; i<size; i++) {
-
-    Expr *elem = NULL;
-    palloc(vm->outputPool, elem, sizeof(Expr), "Expr");
-    exprInitContents(elem);
-
-    vmPrn(vm, elements[i], elem);
-
-    if (tryVecAppend(vm->outputPool, &expr->vec, elem, &error) != R_SUCCESS) {
-      explode("list append");
-    }
-  }
-}
-
-void prnRecord(VM_t vm, Value result, Expr *expr) {
-  Record *record = deref(&vm->gc, result);
-
-  Error error;
-  errorInitContents(&error);
-
-  StringBuffer_t b = NULL;
-  if (tryStringBufferMake(vm->outputPool, &b, &error) != R_SUCCESS) {
-    explode("sbmake");
-  }
-
-  if (tryStringBufferAppendStr(b, L"#", &error) != R_SUCCESS) {
-    explode("append");
-  }
-
-  Symbol *symbol = deref(&vm->gc, record->symbol);
-  String *name = deref(&vm->gc, symbol->name);
-
-  if (tryStringBufferAppendStr(b, stringValue(name), &error) != R_SUCCESS) {
-    explode("append");
-  }
-
-  if (tryStringBufferAppendStr(b, L"[", &error) != R_SUCCESS) {
-    explode("append");
-  }
-
-  if (tryStringBufferAppendStr(b, L"]", &error) != R_SUCCESS) {
-    explode("append");
-  }
-
-  expr->type = N_STRING;
-  expr->string.length = stringBufferLength(b);
-  expr->string.value = stringBufferText(b);
-}
-
 ValueTypeTable valueTypeTableCreate() {
   ValueTypeTable table;
 
@@ -2669,67 +2108,52 @@ ValueTypeTable valueTypeTableCreate() {
     table.valueTypes[i].name = NULL;
     table.valueTypes[i].isTruthy = NULL;
     table.valueTypes[i].relocateChildren = NULL;
-    table.valueTypes[i].prn = NULL;
   }
 
   // init with known value types
   ValueTypeInfo valueTypes [] = {
       [VT_NIL]       = {.name = "nil",
                         .isTruthy = &isTruthyNo,
-                        .relocateChildren = NULL,
-                        .prn = &prnNil},
+                        .relocateChildren = NULL},
       [VT_UINT]      = {.name = "uint",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = NULL,
-                        .prn = &prnInt},
+                        .relocateChildren = NULL},
       [VT_BOOL]      = {.name = "bool",
                         .isTruthy = &isTruthyBool,
-                        .relocateChildren = NULL,
-                        .prn = &prnBool},
+                        .relocateChildren = NULL},
       [VT_FN]        = {.name = "fn",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenFn,
-                        .prn = &prnFn},
+                        .relocateChildren = &relocateChildrenFn},
       [VT_STR]       = {.name = "str",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = NULL,
-                        .prn = &prnStr},
+                        .relocateChildren = NULL},
       [VT_SYMBOL]    = {.name = "symbol",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenSymbol,
-                        .prn = &prnSymbol},
+                        .relocateChildren = &relocateChildrenSymbol},
       [VT_KEYWORD]   = {.name = "keyword",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenKeyword,
-                        .prn = &prnKeyword},
+                        .relocateChildren = &relocateChildrenKeyword},
       [VT_LIST]      = {.name = "list",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenList,
-                        .prn = &prnList},
+                        .relocateChildren = &relocateChildrenList},
       [VT_CLOSURE]   = {.name = "closure",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenClosure,
-                        .prn = &prnClosure},
+                        .relocateChildren = &relocateChildrenClosure},
       [VT_CFN]       = {.name = "cfn",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = NULL,
-                        .prn = &prnCFn},
+                        .relocateChildren = NULL},
       [VT_ARRAY]     = {.name = "array",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenArray,
-                        .prn = &prnArray},
+                        .relocateChildren = &relocateChildrenArray},
       [VT_MAP]       = {.name = "map",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenMap,
-                        .prn = &prnMap},
+                        .relocateChildren = &relocateChildrenMap},
       [VT_MAP_ENTRY] = {.name = "map-entry",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenMapEntry,
-                        .prn = NULL},
+                        .relocateChildren = &relocateChildrenMapEntry},
       [VT_RECORD]    = {.name = "record",
                         .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenRecord,
-                        .prn = &prnRecord},
+                        .relocateChildren = &relocateChildrenRecord},
 
   };
   memcpy(table.valueTypes, valueTypes, sizeof(valueTypes));
@@ -3063,7 +2487,7 @@ Value getFnRef(Frame *frame) {
 
 void setFnRef(VM *vm, Frame *frame, Value value) {
   frame->fnRef = value;
-  frame->fn = deref(&vm->gc, value);
+  frame->fn = deref(vm, value);
 }
 
 bool hasResult(Frame *frame) {
@@ -3177,7 +2601,7 @@ Value getException(VM *vm) {
 
 Frame_t pushFrame(VM *vm, Value newFn) {
 
-  Fn *fn = deref(&vm->gc, newFn);
+  Fn *fn = deref(vm, newFn);
 
   Stack *stack = &vm->stack;
   Frame *parent = vm->current;
@@ -3218,7 +2642,7 @@ Frame* popFrame(VM *vm) {
 }
 
 Frame* replaceFrame(VM *vm, Value newFn) {
-  Fn *fn = deref(&vm->gc, newFn);
+  Fn *fn = deref(vm, newFn);
 
   Stack *stack = &vm->stack;
   Frame *frame = vm->current;
@@ -3323,26 +2747,23 @@ Value _vmEval(VM *vm, CodeUnit *codeUnit, bool *exceptionThrown) {
   }
 }
 
-RetVal tryVMEval(VM *vm, CodeUnit *codeUnit, Pool_t outputPool, VMEvalResult *result, Error *error) {
+VMEvalResult vmEval(VM *vm, CodeUnit *codeUnit) {
 
   Value value;
   bool exceptionThrown = false;
 
-  vm->outputPool = outputPool;
-
   value = _vmEval(vm, codeUnit, &exceptionThrown);
 
+  VMEvalResult result;
   if (exceptionThrown) {
-    result->type = RT_EXCEPTION;
+    result.type = RT_EXCEPTION;
   }
   else {
-    result->type = RT_RESULT;
+    result.type = RT_RESULT;
   }
-  vmPrn(vm, value, &result->result);
+  result.value = value;
 
-  vm->outputPool = NULL;
-
-  return R_SUCCESS;
+  return result;
 }
 
 /*
@@ -3413,26 +2834,26 @@ void strJoinBuiltin(VM *vm, Frame_t frame) {
   Value cursor = strings;
   while (valueType(cursor) != VT_NIL) {
 
-    Cons *seq = deref(&vm->gc, cursor);
+    Cons *seq = deref(vm, cursor);
 
     ASSERT_STR(vm, seq->value);
 
-    String *string = deref(&vm->gc, seq->value);
+    String *string = deref(vm, seq->value);
     totalLength += string->length;
 
     cursor = seq->next;
   }
 
   Value resultRef = stringMakeBlank(vm, totalLength);
-  String *result = deref(&vm->gc, resultRef);
+  String *result = deref(vm, resultRef);
 
   uint64_t totalSizeWritten = 0;
 
   cursor = strings;
   while (valueType(cursor) != VT_NIL) {
-    Cons *seq = deref(&vm->gc, cursor);
+    Cons *seq = deref(vm, cursor);
 
-    String *string = deref(&vm->gc, seq->value);
+    String *string = deref(vm, seq->value);
 
     wchar_t *writePtr = (void*)result + result->valueOffset + totalSizeWritten;
     size_t textSize = string->length * sizeof(wchar_t);
@@ -3444,42 +2865,6 @@ void strJoinBuiltin(VM *vm, Frame_t frame) {
 
   popFrameRoot(vm);
   pushOperand(frame, resultRef);
-}
-
-void prStrBuiltinConf(VM *vm, Frame_t frame, bool readable) {
-  Value value = popOperand(frame);
-
-  Expr expr;
-  exprInitContents(&expr);
-  StringBuffer_t b = NULL;
-
-  Error error;
-  errorInitContents(&error);
-
-  vmPrn(vm, value, &expr);
-
-  if (tryStringBufferMake(vm->outputPool, &b, &error) != R_SUCCESS) {
-    explode("sbmake");
-  }
-
-  if (tryExprPrnBufConf(&expr, b, readable, &error) != R_SUCCESS) {
-    explode("prnbuf");
-  }
-
-  Value resultRef = stringMakeBlank(vm, stringBufferLength(b));
-  String *result = deref(&vm->gc, resultRef);
-
-  memcpy(stringValue(result), stringBufferText(b), stringBufferLength(b) * sizeof(wchar_t));
-
-  pushOperand(frame, resultRef);
-}
-
-void prStrBuiltin(VM *vm, Frame_t frame) {
-  prStrBuiltinConf(vm, frame, true);
-}
-
-void printStrBuiltin(VM *vm, Frame_t frame) {
-  prStrBuiltinConf(vm, frame, false);
 }
 
 void symbolBuiltin(VM *vm, Frame_t frame) {
@@ -3519,13 +2904,13 @@ void countBuiltin(VM *vm, Frame_t frame) {
   Value result = nil();
   switch (valueType(value)) {
     case VT_ARRAY: {
-      Array *k = deref(&vm->gc, value);
+      Array *k = deref(vm, value);
       uint64_t size = objectHeaderSize(k->header);
       result = wrapUint(size);
       break;
     }
     case VT_STR: {
-      String *s = deref(&vm->gc, value);
+      String *s = deref(vm, value);
       result = wrapUint(s->length);
       break;
     }
@@ -3534,14 +2919,14 @@ void countBuiltin(VM *vm, Frame_t frame) {
       Value cursor = value;
       while (valueType(cursor) != VT_NIL) {
         size++;
-        Cons *cons = deref(&vm->gc, cursor);
+        Cons *cons = deref(vm, cursor);
         cursor = cons->next;
       }
       result = wrapUint(size);
       break;
     }
     case VT_MAP: {
-      Map *m = deref(&vm->gc, value);
+      Map *m = deref(vm, value);
       result = wrapUint(m->size);
       break;
     }
@@ -3564,7 +2949,7 @@ void getBuiltin(VM *vm, Frame_t frame) {
       ASSERT_UINT(vm, key);
       uint64_t index = unwrapUint(key);
 
-      Array *k = deref(&vm->gc, coll);
+      Array *k = deref(vm, coll);
       if (index >= objectHeaderSize(k->header)) {
         raise(vm, "index out of bounds: %" PRIu64, index);
       }
@@ -3574,7 +2959,7 @@ void getBuiltin(VM *vm, Frame_t frame) {
       break;
     }
     case VT_MAP: {
-      Map *m = deref(&vm->gc, coll);
+      Map *m = deref(vm, coll);
       result = mapLookup(vm, m, key);
       break;
     }
@@ -3582,7 +2967,7 @@ void getBuiltin(VM *vm, Frame_t frame) {
       ASSERT_UINT(vm, key);
       uint64_t index = unwrapUint(key);
 
-      Record *record = deref(&vm->gc, coll);
+      Record *record = deref(vm, coll);
       if (index >= objectHeaderSize(record->header)) {
         raise(vm, "index out of bounds: %" PRIu64, index);
       }
@@ -3609,7 +2994,7 @@ void setBuiltin(VM *vm, Frame_t frame) {
       ASSERT_UINT(vm, key);
       uint64_t index = unwrapUint(key);
 
-      Array *k = deref(&vm->gc, coll);
+      Array *k = deref(vm, coll);
       if (index >= objectHeaderSize(k->header)) {
         raise(vm, "index out of bounds: %" PRIu64, index);
       }
@@ -3620,7 +3005,7 @@ void setBuiltin(VM *vm, Frame_t frame) {
       break;
     }
     case VT_MAP: {
-      Map *protectedMap = deref(&vm->gc, coll);
+      Map *protectedMap = deref(vm, coll);
       pushFrameRoot(vm, (Value*)&protectedMap);
 
       putMapEntry(vm, &protectedMap, key, value);
@@ -3633,7 +3018,7 @@ void setBuiltin(VM *vm, Frame_t frame) {
       ASSERT_UINT(vm, key);
       uint64_t index = unwrapUint(key);
 
-      Record *record = deref(&vm->gc, coll);
+      Record *record = deref(vm, coll);
       if (index >= objectHeaderSize(record->header)) {
         raise(vm, "index out of bounds: %" PRIu64, index);
       }
@@ -3671,17 +3056,17 @@ uint32_t hashCode(VM *vm, Value v) {
       }
     }
     case VT_STR: {
-      String *s = deref(&vm->gc, v);
+      String *s = deref(vm, v);
       return stringHash(s);
     }
     case VT_SYMBOL: {
-      Symbol *sym = deref(&vm->gc, v);
-      String *s = deref(&vm->gc, sym->name);
+      Symbol *sym = deref(vm, v);
+      String *s = deref(vm, sym->name);
       return stringHash(s);
     }
     case VT_KEYWORD: {
-      Keyword *k = deref(&vm->gc, v);
-      String *s = deref(&vm->gc, k->name);
+      Keyword *k = deref(vm, v);
+      String *s = deref(vm, k->name);
       return stringHash(s);
     }
     case VT_FN:
@@ -3705,8 +3090,8 @@ bool equalsStr(VM_t vm, Value this, Value that) {
   }
   else {
 
-    String *a = deref(&vm->gc, this);
-    String *b = deref(&vm->gc, that);
+    String *a = deref(vm, this);
+    String *b = deref(vm, that);
 
     if (a == b) {
       return true;
@@ -3728,10 +3113,10 @@ bool equalsList(VM_t vm, Value this, Value that) {
   }
   else {
     bool e = true;
-    while (valueType(this) != T_NIL) {
+    while (valueType(this) != VT_NIL) {
 
-      Cons *a = deref(&vm->gc, this);
-      Cons *b = deref(&vm->gc, that);
+      Cons *a = deref(vm, this);
+      Cons *b = deref(vm, that);
 
       if (a == b) {
         return true;
@@ -3783,21 +3168,21 @@ bool equals(VM_t vm, Value this, Value that) {
 
 MapEntry* findMapEntry(VM *vm, Map *map, Value key, uint32_t hash) {
 
-  Array *array = deref(&vm->gc, map->entries);
+  Array *array = deref(vm, map->entries);
   uint64_t numEntries = objectHeaderSize(array->header);
   Value *entries = arrayElements(array);
 
   uint64_t index = hash % numEntries;
 
   for (uint64_t i = index; i < numEntries; i++) {
-    MapEntry *entry = deref(&vm->gc, entries[i]);
+    MapEntry *entry = deref(vm, entries[i]);
     if (!entry->used || equals(vm, key, entry->key)) {
       return entry;
     }
   }
 
   for (uint64_t i = 0; i < index; i++) {
-    MapEntry *entry = deref(&vm->gc, entries[i]);
+    MapEntry *entry = deref(vm, entries[i]);
     if (!entry->used || equals(vm, key, entry->key)) {
       return entry;
     }
@@ -3843,13 +3228,13 @@ void mapResize(VM *vm, Map **protectedMap, uint64_t targetEntries) {
   popFrameRoot(vm); // protectedNewEntries
 
   Map *map = *protectedMap;
-  Array *oldEntries = deref(&vm->gc, map->entries);
+  Array *oldEntries = deref(vm, map->entries);
   map->size = 0;
   map->entries = (Value)protectedNewEntries;
 
   uint64_t numOldEntries = objectHeaderSize(oldEntries->header);
   for (uint64_t i=0; i<numOldEntries; i++) {
-    MapEntry *oldEntry = deref(&vm->gc, arrayElements(oldEntries)[i]);
+    MapEntry *oldEntry = deref(vm, arrayElements(oldEntries)[i]);
     if (oldEntry->used) {
       _putMapEntryWithHash(vm, *protectedMap, oldEntry->value, oldEntry->key, oldEntry->keyHash);
     }
@@ -3862,7 +3247,7 @@ void putMapEntry(VM *vm, Map **protectedMap, Value key, Value insertMe) {
 
   uint64_t numEntries;
   {
-    Array *entries = deref(&vm->gc, (*protectedMap)->entries);
+    Array *entries = deref(vm, (*protectedMap)->entries);
     numEntries = objectHeaderSize(entries->header);
   }
 
@@ -3906,12 +3291,12 @@ void hashMapBuiltin(VM *vm, Frame_t frame) {
 
       while (protectedParams != W_NIL_VALUE) {
 
-        Cons *keyCons = deref(&vm->gc, protectedParams);
+        Cons *keyCons = deref(vm, protectedParams);
         if (keyCons->next == W_NIL_VALUE) {
           raise(vm, "hash-map takes an even number of parameters");
         }
 
-        Cons *valueCons = deref(&vm->gc, keyCons->next);
+        Cons *valueCons = deref(vm, keyCons->next);
         putMapEntry(vm, &protectedMap, keyCons->value, valueCons->value);
         protectedParams = valueCons->next;
       }
@@ -3946,7 +3331,7 @@ void vectorBuiltin(VM *vm, Frame_t frame) {
       {
         Value seq = params;
         while (seq != W_NIL_VALUE) {
-          Cons *cons = deref(&vm->gc, seq);
+          Cons *cons = deref(vm, seq);
           length++;
           seq = cons->next;
         }
@@ -3958,7 +3343,7 @@ void vectorBuiltin(VM *vm, Frame_t frame) {
       Array *array = makeArray(vm, length);
 
       for (uint64_t i=0; protectedParams != W_NIL_VALUE; i++) {
-        Cons *cons = deref(&vm->gc, protectedParams);
+        Cons *cons = deref(vm, protectedParams);
         arrayElements(array)[i] = cons->value;
         protectedParams = cons->next;
       }
@@ -3999,6 +3384,28 @@ void recordBuiltin(VM *vm, Frame_t frame) {
   pushOperand(frame, (Value)record);
 }
 
+void toStringBuiltin(VM *vm, Frame_t frame) {
+
+  Value value = popOperand(frame);
+
+  if (valueType(value) == VT_STR) {
+    pushOperand(frame, value);
+  }
+  else {
+
+    if (valueType(value) != VT_UINT) {
+      explode("numFields must be a uint: %s", getValueTypeName(vm, valueType(value)));
+    }
+
+    wchar_t s[30];
+    uint64_t number = unwrapUint(value);
+    swprintf(s, 20, L"%" PRIu64, number);
+    Value str = stringHydrate(vm, s, wcslen(s));
+
+    pushOperand(frame, str);
+  }
+}
+
 void cFnInitContents(CFn *fn) {
   fn->header = 0;
   fn->nameLength = 0;
@@ -4007,6 +3414,8 @@ void cFnInitContents(CFn *fn) {
   fn->ptr = NULL;
   fn->usesVarArgs = false;
 }
+
+wchar_t* cFnName(CFn *fn) { return (void*)fn + fn->nameOffset; }
 
 Value makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
   CFn *fn = NULL;
@@ -4042,7 +3451,7 @@ void defineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke 
 
   Value value = makeCFn(vm, name, numArgs, varArgs, ptr);
 
-  Symbol *symbol = deref(&vm->gc, protectedSymbol);
+  Symbol *symbol = deref(vm, protectedSymbol);
   symbol->valueDefined = true;
   symbol->topLevelValue = value;
 
@@ -4059,13 +3468,10 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"get-macro", 1, false, getMacroEval);
   defineCFn(vm, L"gc", 0, false, gcEval);
   defineCFn(vm, L"get-type", 1, false, getTypeEval);
-  defineCFn(vm, L"prn", 1, false, prnEval);
   defineCFn(vm, L"+", 2, false, addEval);
   defineCFn(vm, L"-", 2, false, subEval);
   defineCFn(vm, L"eq", 2, false, cmpEval);
   defineCFn(vm, L"join", 1, false, strJoinBuiltin);
-  defineCFn(vm, L"pr-str", 1, false, prStrBuiltin);
-  defineCFn(vm, L"print-str", 1, false, printStrBuiltin);
   defineCFn(vm, L"symbol", 1, false, symbolBuiltin);
   defineCFn(vm, L"keyword", 1, false, keywordBuiltin);
   defineCFn(vm, L"array", 1, false, arrayBuiltin);
@@ -4075,6 +3481,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"hash-map", 1, true, hashMapBuiltin);
   defineCFn(vm, L"vector", 1, true, vectorBuiltin);
   defineCFn(vm, L"record", 2, false, recordBuiltin);
+  defineCFn(vm, L"to-string", 1, false, toStringBuiltin);
 }
 
 void vmConfigInitContents(VMConfig *config) {
@@ -4090,7 +3497,6 @@ void vmInitContents(VM *vm, VMConfig config) {
   tableInit(&vm->symbolTable);
   tableInit(&vm->keywordTable);
   vm->current = NULL;
-  vm->outputPool = NULL;
   vm->exception = nil();
   vm->noFrameRoots = NULL;
   initCFns(vm);
@@ -4104,17 +3510,13 @@ void vmFreeContents(VM *vm) {
   }
 }
 
-RetVal tryVMMake(VM **ptr, VMConfig config, Error *error) {
-  RetVal ret;
-
-  tryMalloc(*ptr, sizeof(VM), "VM malloc");
-  vmInitContents(*ptr, config);
-
-  ret = R_SUCCESS;
-  return ret;
-
-  failure:
-  return ret;
+VM_t vmMake(VMConfig config) {
+  VM *vm = malloc(sizeof(VM));
+  if (vm == NULL) {
+    explode("failed to malloc");
+  }
+  vmInitContents(vm, config);
+  return vm;
 }
 
 void vmFree(VM *vm) {
@@ -4138,56 +3540,4 @@ void printCodeUnit(CodeUnit *unit) {
   _printCodeUnit(&table, unit);
 }
 
-/*
- * CodeUnit init/free functions
- */
 
-void lineNumberInitContents(LineNumber *n) {
-  n->lineNumber = 0;
-  n->startInstructionIndex = 0;
-}
-
-void sourceTableInitContents(SourceTable *t) {
-  t->lineNumbers = NULL;
-  t->numLineNumbers = 0;
-  textInitContents(&t->fileName);
-}
-
-void codeInitContents(Code *code) {
-  code->maxOperandStackSize = 0;
-  code->numLocals = 0;
-  code->hasSourceTable = false;
-  code->code = NULL;
-  code->codeLength = 0;
-  sourceTableInitContents(&code->sourceTable);
-}
-
-void constantMetaPropertyInit(ConstantMetaProperty *p) {
-  p->keyIndex = 0;
-  p->valueIndex = 0;
-}
-
-void constantMetaInit(ConstantMeta *c) {
-  c->numProperties = 0;
-  c->properties = NULL;
-}
-
-void constantFnInitContents(FnConstant *fnConst) {
-  fnConst->hasName = 0;
-  textInitContents(&fnConst->name);
-  fnConst->numArgs = 0;
-  fnConst->usesVarArgs = false;
-  fnConst->numConstants = 0;
-  fnConst->constants = NULL;
-  codeInitContents(&fnConst->code);
-}
-
-void codeUnitInitContents(CodeUnit *codeUnit) {
-  codeUnit->constants = NULL;
-  codeUnit->numConstants = 0;
-  codeInitContents(&codeUnit->code);
-}
-
-void evalResultInitContents(VMEvalResult *r) {
-  r->type = RT_NONE;
-}

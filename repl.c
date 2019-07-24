@@ -2,6 +2,7 @@
 #include <libgen.h>
 #include "repl.h"
 #include "compiler.h"
+#include "print.h"
 
 void fileInfoInitContents(FileInfo *f) {
   f->hasFileName = false;
@@ -62,7 +63,8 @@ RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputTe
   throws(tryPoolCreate(&pool, ONE_MB, error));
   throws(tryStringInputStreamMake(pool, inputText, wcslen(inputText), &source, error));
   throws(tryStreamMake(pool, source, &stream, error));
-  throws(tryVMMake(&vm, config, error));
+
+  vm = vmMake(config);
 
   if (useStdLib) {
     throws(tryLoad(vm, STD_LIB, error));
@@ -74,15 +76,14 @@ RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputTe
   throws(tryReplCompile(pool, stream, fileInfo, vm, &unit, error));
   printCodeUnit(&unit);
 
-  throws(tryVMEval(vm, &unit, pool, &result, error));
+  result = vmEval(vm, &unit);
 
   if (result.type == RT_RESULT) {
-    throws(tryExprPrnStr(outputPool, &result.result, outputText, error));
+    Expr *expr = printToReader(vm, pool, result.value);
+    throws(tryExprPrnStr(outputPool, expr, outputText, error));
   }
   else {
-    exceptionPrintf(vm);
-//    throws(tryExprPrnStr(outputPool, &result.result, outputText, error));
-//    throws(tryExceptionPrintf(&result.exception, error));
+    printException(vm, result.value);
   }
 
   ret = R_SUCCESS;
@@ -155,7 +156,11 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
     }
     //printCodeUnit(&unit);
 
-    throws(tryVMEval(vm, &unit, pool, &result, error));
+    result = vmEval(vm, &unit);
+    if (result.type == RT_EXCEPTION) {
+      printException(vm, result.value);
+      break;
+    }
   }
 
   ret = R_SUCCESS;

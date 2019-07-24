@@ -5,6 +5,7 @@
 #include "expander.h"
 #include "reader.h"
 #include "pool.h"
+#include "print.h"
 
 typedef struct Expander {
   Pool_t pool;
@@ -67,19 +68,18 @@ RetVal tryIsMacro(Expander *expander, Text sym, bool *isMacro, Error *error) {
   VMEvalResult output;
 
   throws(tryCompileTopLevel(expander->pool, &root, &codeUnit, error));
-  throws(tryVMEval(expander->vm, &codeUnit, expander->pool, &output, error));
+  output = vmEval(expander->vm, &codeUnit);
 
   if (output.type == RT_RESULT) {
-    if (output.result.type != N_BOOLEAN) {
+    if (valueType(output.value) != VT_BOOL) {
       throwInternalError(error, "this should return a boolean");
     }
-    *isMacro = output.result.boolean.value;
+    *isMacro = unwrapBool(output.value);
     return R_SUCCESS;
   }
   else if (output.type == RT_EXCEPTION) {
-    exceptionPrintf(expander->vm);
+    printException(expander->vm, output.value);
     throwInternalError(error, "encountered exception while processing macro: getmacro");
-
   }
   else {
     throwInternalError(error, "unhandled eval result type");
@@ -89,7 +89,7 @@ RetVal tryIsMacro(Expander *expander, Text sym, bool *isMacro, Error *error) {
     return ret;
 }
 
-RetVal tryExpand(Expander *expander, Text sym, Expr *input, VMEvalResult *output, Error *error) {
+RetVal tryExpand(Expander *expander, Text sym, Expr *input, Expr **output, Error *error) {
   RetVal ret;
 
   if (input->type != N_LIST) {
@@ -129,14 +129,32 @@ RetVal tryExpand(Expander *expander, Text sym, Expr *input, VMEvalResult *output
   CodeUnit codeUnit;
 
   throws(tryCompileTopLevel(expander->pool, &root, &codeUnit, error));
-  throws(tryVMEval(expander->vm, &codeUnit, expander->pool, output, error));
 
-  if (output->type == RT_EXCEPTION) {
-    exceptionPrintf(expander->vm);
+  VMEvalResult result = vmEval(expander->vm, &codeUnit);
+
+  if (result.type == RT_RESULT) {
+
+    Expr *expr = printToReader(expander->vm, expander->pool, result.value);
+
+    printf("macroexpand occurred {\n    ");
+    throws(tryExprPrn(expander->pool, input, error));
+    printf("\n    =>\n    ");
+    throws(tryExprPrn(expander->pool, expr, error));
+    printf("\n}\n");
+
+    *output = expr;
+
+    return R_SUCCESS;
+  }
+  else if (result.type == RT_EXCEPTION) {
+    printException(expander->vm, result.value);
+    throwInternalError(error, "encountered exception while processing macro: %ls", sym.value);
+  }
+  else {
+    throwInternalError(error, "unhandled eval result type");
   }
 
   return R_SUCCESS;
-
   failure:
     return ret;
 

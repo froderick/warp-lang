@@ -1,4 +1,5 @@
 #include "repl.h"
+#include "print.h"
 #include <stdio.h>
 
 #define ONE_MB (1024 * 1000)
@@ -21,7 +22,7 @@ int main(void) {
   throws(tryPoolCreate(&sessionPool, ONE_MB, &error));
 
   vmConfigInitContents(&config);
-  throws(tryVMMake(&vm, config, &error));
+  vm = vmMake(config);
   throws(tryLoad(vm, STD_LIB, &error));
 
   throws(tryFileInputStreamMake(sessionPool, stdin, &source, &error));
@@ -52,22 +53,16 @@ int main(void) {
 
     printCodeUnit(&unit);
 
-    VMEvalResult result;
-    ret = tryVMEval(vm, &unit, evalPool, &result, &error);
-
-    if (ret != R_SUCCESS) {
-      printf("> encountered eval error\n\n");
-      continue;
-    }
+    VMEvalResult result = vmEval(vm, &unit);
 
     if (result.type == RT_RESULT) {
       printf("> ");
-      throws(tryExprPrn(sessionPool, &result.result, &error));
+      print(vm, result.value);
       printf("\n");
     }
     else if (result.type == RT_EXCEPTION) {
       printf("> encountered exception:\n\n");
-      exceptionPrintf(vm);
+      printException(vm, result.value);
     }
     else {
       printf("> encountered unhandled eval result type\n\n");

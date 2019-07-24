@@ -15,7 +15,7 @@ find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 pkg_check_modules(check REQUIRED check)
 
-add_library(compiler errors.c reader.c analyzer.c vm.c utils.c compiler.c lexer.c repl.c source.c expander.c pool.c)
+add_library(compiler errors.c reader.c analyzer.c vm.c utils.c compiler.c lexer.c repl.c source.c expander.c pool.c bytecode.c print.c print.h)
 
 add_executable(tests test.c)
 target_link_libraries(tests check compiler)

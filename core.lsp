@@ -44,7 +44,7 @@
            (let (_str (fn _str (strings remaining)
                         (if (empty? remaining)
                           (join (reverse strings))
-                          (_str (cons (print-str (first remaining)) strings)
+                          (_str (cons (to-string (first remaining)) strings)
                                 (rest remaining)))))
              (_str nil args))))
 

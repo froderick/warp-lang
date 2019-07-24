@@ -1,172 +1,194 @@
 #ifndef WARP_LANG_VM_H
 #define WARP_LANG_VM_H
 
-#include<stdint.h>
-#include<wchar.h>
-#include <stdbool.h>
+#include "bytecode.h"
 
-#include "source.h"
-#include "errors.h"
-#include "reader.h"
+/*
+ * VM runtime data structures
+ */
 
-// This is the basic representation of code that the virtual machine can accept as input for evaluation.
+typedef uint64_t Value;
 
-typedef struct LineNumber {
-  uint64_t startInstructionIndex;
-  uint64_t lineNumber;
-} LineNumber;
+#define W_UINT_MASK      0x01u
+#define W_UINT_BITS      0x01u
+#define W_PTR_MASK       0x03u
+#define W_IMMEDIATE_MASK 0x0fu
+#define W_BOOLEAN_BITS   0x06u
+#define W_SPECIAL_MASK   0xf0u
+#define W_NIL_BITS       0x00u
+#define W_SPECIAL_BITS   0x0eu // 1110
+#define W_NIL_VALUE      0x0eu
 
-typedef struct SourceTable {
-  Text fileName;
-  uint64_t numLineNumbers;
-  LineNumber *lineNumbers;
-} SourceTable;
+typedef enum ValueType {
+  VT_NIL,
+  VT_UINT,
+  VT_BOOL,
+  VT_FN,
+  VT_STR,
+  VT_SYMBOL,
+  VT_KEYWORD,
+  VT_LIST,
+  VT_CLOSURE,
+  VT_CFN,
+  VT_ARRAY,
+  VT_MAP,
+  VT_MAP_ENTRY,
+  VT_RECORD,
+} ValueType;
 
-typedef struct Code {
+#define W_GC_FORWARDING_BIT      0x8000000000000000L   /* header contains forwarding pointer */
+#define W_BYTEBLOCK_BIT          0x4000000000000000L   /* block contains bytes instead of slots */
+#define W_SPECIALBLOCK_BIT       0x2000000000000000L   /* 1st item is a non-value */
+#define W_8ALIGN_BIT             0x1000000000000000L   /* data is aligned to 8-byte boundary */
+#define W_HEADER_TYPE_BITS       0x0f00000000000000L
+#define W_HEADER_SIZE_MASK       0x00ffffffffffffffL
+
+#define W_FN_TYPE        0x0u
+#define W_STR_TYPE       0x1u
+#define W_SYMBOL_TYPE    0x2u
+#define W_KEYWORD_TYPE   0x3u
+#define W_LIST_TYPE      0x4u
+#define W_CLOSURE_TYPE   0x5u
+#define W_CFN_TYPE       0x6u
+#define W_ARRAY_TYPE     0x7u
+#define W_MAP_TYPE       0x8u
+#define W_MAP_ENTRY_TYPE 0x9u
+#define W_RECORD_TYPE    0xau
+
+/*
+ * This is the first field inside all heap objects. It must come first so that the GC can
+ * scan through the heap, for which it needs to determine object sizes and object types.
+ */
+typedef uint64_t ObjectHeader;
+
+uint8_t objectHeaderType(ObjectHeader h);
+uint64_t objectHeaderSize(ObjectHeader h);
+ValueType objectHeaderValueType(ObjectHeader header);
+ValueType valueType(Value v);
+
+Value nil();
+
+Value wrapBool(bool b);
+bool unwrapBool(Value v);
+
+Value wrapUint(uint64_t i);
+uint64_t unwrapUint(Value v);
+
+typedef struct CFn {
+  ObjectHeader header;
+
+  uint64_t nameLength;
+  size_t nameOffset;
+  void* ptr;
+  uint16_t numArgs;
+  bool usesVarArgs;
+} CFn;
+
+wchar_t* cFnName(CFn *fn);
+
+typedef struct Fn {
+  ObjectHeader header;
+
+  bool hasName;
+  uint64_t nameLength;
+  size_t nameOffset;
+
+  uint16_t numArgs;
+  bool usesVarArgs;
+
+  uint16_t numConstants;
+  size_t constantsOffset;
+
   uint16_t numLocals;           // the number of local bindings this code unit uses
   uint64_t maxOperandStackSize; // the maximum number of items this code pushes onto the operand stack at one time
   uint64_t codeLength;          // the number of bytes in this code block
-  uint8_t *code;                // this code block's actual instructions
+  size_t codeOffset;
+
   bool hasSourceTable;
-  SourceTable sourceTable;      // this lines up lines of code to generated instruction ranges
-} Code;
+  uint64_t sourceFileNameLength;
+  size_t sourceFileNameOffset;
+  uint64_t numLineNumbers;
+  size_t lineNumbersOffset;
 
-// There are the instructions a Code object supports.
+} Fn;
 
-typedef enum InstType {
+wchar_t* fnName(Fn *fn);
+Value* fnConstants(Fn *fn);
+uint8_t* fnCode(Fn *fn);
+wchar_t* fnSourceFileName(Fn *fn);
+LineNumber* fnLineNumbers(Fn *fn);
 
-  I_LOAD_CONST,      // (8), typeIndex  (16) | (-> value)
-  I_LOAD_LOCAL,      // (8), typeIndex  (16) | (-> value)
-  I_STORE_LOCAL,     // (8), typeIndex  (16) | (objectref ->)
-  I_INVOKE_DYN,      // (8)              | (objectref, args... -> ...)
-  I_INVOKE_DYN_TAIL, // (8)              | (objectref, args... -> ...)
-  I_RET,             // (8)              | (objectref ->)
-  I_CMP,             // (8)              | (a, b -> 0 | 1)
-  I_JMP,             // (8), offset (16) | (->)
-  I_JMP_IF,          // (8), offset (16) | (value ->)
-  I_JMP_IF_NOT,      // (8), offset (16) | (value ->)
-  I_ADD,             // (8)              | (a, b -> c)
-  I_SUB,             // (8)              | (a, b -> c)
-  I_DEF_VAR,         // (8), offset (16) | (name, value ->)
-  I_LOAD_VAR,        // (8), offset (16) | (name -> value)
-  I_LOAD_CLOSURE,    // (8), offset (16) | (captures... -> value)
-  I_SWAP,            // (8),             | (a, b -> b, a)
-  I_SET_HANDLER,     // (8),             | (jumpAddr, handler ->)
-  I_CLEAR_HANDLER,   // (8),             | (->)
-  I_CONS,            // (8),             | (x, seq -> newseq)
+typedef struct Closure {
+  ObjectHeader header;
 
-  // requires garbage collection
-  I_NEW,         // (8), objlen (16) | (-> objectref)
-  I_GET_FIELD,   // (8), typeIndex  (16) | (objectref -> value)
-  I_SET_FIELD,   // (8), typeIndex  (16) | (objectref, value ->)
-  I_NEW_ARRAY,   // (8), objlen (16) | (arraylen -> objectref)
-  I_LOAD_ARRAY,  // (8)              | (objectref, typeIndex -> value)
-  I_STORE_ARRAY, // (8)              | (objectref, typeIndex, value ->)
+  Value fn;
+  uint16_t numCaptures;
+  size_t capturesOffset;
+} Closure;
 
-} InstType;
+Value* closureCaptures(Closure *closure);
 
+typedef struct String {
+  ObjectHeader header;
 
-// These are the constant values that can be loaded by Code instructions into the opstack for use.
-// These constant values are represented as a part of the CodeUnit that is submitted to the vm for evaluation.
-
-typedef enum ConstantType {
-  CT_NONE,
-  CT_BOOL,
-  CT_INT,
-  CT_NIL,
-  CT_STR,
-  CT_FN,
-  CT_SYMBOL,
-  CT_KEYWORD,
-  CT_LIST,
-  CT_VEC,
-  CT_MAP
-} ConstantType;
-
-typedef struct Constant Constant;
-
-typedef struct ConstantMetaProperty {
-  uint16_t keyIndex;
-  uint16_t valueIndex;
-} ConstantMetaProperty;
-
-typedef struct ConstantMeta {
-  uint64_t numProperties;
-  ConstantMetaProperty *properties;
-} ConstantMeta;
-
-typedef struct StringConstant {
   uint64_t length;
-  wchar_t *value;
-} StringConstant;
+  size_t valueOffset;
+  uint32_t hash;
+} String;
 
-typedef struct FnConstant {
-  bool hasName;
-  Text name;
-  uint64_t numArgs;
-  bool usesVarArgs;
-  uint16_t numConstants;
-  Constant *constants;
-  Code code;
-} FnConstant;
+wchar_t* stringValue(String *x);
 
-typedef struct SymbolConstant {
-  uint64_t length;
-  wchar_t *value;
-} SymbolConstant;
+typedef struct Symbol {
+  ObjectHeader header;
 
-typedef struct KeywordConstant {
-  uint64_t length;
-  wchar_t *value;
-} KeywordConstant;
+  Value topLevelValue;
+  bool valueDefined;
+  Value name;
+  bool isMacro;
+} Symbol;
 
-typedef struct ListConstant {
-  uint16_t length;
-  uint16_t *constants;
-  ConstantMeta meta;
-} ListConstant;
+typedef struct Keyword {
+  ObjectHeader header;
 
-typedef struct VecConstant {
-  uint16_t length;
-  uint16_t *constants;
-} VecConstant;
+  Value name;
+} Keyword;
 
-typedef struct MapConstant {
-  uint16_t length;
-  uint16_t *constants;
-  ConstantMeta meta;
-} MapConstant;
+typedef struct Cons {
+  ObjectHeader header;
 
-typedef struct Constant {
-  ConstantType type;
-  union {
-    uint8_t boolean;
-    uint64_t integer;
-    StringConstant string;
-    FnConstant function;
-    SymbolConstant symbol;
-    KeywordConstant keyword;
-    ListConstant list;
-    VecConstant vec;
-    MapConstant map;
-  };
-} Constant;
+  Value metadata;
+  Value value;
+  Value next; // this must be a Cons, or Nil
+} Cons;
 
-typedef struct CodeUnit {
-  uint16_t numConstants;
-  Constant *constants;
-  Code code;
-} CodeUnit;
+typedef struct Array {
+  ObjectHeader header;
+} Array;
 
-void lineNumberInitContents(LineNumber *n);
-void sourceTableInitContents(SourceTable *t);
-void codeInitContents(Code *code);
-void printCodeUnit(CodeUnit *unit);
-void constantFnInitContents(FnConstant *fnConst);
-void codeUnitInitContents(CodeUnit *codeUnit);
-void constantMetaInit(ConstantMeta *c);
+typedef struct MapEntry {
+  ObjectHeader header;
+  bool used;
+  Value key;
+  uint32_t keyHash;
+  Value value;
+} MapEntry;
 
-typedef struct VM *VM_t;
+typedef struct Map {
+  ObjectHeader header;
+  uint64_t size;
+  Value entries;
+} Map;
+
+typedef struct Record {
+  ObjectHeader header;
+  Value symbol;
+} Record;
+
+Value* arrayElements(Array *array);
+
+/*
+ * VM code eval contract
+ */
 
 typedef struct VMConfig {
   bool gcOnAlloc;
@@ -174,26 +196,29 @@ typedef struct VMConfig {
 
 void vmConfigInitContents(VMConfig *config);
 
+typedef struct VM *VM_t;
+VM_t vmMake(VMConfig config);
 void vmFreeContents(VM_t vm);
-RetVal tryVMMake(VM_t *ptr, VMConfig config, Error *error);
 void vmFree(VM_t vm);
 
+Value mapLookup(VM_t vm, Map *map, Value key);
+Value getKeyword(VM_t vm, wchar_t *text);
+
 typedef enum VMEvalResultType {
-  RT_NONE,
   RT_RESULT,
   RT_EXCEPTION
 } VMEvalResultType;
 
 typedef struct VMEvalResult {
   VMEvalResultType type;
-  Expr result;
+  Value value;
 } VMEvalResult;
 
-void exceptionPrintf(VM_t vm);
+VMEvalResult vmEval(VM_t vm, CodeUnit *codeUnit);
 
-RetVal tryVMEval(VM_t vm, CodeUnit *codeUnit, Pool_t pool, VMEvalResult *result, Error *error);
+void* deref(VM_t vm, Value value);
 
-void printCodeArray(uint8_t *code, uint16_t codeLength);
+const char* getValueTypeName(VM_t vm, uint8_t type);
 
 #endif //WARP_LANG_VM_H
 

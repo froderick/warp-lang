@@ -8,6 +8,7 @@
 #include "utils.h"
 #include "expander.h"
 #include "pool.h"
+#include "print.h"
 
 /*
  * Core analyzer behavior.
@@ -1193,27 +1194,9 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *err
   input.list.head = expr->list.head->next;
   input.list.tail = expr->list.tail;
 
-  VMEvalResult output;
-
+  Expr *output = NULL;
   throws(tryExpand(ctx->options.expander, macroName, &input, &output, error));
-
-  if (output.type == RT_RESULT) {
-
-    printf("macroexpand occurred {\n    ");
-    throws(tryExprPrn(ctx->pool, expr, error));
-    printf("\n    =>\n    ");
-    throws(tryExprPrn(ctx->pool, &output.result, error));
-    printf("\n}\n");
-
-    throws(tryFormAnalyzeContents(ctx, &output.result, form, error));
-    return R_SUCCESS;
-  }
-  else if (output.type == RT_EXCEPTION) {
-    throwInternalError(error, "encountered exception while processing macro: %ls", macroName.value);
-  }
-  else {
-    throwInternalError(error, "unhandled eval result type");
-  }
+  throws(tryFormAnalyzeContents(ctx, output, form, error));
 
   failure:
   return ret;
