@@ -1290,6 +1290,38 @@ RetVal tryMapAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error)
   return ret;
 }
 
+void _handlerInitContents(FormHandler *h) {
+  h->handler = NULL;
+  formsInitContents(&h->forms);
+}
+
+RetVal tryHandlerAnalyze(AnalyzerContext *ctx, Expr* expr, FormHandler *handler, Error *error) {
+  RetVal ret;
+
+  _handlerInitContents(handler);
+
+  uint64_t pos = getExprPosition(expr);
+  if (expr->list.length < 1) {
+    throwSyntaxError(error, pos, "the 'with-handler' special form requires at least one parameter");
+  }
+
+  palloc(ctx->pool, handler->handler, sizeof(Form), "Form");
+  throws(tryFormAnalyzeContents(ctx, expr->list.head->next->expr, handler->handler, error));
+
+  throws(tryFormsAllocate(ctx->pool, &handler->forms, expr->list.length - 2, error));
+
+  ListElement *exprElem = expr->list.head->next->next;
+  for (int i=0; i<handler->forms.numForms; i++) {
+    Form *thisForm = handler->forms.forms + i;
+    throws(tryFormAnalyzeContents(ctx, exprElem->expr, thisForm, error));
+    exprElem = exprElem->next;
+  }
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
 RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Error *error) {
 
   // copy expression source metadata
@@ -1377,6 +1409,12 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
         if (wcscmp(sym, L"builtin") == 0) {
           form->type = F_BUILTIN;
           throws(tryBuiltinAnalyze(ctx, expr, &form->builtin, error));
+          break;
+        }
+
+        if (wcscmp(sym, L"with-handler") == 0) {
+          form->type = F_HANDLER;
+          throws(tryHandlerAnalyze(ctx, expr, &form->handler, error));
           break;
         }
 

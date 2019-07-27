@@ -417,11 +417,11 @@ uint64_t computeOpStackSize(uint8_t *code, uint16_t length) {
       case I_SWAP:
         code++;
         break;
-      case I_SET_HANDLER:
-        code++;
-        currentOpStack -= 2;
+      case I_PUSH_HANDLER:
+        code += 3;
+        currentOpStack -= 1;
         break;
-      case I_CLEAR_HANDLER:
+      case I_POP_HANDLER:
         code++;
         break;
       case I_CONS:
@@ -1010,6 +1010,54 @@ RetVal tryCompileList(Form *form, Output output, Error *error) {
   return ret;
 }
 
+RetVal tryCompileHandler(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  throws(tryCompile(form->handler.handler, output, error));
+
+  // emit the pushHandler code, keep a pointer to the jump address
+  uint16_t jumpAddrOffset;
+  {
+    uint8_t code[] = { I_PUSH_HANDLER, 0, 0 };
+    throws(tryCodeAppend(output, sizeof(code), code, error));
+    jumpAddrOffset = output.codes->numUsed - 2;
+  }
+
+  // emit all the forms
+  Forms forms = form->handler.forms;
+  if (forms.numForms == 0) {
+    {
+      Constant c;
+      c.type = CT_NIL;
+      throws(tryAppendConstant(output, c, error));
+      uint16_t index = output.constants->numUsed - 1;
+      uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
+      throws(tryCodeAppend(output, sizeof(code), code, error));
+    }
+  }
+  else {
+    for (int i=0; i < forms.numForms; i++) {
+      Form *f = &form->handler.forms.forms[i];
+      throws(tryCompile(f, output, error));
+    }
+  }
+
+  // the jumpAddrOffset should point to the first address after the forms
+  {
+    uint16_t nextCodeAddr = output.codes->numUsed;
+    setIndexAtOffset(output, jumpAddrOffset, nextCodeAddr);
+  }
+
+  // remove the handler
+  uint8_t code[] = { I_POP_HANDLER };
+  throws(tryCodeAppend(output, sizeof(code), code, error));
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 RetVal tryCompile(Form *form, Output output, Error *error) {
   RetVal ret;
 
@@ -1055,6 +1103,10 @@ RetVal tryCompile(Form *form, Output output, Error *error) {
 
     case F_LIST:
       throws(tryCompileList(form, output, error));
+      break;
+
+    case F_HANDLER:
+      throws(tryCompileHandler(form, output, error));
       break;
 
     default:

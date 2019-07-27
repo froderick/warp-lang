@@ -652,7 +652,6 @@ END_TEST
 
 START_TEST(repl)
   {
-
     assertEval(L"(let ()"
                "  (def + (fn (a b) (builtin :add a b)))"
                "  (+ 1 2))",
@@ -842,6 +841,17 @@ START_TEST(repl)
                "   (def n (record 'cheese 1))"
                "   (set n 0 'y)"
                "   (get n 0))", L"y");
+
+    assertEval(L"(with-handler (fn err (x) :hi)"
+               "   (+ 'x 'y)))", L":hi");
+
+    assertEval(L"(with-handler (fn err (x) :hi)"
+                "  (with-handler (fn err (x) :there)"
+                "    (+ 'x 'y)))", L":there");
+
+//    assertEval(L"(with-handler (fn err (x) x)"
+//               "  (with-handler (fn err (x) (+ 'a 'b))"
+//               "    (+ 'x 'y)))", L":there");
   }
 END_TEST
 
@@ -890,7 +900,7 @@ Suite * suite(void) {
   tcase_add_test(tc_core, gc);
 
   if (config.gcOnAlloc) {
-    tcase_set_timeout(tc_core, 10);
+    tcase_set_timeout(tc_core, 20);
   }
 
   Suite *s = suite_create("lexer");

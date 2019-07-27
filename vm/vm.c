@@ -1478,16 +1478,15 @@ void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invo
 
 void handleRaise(VM *vm, Raised *r) {
   Value exception = exceptionMake(vm, r);
-  setException(vm, exception);
 
-  Frame_t handlerFrame = NULL;
+  Frame_t handlingFrame = NULL;
   Frame_t frameToPop = NULL;
   if (vm->current != NULL) {
     Frame_t current = vm->current;
     while (true) {
 
       if (frameHandlers(current) != NULL) {
-        handlerFrame = current;
+        handlingFrame = current;
         break;
       }
       else { // no handler, this frame will get popped
@@ -1503,7 +1502,7 @@ void handleRaise(VM *vm, Raised *r) {
     }
   }
 
-  if (handlerFrame != NULL) { // found a handler
+  if (handlingFrame != NULL) { // found a handler
 
     // pop all the frames off the stack until we are on the frame we're jumping to
     if (frameToPop != NULL) {
@@ -1513,20 +1512,22 @@ void handleRaise(VM *vm, Raised *r) {
     FrameHandler_t handler = frameHandlers(vm->current);
 
     {
-      pushOperand(handlerFrame, exception);
+      pushOperand(handlingFrame, exception);
 
       Invocable invocable;
       makeInvocable(vm, *frameHandlerValue(handler), &invocable);
 
-      Frame_t frame = pushFrame(vm, (Value) invocable.fn);
-      Frame_t parent = getParent(frame);
-      invokePopulateLocals(vm, parent, frame, &invocable, 1);
+      Frame_t handlerFrame = pushFrame(vm, (Value) invocable.fn);
+      invokePopulateLocals(vm, handlingFrame, handlerFrame, &invocable, 1);
     }
 
     uint16_t jumpAddr = frameHandlerJumpAddr(handler);
-    setPc(handlerFrame, jumpAddr);
+    setPc(handlingFrame, jumpAddr);
+
+    longjmp(vm->jumpBuf, 1); // eval next instruction
   }
-  else { // bomb out
+  else {
+    setException(vm, exception); // bomb out
     longjmp(vm->jumpBuf, 1);
   }
 }
@@ -1943,13 +1944,15 @@ void swapEval(VM *vm, Frame_t frame) {
 
 // (8)        | (jumpAddr, handler ->)
 void setHandlerEval(VM *vm, Frame_t frame) {
+  uint16_t jumpIndex = readIndex(frame);
+
   Value handler = popOperand(frame);
   ValueType handlerType = valueType(handler);
   if (handlerType != VT_FN) {
-    raise(vm, "cannot cons onto a value of type %s", getValueTypeName(vm, handlerType));
+    raise(vm, "handlers must be of type fn: %s", getValueTypeName(vm, handlerType));
   }
-//  pushFrameHandler(vm, handler);
-  explode("oops");
+
+  pushFrameHandler(vm, handler, jumpIndex);
 }
 
 // (8)        | (->)
@@ -2130,10 +2133,10 @@ InstTable instTableCreate() {
       [I_SUB]              = { .name = "I_SUB",             .print = printInst,           .eval = subEval },
       [I_DEF_VAR]          = { .name = "I_DEF_VAR",         .print = printInstAndIndex,   .eval = defVarEval },
       [I_LOAD_VAR]         = { .name = "I_LOAD_VAR",        .print = printInstAndIndex,   .eval = loadVarEval },
-      [I_LOAD_CLOSURE]     = { .name = "I_LOAD_CLOSURE",    .print = printInstAndIndex2x,   .eval = loadClosureEval },
+      [I_LOAD_CLOSURE]     = { .name = "I_LOAD_CLOSURE",    .print = printInstAndIndex2x, .eval = loadClosureEval },
       [I_SWAP]             = { .name = "I_SWAP",            .print = printInst,           .eval = swapEval },
-      [I_SET_HANDLER]      = { .name = "I_SET_HANDLER",     .print = printInstAndIndex2x, .eval = setHandlerEval },
-      [I_CLEAR_HANDLER]    = { .name = "I_CLEAR_HANDLER",   .print = printInst,           .eval = clearHandlerEval },
+      [I_PUSH_HANDLER]     = { .name = "I_PUSH_HANDLER",     .print = printInstAndIndex,   .eval = setHandlerEval },
+      [I_POP_HANDLER]      = { .name = "I_POP_HANDLER",   .print = printInst,           .eval = clearHandlerEval },
 
       [I_CONS]             = { .name = "I_CONS",            .print = printInst,           .eval = consEval },
 
@@ -2953,26 +2956,37 @@ void popFrameHandler(VM *vm) {
 
 VMEvalResult vmEval(VM *vm, CodeUnit *codeUnit) {
 
-  FnConstant c;
-  constantFnInitContents(&c);
-  c.numConstants = codeUnit->numConstants;
-  c.constants = codeUnit->constants;
-  c.code = codeUnit->code;
+  // set up
+  {
+    FnConstant c;
+    constantFnInitContents(&c);
+    c.numConstants = codeUnit->numConstants;
+    c.constants = codeUnit->constants;
+    c.code = codeUnit->code;
+
+    Value fnRef = fnHydrate(vm, &c);
+    pushFrame(vm, fnRef);
+  }
 
   VMEvalResult result;
-  if (!setjmp(vm->jumpBuf)) {
-    Value fnRef = fnHydrate(vm, &c);
-    Frame_t frame = pushFrame(vm, fnRef);
+
+  if (!setjmp(vm->jumpBuf)) { // initial and normal case, no exceptions thrown
     frameEval(vm);
-    Value value = frame->result;
-    popFrame(vm);
     result.type = RT_RESULT;
-    result.value = value;
+    result.value = vm->current->result;
   }
-  else {
+  else if (vm->exception == W_NIL_VALUE) { // exception thrown and handled, keep evaluating
+    frameEval(vm);
+    result.type = RT_RESULT;
+    result.value = vm->current->result;
+  }
+  else { // exception unhandled
     result.type = RT_EXCEPTION;
     result.value = vm->exception;
   }
+
+  // clean up
+  popFrame(vm);
 
   return result;
 }
@@ -3574,20 +3588,6 @@ void toStringBuiltin(VM *vm, Frame_t frame) {
   }
 }
 
-void pushHandlerBuiltin(VM *vm, Frame_t frame) {
-  Value fn = popOperand(frame);
-  if (valueType(fn) != VT_FN) {
-    explode("handler must be a fn: %s", getValueTypeName(vm, valueType(fn)));
-  }
-  pushFrameHandler(vm, fn, 0);
-  pushOperand(frame, W_NIL_VALUE);
-}
-
-void popHandlerBuiltin(VM *vm, Frame_t frame) {
-  popFrameHandler(vm);
-  pushOperand(frame, W_NIL_VALUE);
-}
-
 void initCFns(VM *vm) {
 
   defineCFn(vm, L"cons", 2, false, consEval);
@@ -3611,8 +3611,6 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"vector", 1, true, vectorBuiltin);
   defineCFn(vm, L"record", 2, false, recordBuiltin);
   defineCFn(vm, L"to-string", 1, false, toStringBuiltin);
-  defineCFn(vm, L"push-handler", 1, false, pushHandlerBuiltin);
-  defineCFn(vm, L"pop-handler", 0, false, popHandlerBuiltin);
 }
 
 void vmConfigInitContents(VMConfig *config) {
