@@ -1072,13 +1072,13 @@ Value fnHydrate(VM *vm, FnConstant *fnConst) {
   {
     uint64_t nameSize = 0;
     if (fnConst->hasName) {
-      nameSize = wcslen(fnConst->name) * sizeof(wchar_t);
+      nameSize = (wcslen(fnConst->name) + 1) * sizeof(wchar_t);
     }
     uint64_t constantsSize = fnConst->numConstants * sizeof(Value);
     uint64_t codeSize = fnConst->code.codeLength * sizeof(uint8_t);
     uint64_t sourceFileNameSize = 0;
     if (fnConst->code.hasSourceTable) {
-      sourceFileNameSize = wcslen(fnConst->code.sourceTable.fileName) * sizeof(wchar_t);
+      sourceFileNameSize = (wcslen(fnConst->code.sourceTable.fileName) + 1) * sizeof(wchar_t);
     }
     uint64_t lineNumbersSize = fnConst->code.sourceTable.numLineNumbers * sizeof(LineNumber);
 
