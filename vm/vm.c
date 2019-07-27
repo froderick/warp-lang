@@ -1404,25 +1404,34 @@ Value exceptionMake(VM *vm, Raised *raised) {
       Map *protectedFrame = makeMap(vm);
       pushFrameRoot(vm, (Value*)&protectedFrame);
 
-      wchar_t *fnName;
-      if (hasFnName(current)) {
-        fnName = getFnName(current);
+      Value protectedFnName;
+      {
+        wchar_t *fnName;
+        if (hasFnName(current)) {
+          fnName = getFnName(current);
+        } else {
+          fnName = L"<root>\0";
+        }
+        protectedFnName = makeStringValue(vm, fnName, wcslen(fnName));
+        pushFrameRoot(vm, &protectedFnName);
+        putMapEntry(vm, &protectedFrame, protectedFunctionKw, protectedFnName);
+        popFrameRoot(vm); //protectedFnName
       }
-      else {
-        fnName = L"<root>\0";
-      }
-
-      putMapEntry(vm, &protectedFrame, protectedFunctionKw, makeStringValue(vm, fnName, wcslen(fnName)));
 
       if (hasSourceTable(current)) {
 
-        wchar_t *fileName = getFileName(current);
+        putMapEntry(vm, &protectedFrame, protectedUnknownSourceKw, wrapBool(false));
+
+        {
+          wchar_t *fileName = getFileName(current);
+          Value protectedFileName = makeStringValue(vm, fileName, wcslen(fileName));
+          pushFrameRoot(vm, &protectedFileName);
+          putMapEntry(vm, &protectedFrame, protectedFileNameKw, protectedFileName);
+          popFrameRoot(vm); //protectedFileName
+        }
 
         uint64_t lineNumber;
         getLineNumber(current, &lineNumber);
-
-        putMapEntry(vm, &protectedFrame, protectedUnknownSourceKw, wrapBool(false));
-        putMapEntry(vm, &protectedFrame, protectedFileNameKw, makeStringValue(vm, fileName, wcslen(fileName)));
         putMapEntry(vm, &protectedFrame, protectedLineNumberKw, wrapUint(lineNumber));
       }
       else {
