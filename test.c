@@ -11,7 +11,6 @@
 #include "vm/vm.h"
 #include "bootstrap/repl.h"
 
-#define ONE_KB (1024)
 #define ONE_MB (1024 * 1000)
 
 VMConfig config;
@@ -634,7 +633,7 @@ END_TEST
 #define assertEval(inputText, expectedOutputText) { \
   Error error; \
   Pool_t pool = NULL; \
-  ck_assert_int_eq(tryPoolCreate(&pool, ONE_KB, &error), R_SUCCESS); \
+  ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &error), R_SUCCESS); \
   wchar_t *result; \
   errorInitContents(&error); \
   result = NULL; \
@@ -858,7 +857,7 @@ END_TEST
 #define assertEvalNoStd(inputText, expectedOutputText) { \
   Error error; \
   Pool_t pool = NULL; \
-  ck_assert_int_eq(tryPoolCreate(&pool, ONE_KB, &error), R_SUCCESS); \
+  ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &error), R_SUCCESS); \
   wchar_t *result; \
   errorInitContents(&error); \
   result = NULL; \

@@ -344,14 +344,14 @@ Expr* printToReader(VM_t vm, Pool_t pool, Value result) {
   return elem;
 }
 
-#define ONE_KB 1024
+#define ONE_MB (1024 * 1000)
 
 void print(VM_t vm, Value value) {
   Error error;
   errorInitContents(&error);
 
   Pool_t pool = NULL;
-  if (tryPoolCreate(&pool, ONE_KB, &error) != R_SUCCESS) {
+  if (tryPoolCreate(&pool, ONE_MB, &error) != R_SUCCESS) {
     explode("oops");
   }
 
@@ -432,7 +432,7 @@ void printException(VM_t vm, Value exception) {
   errorInitContents(&error);
 
   Pool_t pool = NULL;
-  if (tryPoolCreate(&pool, ONE_KB, &error) != R_SUCCESS) {
+  if (tryPoolCreate(&pool, ONE_MB, &error) != R_SUCCESS) {
     explode("oops");
   }
 
