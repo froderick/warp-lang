@@ -3,7 +3,6 @@
 #include <libgen.h>
 #include <time.h>
 #include <inttypes.h>
-#include <setjmp.h>
 #include "vm.h"
 #include "../bootstrap/print.h"
 #include "../errors.h"
@@ -89,30 +88,6 @@ ValueType valueType(Value v) {
   explode("unknown type: %" PRIu64, v);
 }
 
-#define ASSERT_SEQ(vm, value, ...) {\
-  if (valueType(value) != VT_LIST && valueType(value) != VT_NIL) { \
-    raise(vm, "expected a list type: %s", getValueTypeName(vm, valueType(value))); \
-  } \
-}
-
-#define ASSERT_STR(vm, value, ...) {\
-  if (valueType(value) != VT_STR) { \
-    raise(vm, "expected a string type: %s", getValueTypeName(vm, valueType(value))); \
-  } \
-}
-
-#define ASSERT_UINT(vm, value, ...) {\
-  if (valueType(value) != VT_UINT) { \
-    raise(vm, "expected a uint type: %s", getValueTypeName(vm, valueType(value))); \
-  } \
-}
-
-#define ASSERT_ARRAY(vm, value, ...) {\
-  if (valueType(value) != VT_ARRAY) { \
-    raise(vm, "expected an array type: %s", getValueTypeName(vm, valueType(value))); \
-  } \
-}
-
 Value wrapBool(bool b) {
   return (((uint8_t)b & 1u) << 4u) | W_BOOLEAN_BITS;
 }
@@ -161,7 +136,7 @@ typedef struct GC {
 
 // instruction definitions
 
-typedef void (*Eval) (struct VM *vm, Frame_t frame);
+typedef int (*Eval) (struct VM *vm, Frame_t frame);
 
 typedef struct Inst {
   const char *name;
@@ -238,7 +213,6 @@ typedef struct VM {
   Frame_t current;
   Table symbolTable;
   Table keywordTable;
-  jmp_buf jumpBuf;
   Value exception;
 } VM;
 
@@ -494,7 +468,7 @@ Record* makeRecord(VM *vm, uint64_t numFields) {
   return record;
 }
 
-typedef void (*CFnInvoke) (VM_t vm, Frame_t frame);
+typedef int (*CFnInvoke) (VM_t vm, Frame_t frame);
 
 Value makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
   CFn *fn = NULL;
@@ -754,6 +728,7 @@ wchar_t* getFileName(Frame_t frame);
 bool hasException(VM *vm);
 void setException(VM *vm, Value e);
 Value getException(VM *vm);
+void clearException(VM *vm);
 
 Frame_t pushFrame(VM *vm, Value newFn);
 Frame_t replaceFrame(VM *vm, Value newFn);
@@ -912,18 +887,14 @@ void* deref(VM *vm, Value value) {
   return ptr;
 }
 
-Value sanityCheck(VM *vm);
-
 void relocate(VM *vm, Value *valuePtr) {
 
   Value value = *valuePtr;
 
   void* ptr = (void*)value;
   if (ptr >= vm->gc.currentHeap && ptr < (vm->gc.currentHeap + vm->gc.heapSize)) {
-    printf("cannot relocate from current heap");
+    explode("cannot relocate from current heap");
   }
-
-  sanityCheck(vm);
 
   if ((value & W_PTR_MASK) != 0) {
     // only relocate heap objects
@@ -942,20 +913,12 @@ void relocate(VM *vm, Value *valuePtr) {
       explode("out of memory, cannot allocate %" PRIu64 " bytes mid-gc", size);
     }
 
-    sanityCheck(vm);
-
     memcpy(newPtr, (void*)value, size); // this must somehow be pointing to the CFn + address range
-
-    sanityCheck(vm);
 
     *valuePtr = (Value)newPtr;
     *header = W_GC_FORWARDING_BIT | ((Value)newPtr >> 1u);
-    // TODO: somehow this unrelated root function relocation is nuking sanityCheck
-
-    sanityCheck(vm);
   }
 
-  sanityCheck(vm);
 }
 
 uint64_t now() {
@@ -975,125 +938,8 @@ void relocateTable(VM *vm, Table *table) {
   }
 }
 
-Value sanityCheck(VM *vm) {
-
-  Symbol *sym = NULL;
-
-  TableEntry *entries = vm->symbolTable.entries;
-  for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
-    TableEntry *e = &entries[i];
-    if (e->used) {
-      String *name = (String*)e->name; //deref(vm, e->name);
-      if (wcscmp(stringValue(name), L"+") == 0) {
-        sym = (Symbol *) e->value; // deref(vm, e->value);
-        break;
-      }
-    }
-  }
-
-  if (sym != NULL) {
-
-    Value value = sym->topLevelValue;
-    if (value != W_NIL_VALUE) {
-
-      if ((value & W_PTR_MASK) == 0) {
-
-        ObjectHeader *h = (ObjectHeader *) value;
-        bool isForward = (*h) & W_GC_FORWARDING_BIT;
-        if (isForward) {
-          Value forwardValue = (*h << 1u);
-          ObjectHeader *forwardHeader = (ObjectHeader*)forwardValue;
-
-          if (objectHeaderValueType(*forwardHeader) != VT_CFN) {
-            printf("sanity check gotcha type");
-          }
-        }
-        else {
-
-          if (objectHeaderValueType(*h) != VT_CFN) {
-            printf("sanity check gotcha type");
-          }
-
-          if (objectHeaderSizeBytes(*h) > 1000000) {
-            printf("sanity check gotcha A");
-          }
-        }
-      }
-    }
-
-    return value;
-  }
-  else {
-    return NULL;
-  }
-}
-
-//            void *ptr = h;
-//            if (ptr >= vm->gc.allocPtr && ptr <vm->gc.currentHeapEnd) {
-//              printf("sanity check gotcha B");
-//            }
-
-//            void *oldHeap;
-//            if (vm->gc.currentHeap == vm->gc.heapA) {
-//              oldHeap = vm->gc.heapB;
-//            }
-//            else {
-//              oldHeap = vm->gc.heapA;
-//            }
-//            if (ptr >= oldHeap && ptr < (oldHeap + vm->gc.heapSize)) {
-//              printf("found a pointer to wrong heap");
-//            }
-
-void sanityCheckOffSides(VM *vm) {
-  TableEntry *entries = vm->symbolTable.entries;
-  for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
-    TableEntry *e = &entries[i];
-    if (e->used) {
-      String *name = (String*)e->name; //deref(vm, e->name);
-      if (wcscmp(stringValue(name), L"+") == 0) {
-        // found it
-
-        Symbol *sym = (Symbol*)e->value; // deref(vm, e->value);
-        Value value = sym->topLevelValue;
-
-
-        if (value != W_NIL_VALUE) {
-
-          if ((value & W_PTR_MASK) == 0) {
-
-            ObjectHeader *h = (ObjectHeader *) value;
-            if (!(*h & W_GC_FORWARDING_BIT)) {
-
-              void *ptr = h;
-              if (ptr >= vm->gc.allocPtr && ptr < vm->gc.currentHeapEnd) {
-                printf("pointer to unallocated space");
-              }
-
-              void *oldHeap;
-              if (vm->gc.currentHeap == vm->gc.heapA) {
-                oldHeap = vm->gc.heapB;
-              }
-              else {
-                oldHeap = vm->gc.heapA;
-              }
-              if (ptr >= oldHeap && ptr < (oldHeap + vm->gc.heapSize)) {
-                printf("found a pointer to wrong heap");
-              }
-            }
-          }
-        }
-
-        break;
-      }
-    }
-  }
-}
 
 void collect(VM *vm) {
-
-  sanityCheckOffSides(vm);
-
-  sanityCheck(vm);
 
   uint64_t oldHeapUsed = vm->gc.allocPtr - vm->gc.currentHeap;
 
@@ -1111,25 +957,14 @@ void collect(VM *vm) {
   vm->gc.currentHeapEnd = vm->gc.currentHeap + vm->gc.heapSize;
   vm->gc.allocPtr = vm->gc.currentHeap;
 
-  Value _v = sanityCheck(vm);
-
   memset(vm->gc.currentHeap, 0, vm->gc.heapSize); // TODO: this seems to clobber '+'
-
-  sanityCheck(vm);
 
   // relocate exception, if present
   relocate(vm, &vm->exception);
 
-  sanityCheck(vm);
-
   // relocate tables
   relocateTable(vm, &vm->symbolTable);
-
-  sanityCheck(vm);
-
   relocateTable(vm, &vm->keywordTable);
-
-  sanityCheck(vm);
 
   // relocate noFrameRoots
   FrameRoot_t noFrameRoot = vm->noFrameRoots;
@@ -1139,8 +974,6 @@ void collect(VM *vm) {
     noFrameRoot = frameRootNext(noFrameRoot);
   }
 
-  sanityCheck(vm);
-
   // relocate noFrameHandlers
   FrameHandler_t noFrameHandler = vm->noFrameHandlers;
   while (noFrameHandler != NULL) {
@@ -1149,14 +982,10 @@ void collect(VM *vm) {
     noFrameHandler = frameHandlerNext(noFrameHandler);
   }
 
-  sanityCheck(vm);
-
   // relocate call stack roots
   Frame_t current = vm->current;
   if (current != NULL) {
     while (true) {
-
-      sanityCheck(vm);
 
       // relocate fnRef
       {
@@ -1167,15 +996,11 @@ void collect(VM *vm) {
         setFn(vm, current, fn);
       }
 
-      sanityCheck(vm);
-
       uint16_t locals = numLocals(current);
       for (uint16_t i = 0; i < locals; i++) {
         Value *val = getLocalRef(current, i);
         relocate(vm, val);
       }
-
-      sanityCheck(vm);
 
       uint64_t operands = numOperands(current);
       for (uint64_t i = 0; i < operands; i++) {
@@ -1183,21 +1008,12 @@ void collect(VM *vm) {
         relocate(vm, val);
       }
 
-      sanityCheck(vm);
-
       FrameRoot_t root = frameRoots(current);
       while (root != NULL) {
-
-        sanityCheck(vm);
-
         Value *valuePtr = frameRootValue(root);
         relocate(vm, valuePtr);
         root = frameRootNext(root);
-
-        sanityCheck(vm);
       }
-
-      sanityCheck(vm);
 
       FrameHandler_t handler = frameHandlers(current);
       while (handler != NULL) {
@@ -1205,8 +1021,6 @@ void collect(VM *vm) {
         relocate(vm, valuePtr);
         handler = frameHandlerNext(handler);
       }
-
-      sanityCheck(vm);
 
       if (!hasParent(current)) {
         break;
@@ -1229,13 +1043,9 @@ void collect(VM *vm) {
 
     relocateChildren(vm, type, scanptr);
 
-    sanityCheck(vm);
-
     scanptr += sizeBytes;
     count++;
   }
-
-  sanityCheck(vm);
 
   uint64_t newHeapUsed = vm->gc.allocPtr - vm->gc.currentHeap;
   uint64_t sizeRecovered = oldHeapUsed - newHeapUsed;
@@ -1243,34 +1053,6 @@ void collect(VM *vm) {
   uint64_t duration = end - start;
 
   printf("gc: completed, %" PRIu64 " bytes recovered, %" PRIu64 " bytes used, took %" PRIu64 "ms\n", sizeRecovered, newHeapUsed, duration);
-
-
-  {
-    TableEntry *entries = vm->symbolTable.entries;
-    for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
-      TableEntry *e = &entries[i];
-      if (e->used) {
-        String *name = deref(vm, e->name);
-        if (wcscmp(stringValue(name), L"+") == 0) {
-          // found it
-
-          Symbol *sym = deref(vm, e->value);
-          Value value = sym->topLevelValue;
-
-          if (value != W_NIL_VALUE) {
-            ObjectHeader *h = (ObjectHeader *) value;
-            if (!(*h & W_GC_FORWARDING_BIT)) {
-              if (objectHeaderSizeBytes(*h) > 1000000) {
-                printf("post gotcha");
-              }
-            }
-          }
-
-          break;
-        }
-      }
-    }
-  }
 }
 
 /*
@@ -1686,11 +1468,11 @@ void raisedInitContents(Raised *r) {
 
 Frame_t popSpecificFrame(VM *vm, Frame_t popped);
 
-void makeInvocable(VM *vm, Value pop, Invocable *invocable);
+int makeInvocable(VM *vm, Value pop, Invocable *invocable);
 void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invocable, uint16_t numArgsSupplied);
 
-void handleRaise(VM *vm, Raised *r) {
-  Value exception = exceptionMake(vm, r);
+bool handleRaise(VM *vm) {
+  Value exception = vm->exception;
 
   if (vm->current != NULL) { // a stack is available, look for a handler
 
@@ -1752,13 +1534,13 @@ void handleRaise(VM *vm, Raised *r) {
       uint16_t jumpAddr = frameHandlerJumpAddr(h);
       setPc(f, jumpAddr);
 
-      longjmp(vm->jumpBuf, 1); // eval next instruction
+      clearException(vm);
+      return true;
     }
   }
 
-  // no handler, don't worry about handling the error at all
-  setException(vm, exception); // bomb out
-  longjmp(vm->jumpBuf, 1);
+  // no handler, bomb out
+  return false;
 }
 
 #define raise(vm, str, ...) {\
@@ -1773,7 +1555,7 @@ void handleRaise(VM *vm, Raised *r) {
   snprintf(msg, len, str, ##__VA_ARGS__); \
   \
   swprintf(r.message, ERROR_MSG_LENGTH, L"vm raised an exception: %s", msg); \
-  handleRaise(vm, &r); \
+  vm->exception = exceptionMake(vm, &r); \
 }
 
 /*
@@ -1781,24 +1563,27 @@ void handleRaise(VM *vm, Raised *r) {
  */
 
 // (8), typeIndex (16) | (-> value)
-void loadConstEval(VM *vm, Frame_t frame) {
+int loadConstEval(VM *vm, Frame_t frame) {
   uint16_t constantIndex = readIndex(frame);
   Value constant = getConst(frame, constantIndex);
   pushOperand(frame, constant);
+  return R_SUCCESS;
 }
 
 // (8), typeIndex (16) | (-> value)
-void loadLocalEval(VM *vm, Frame_t frame) {
+int loadLocalEval(VM *vm, Frame_t frame) {
   uint16_t localIndex = readIndex(frame);
   Value v = getLocal(frame, localIndex);
   pushOperand(frame, v);
+  return R_SUCCESS;
 }
 
 // (8), typeIndex  (16) | (objectref ->)
-void storeLocalEval(VM *vm, Frame_t frame) {
+int storeLocalEval(VM *vm, Frame_t frame) {
   uint16_t localIndex = readIndex(frame);
   Value v = popOperand(frame);
   setLocal(frame, localIndex, v);
+  return R_SUCCESS;
 }
 
 void invocableInitContents(Invocable *i) {
@@ -1807,7 +1592,7 @@ void invocableInitContents(Invocable *i) {
   i->closure = NULL; // points to the closure, if there is one
 }
 
-void makeInvocable(VM *vm, Value pop, Invocable *invocable) {
+int makeInvocable(VM *vm, Value pop, Invocable *invocable) {
 
   invocableInitContents(invocable);
   invocable->ref = pop;
@@ -1828,7 +1613,10 @@ void makeInvocable(VM *vm, Value pop, Invocable *invocable) {
       // fail: not all values are invocable
       raise(vm, "cannot invoke this value type as a function: %s",
           getValueTypeName(vm, fnRefType));
+      return R_ERROR;
   }
+
+  return R_SUCCESS;
 }
 
 void protectInvocable(VM *vm, Invocable *invocable) {
@@ -1847,16 +1635,16 @@ void unprotectInvocable(VM *vm, Invocable *invocable) {
   }
 }
 
-void preprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarArgs, uint64_t numArgsSupplied) {
+int validateArguments(VM *vm, uint16_t numArgs, bool usesVarArgs, uint64_t numArgsSupplied) {
 
   if (!usesVarArgs) {
     if (numArgsSupplied != numArgs) {
       raise(vm, "required arguments not supplied, expected %u but got %" PRIu64, numArgs,
-          numArgsSupplied);
+            numArgsSupplied);
+      return R_ERROR;
     }
   }
   else {
-
     uint16_t numVarArgs;
     if (numArgsSupplied > numArgs) {
       numVarArgs = (numArgsSupplied - numArgs) + 1;
@@ -1869,7 +1657,30 @@ void preprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarA
     }
     else {
       raise(vm, "required arguments not supplied, expected %u or more arguments but got %" PRIu64,
-                        numArgs - 1, numArgsSupplied);
+            numArgs - 1, numArgsSupplied);
+      return R_ERROR;
+    }
+  }
+
+
+  return R_SUCCESS;
+}
+
+void preprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarArgs, uint64_t numArgsSupplied) {
+  if (usesVarArgs) {
+
+    uint16_t numVarArgs;
+    if (numArgsSupplied > numArgs) {
+      numVarArgs = (numArgsSupplied - numArgs) + 1;
+    }
+    else if (numArgsSupplied == numArgs) {
+      numVarArgs = 1;
+    }
+    else if (numArgsSupplied == numArgs - 1) {
+      numVarArgs = 0;
+    }
+    else {
+      explode("insuficient arguments supplied");
     }
 
     Value seq = W_NIL_VALUE;
@@ -1920,60 +1731,8 @@ void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invo
   unprotectInvocable(vm, invocable);
 }
 
-Value CFnValuesMatch(VM *vm) {
 
-  Symbol *sym = NULL;
-
-  TableEntry *entries = vm->symbolTable.entries;
-  for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
-    TableEntry *e = &entries[i];
-    if (e->used) {
-      String *name = (String*)e->name; //deref(vm, e->name);
-      if (wcscmp(stringValue(name), L"+") == 0) {
-        sym = (Symbol *) e->value; // deref(vm, e->value);
-        break;
-      }
-    }
-  }
-
-  if (sym != NULL) {
-
-    Value value = sym->topLevelValue;
-    if (value != W_NIL_VALUE) {
-
-      if ((value & W_PTR_MASK) == 0) {
-
-        ObjectHeader *h = (ObjectHeader *) value;
-        bool isForward = (*h) & W_GC_FORWARDING_BIT;
-        if (isForward) {
-          Value forwardValue = (*h << 1u);
-          ObjectHeader *forwardHeader = (ObjectHeader*)forwardValue;
-
-          if (objectHeaderValueType(*forwardHeader) != VT_CFN) {
-            printf("sanity check gotcha type");
-          }
-        }
-        else {
-
-          if (objectHeaderValueType(*h) != VT_CFN) {
-            printf("sanity check gotcha type");
-          }
-
-          if (objectHeaderSizeBytes(*h) > 1000000) {
-            printf("sanity check gotcha A");
-          }
-        }
-      }
-    }
-
-    return value;
-  }
-  else {
-    return NULL;
-  }
-}
-
-void invokeCFn(VM *vm, Frame_t frame, Value cFn, uint16_t numArgsSupplied) {
+int invokeCFn(VM *vm, Frame_t frame, Value cFn, uint16_t numArgsSupplied) {
   CFn *protectedFn = deref(vm, cFn);
   pushFrameRoot(vm, (Value*)&protectedFn);
 
@@ -2004,24 +1763,48 @@ void invokeCFn(VM *vm, Frame_t frame, Value cFn, uint16_t numArgsSupplied) {
     }
   }
 
-  collect(vm);
+  int error = validateArguments(vm, protectedFn->numArgs, protectedFn->usesVarArgs, numArgsSupplied);
+  if (error) {
+    goto cleanup;
+  }
 
   preprocessArguments(vm, frame, protectedFn->numArgs, protectedFn->usesVarArgs, numArgsSupplied);
-  ((CFnInvoke)protectedFn->ptr)(vm, frame);
 
-  popFrameRoot(vm);
+  error = ((CFnInvoke)protectedFn->ptr)(vm, frame);
+  if (error) {
+    goto cleanup;
+  }
+
+  cleanup:
+    popFrameRoot(vm);
+    if (error) {
+      return error;
+    }
+    else {
+      return R_SUCCESS;
+    }
 }
 
 // (8)              | (objectref, args... -> ...)
-void invokeDynEval(VM *vm, Frame_t frame) {
+int invokeDynEval(VM *vm, Frame_t frame) {
   uint16_t numArgsSupplied = readIndex(frame);
   Value pop = popOperand(frame);
   switch (valueType(pop)) {
-    case VT_CFN:
-      invokeCFn(vm, frame, pop, numArgsSupplied);
+    case VT_CFN: {
+      int error = invokeCFn(vm, frame, pop, numArgsSupplied);
+      if (error) {
+        return error;
+      }
       break;
+    }
     case VT_KEYWORD: {
       Value key = pop;
+
+      int error = validateArguments(vm, 1, false, numArgsSupplied);
+      if (error) {
+        return error;
+      }
+
       preprocessArguments(vm, frame, 1, false, numArgsSupplied);
       Value coll = popOperand(frame);
       Map *m = deref(vm, coll);
@@ -2030,15 +1813,27 @@ void invokeDynEval(VM *vm, Frame_t frame) {
       break;
     }
     default: {
+
       Invocable invocable;
       Frame_t parent;
 
-      makeInvocable(vm, pop, &invocable);
+      int error = makeInvocable(vm, pop, &invocable);
+      if (error) {
+        return error;
+      }
+
+      error = validateArguments(vm, invocable.fn->numArgs, invocable.fn->usesVarArgs, numArgsSupplied);
+      if (error) {
+        return error;
+      }
+
       frame = pushFrame(vm, (Value) invocable.fn);
       parent = getParent(frame);
       invokePopulateLocals(vm, parent, frame, &invocable, numArgsSupplied);
     }
   }
+
+  return R_SUCCESS;
 }
 
 /*
@@ -2052,15 +1847,25 @@ void invokeDynEval(VM *vm, Frame_t frame) {
  */
 
 // (8)              | (objectref, args... -> ...)
-void invokeDynTailEval(VM *vm, Frame_t frame) {
+int invokeDynTailEval(VM *vm, Frame_t frame) {
   uint16_t numArgsSupplied = readIndex(frame);
   Value pop = popOperand(frame);
   switch (valueType(pop)) {
-    case VT_CFN:
-      invokeCFn(vm, frame, pop, numArgsSupplied);
+    case VT_CFN: {
+      int error = invokeCFn(vm, frame, pop, numArgsSupplied);
+      if (error) {
+        return error;
+      }
       break;
+    }
     case VT_KEYWORD: {
       Value key = pop;
+
+      int error = validateArguments(vm, 1, false, numArgsSupplied);
+      if (error) {
+        return error;
+      }
+
       preprocessArguments(vm, frame, 1, false, numArgsSupplied);
       Value coll = popOperand(frame);
       Map *m = deref(vm, coll);
@@ -2070,87 +1875,110 @@ void invokeDynTailEval(VM *vm, Frame_t frame) {
     }
     default: {
       Invocable invocable;
-      makeInvocable(vm, pop, &invocable);
+
+      int error = makeInvocable(vm, pop, &invocable);
+      if (error) {
+        return error;
+      }
+
+      error = validateArguments(vm, invocable.fn->numArgs, invocable.fn->usesVarArgs, numArgsSupplied);
+      if (error) {
+        return error;
+      }
+
       replaceFrame(vm, (Value) invocable.fn);
       invokePopulateLocals(vm, frame, frame, &invocable, numArgsSupplied);
     }
   }
+
+  return R_SUCCESS;
 }
 
 // (8)              | (objectref ->)
-void retEval(VM *vm, Frame_t frame) {
+int retEval(VM *vm, Frame_t frame) {
   Value v = popOperand(frame);
   setResult(frame, v);
+  return R_SUCCESS;
 }
 
 // (8)              | (a, b -> 0 | 1)
-void cmpEval(VM *vm, Frame_t frame) {
+int cmpEval(VM *vm, Frame_t frame) {
   Value a = popOperand(frame);
   Value b = popOperand(frame);
   Value c = wrapBool(a == b);
   pushOperand(frame, c);
+  return R_SUCCESS;
 }
 
 // (8), offset (16) | (->)
-void jmpEval(VM *vm, Frame_t frame) {
+int jmpEval(VM *vm, Frame_t frame) {
   uint16_t newPc = readIndex(frame);
   setPc(frame, newPc);
+  return R_SUCCESS;
 }
 
 // (8), offset (16) | (value ->)
-void jmpIfEval(VM *vm, Frame_t frame) {
+int jmpIfEval(VM *vm, Frame_t frame) {
   Value test = popOperand(frame);
   bool truthy = isTruthy(vm, test);
   uint16_t newPc = readIndex(frame);
   if (truthy) {
     setPc(frame, newPc);
   }
+  return R_SUCCESS;
 }
 
 // (8), offset (16) | (value ->)
-void jmpIfNotEval(VM *vm, Frame_t frame) {
+int jmpIfNotEval(VM *vm, Frame_t frame) {
   Value test = popOperand(frame);
   bool truthy = isTruthy(vm, test);
   uint16_t newPc = readIndex(frame);
   if (!truthy) {
     setPc(frame, newPc);
   }
+  return R_SUCCESS;
 }
 
 // (8)              | (a, b -> c)
-void addEval(VM *vm, Frame_t frame) {
+int addEval(VM *vm, Frame_t frame) {
   Value b = popOperand(frame);
   Value a = popOperand(frame);
 
   if (valueType(a) != VT_UINT) {
     raise(vm, "can only add integers: %s", getValueTypeName(vm, valueType(a)));
+    return R_ERROR;
   }
   if (valueType(b) != VT_UINT) {
     raise(vm, "can only add integers: %s", getValueTypeName(vm, valueType(b)));
+    return R_ERROR;
   }
 
   Value c = wrapUint(unwrapUint(a) + unwrapUint(b));
   pushOperand(frame, c);
+  return R_SUCCESS;
 }
 
 // (8)              | (a, b -> c)
-void subEval(VM *vm, Frame_t frame) {
+int subEval(VM *vm, Frame_t frame) {
   Value b = popOperand(frame);
   Value a = popOperand(frame);
 
   if (valueType(a) != VT_UINT) {
     raise(vm, "can only subtract integers: %s", getValueTypeName(vm, valueType(a)));
+    return R_ERROR;
   }
   if (valueType(b) != VT_UINT) {
     raise(vm, "can only subtract integers: %s", getValueTypeName(vm, valueType(b)));
+    return R_ERROR;
   }
 
   Value c = wrapUint(unwrapUint(a) - unwrapUint(b));
   pushOperand(frame, c);
+  return R_SUCCESS;
 }
 
 // (8), offset (16)  | (value ->)
-void defVarEval(VM *vm, Frame_t frame) {
+int defVarEval(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
   uint16_t constantIndex = readIndex(frame);
@@ -2165,10 +1993,11 @@ void defVarEval(VM *vm, Frame_t frame) {
   symbol->topLevelValue = value;
 
   pushOperand(frame, W_NIL_VALUE);
+  return R_SUCCESS;
 }
 
 // (8), offset 16  | (-> value)
-void loadVarEval(VM *vm, Frame_t frame) {
+int loadVarEval(VM *vm, Frame_t frame) {
 
   uint16_t constantIndex = readIndex(frame);
   Value value = getConst(frame, constantIndex);
@@ -2193,9 +2022,11 @@ void loadVarEval(VM *vm, Frame_t frame) {
 
     String *name = deref(vm, symbol->name);
     raise(vm, "no value defined for : '%ls'", stringValue(name));
+    return R_ERROR;
   }
 
   pushOperand(frame, symbol->topLevelValue);
+  return R_SUCCESS;
 }
 
 void closureInitContents(Closure *cl) {
@@ -2206,7 +2037,7 @@ void closureInitContents(Closure *cl) {
 }
 
 // (8), offset (16) | (captures... -> value)
-void loadClosureEval(VM *vm, Frame_t frame) {
+int loadClosureEval(VM *vm, Frame_t frame) {
   Fn *protectedFn;
   {
     uint16_t constantIndex = readIndex(frame);
@@ -2215,6 +2046,7 @@ void loadClosureEval(VM *vm, Frame_t frame) {
     ValueType fnValueType = valueType(fnValue);
     if (fnValueType != VT_FN) {
       raise(vm, "cannot create a closure from this value type: %s", getValueTypeName(vm, fnValueType));
+      return R_ERROR;
     }
 
     protectedFn = deref(vm, fnValue);
@@ -2243,36 +2075,41 @@ void loadClosureEval(VM *vm, Frame_t frame) {
 
   popFrameRoot(vm);
   pushOperand(frame, (Value)closure);
+  return R_SUCCESS;
 }
 
 // (8)        | (a, b -> b, a)
-void swapEval(VM *vm, Frame_t frame) {
+int swapEval(VM *vm, Frame_t frame) {
   Value a = popOperand(frame);
   Value b = popOperand(frame);
   pushOperand(frame, a);
   pushOperand(frame, b);
+  return R_SUCCESS;
 }
 
 // (8)        | (jumpAddr, handler ->)
-void setHandlerEval(VM *vm, Frame_t frame) {
+int setHandlerEval(VM *vm, Frame_t frame) {
   uint16_t jumpIndex = readIndex(frame);
 
   Value handler = popOperand(frame);
   ValueType handlerType = valueType(handler);
   if (handlerType != VT_FN) {
     raise(vm, "handlers must be of type fn: %s", getValueTypeName(vm, handlerType));
+    return R_ERROR;
   }
 
   pushFrameHandler(vm, handler, jumpIndex);
+  return R_SUCCESS;
 }
 
 // (8)        | (->)
-void clearHandlerEval(VM *vm, Frame_t frame) {
+int clearHandlerEval(VM *vm, Frame_t frame) {
   popFrameHandler(vm);
+  return R_SUCCESS;
 }
 
 // (8),             | (x, seq -> newseq)
-void consEval(VM *vm, Frame_t frame) {
+int consEval(VM *vm, Frame_t frame) {
   // gc may occur, so allocate the cons first
   Cons *cons = makeCons(vm);
 
@@ -2282,16 +2119,19 @@ void consEval(VM *vm, Frame_t frame) {
   ValueType seqType = valueType(seq);
   if (seqType != VT_NIL && seqType != VT_LIST) {
     raise(vm, "cannot cons onto a value of type %s", getValueTypeName(vm, seqType));
+    return R_ERROR;
   }
 
   cons->value = x;
   cons->next = seq;
 
   pushOperand(frame, (Value)cons);
+
+  return R_SUCCESS;
 }
 
 // (8),             | (seq -> x)
-void firstEval(VM *vm, Frame_t frame) {
+int firstEval(VM *vm, Frame_t frame) {
 
   Value seq = popOperand(frame);
   ValueType seqType = valueType(seq);
@@ -2306,13 +2146,16 @@ void firstEval(VM *vm, Frame_t frame) {
   }
   else {
     raise(vm, "cannot get first from a value of type %s", getValueTypeName(vm, seqType));
+    return R_ERROR;
   }
 
   pushOperand(frame, result);
+
+  return R_SUCCESS;
 }
 
 // (8),             | (seq -> seq)
-void restEval(VM *vm, Frame_t frame) {
+int restEval(VM *vm, Frame_t frame) {
 
   Value seq = popOperand(frame);
   ValueType seqType = valueType(seq);
@@ -2327,19 +2170,23 @@ void restEval(VM *vm, Frame_t frame) {
   }
   else {
     raise(vm, "cannot get rest from a value of type %s", getValueTypeName(vm, seqType));
+    return R_ERROR;
   }
 
   pushOperand(frame, result);
+
+  return R_SUCCESS;
 }
 
 // (8),             | (name -> nil)
-void setMacroEval(VM *vm, Frame_t frame) {
+int setMacroEval(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
   ValueType type = valueType(value);
 
   if (type != VT_SYMBOL) {
     raise(vm, "only symbols can identify vars: %s", getValueTypeName(vm, type));
+    return R_ERROR;
   }
 
   Symbol *s = deref(vm, value);
@@ -2357,44 +2204,52 @@ void setMacroEval(VM *vm, Frame_t frame) {
     }
 
     raise(vm, "no value is defined for this var: %ls", stringValue(name));
+    return R_ERROR;
   }
 
   if (!s->isMacro) {
     if (valueType(s->topLevelValue) != VT_FN) {
       raise(vm, "only vars referring to functions can be macros: %ls -> %s",
           stringValue(name), getValueTypeName(vm, valueType(s->topLevelValue)));
+      return R_ERROR;
     }
     s->isMacro = true;
   }
 
   pushOperand(frame, W_NIL_VALUE);
+  return R_SUCCESS;
 }
 
 // (8),             | (name -> bool)
-void getMacroEval(VM *vm, Frame_t frame) {
+int getMacroEval(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
 
   ValueType type = valueType(value);
   if (type != VT_SYMBOL) {
     raise(vm, "only symbols can identify vars: %s", getValueTypeName(vm, type));
+    return R_ERROR;
   }
 
   Symbol *s = deref(vm, value);
   Value result = wrapBool(s->isMacro);
   pushOperand(frame, result);
+
+  return R_SUCCESS;
 }
 
 // (8),             | (name -> bool)
-void gcEval(VM *vm, Frame_t frame) {
+int gcEval(VM *vm, Frame_t frame) {
   collect(vm);
   pushOperand(frame, W_NIL_VALUE);
+  return R_SUCCESS;
 }
 
 // (8),             | (value -> value)
-void getTypeEval(VM *vm, Frame_t frame) {
+int getTypeEval(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
   Value typeId = wrapUint(valueType(value));
   pushOperand(frame, typeId);
+  return R_SUCCESS;
 }
 
 void printInst(int *i, const char* name, uint8_t *code) {
@@ -2708,7 +2563,16 @@ void frameEval(VM *vm) {
       explode("instruction unimplemented: %s (%u)", getInstName(&vm->instTable, inst), inst);
     }
 
-    eval(vm, vm->current);
+    int raised = eval(vm, vm->current);
+    if (raised) {
+      bool handled = handleRaise(vm);
+      if (handled) { // exception thrown and handled, keep evaluating
+        continue;
+      }
+      else {
+        break;
+      }
+    }
   }
 }
 
@@ -3118,6 +2982,10 @@ void setException(VM *vm, Value value) {
   vm->exception = value;
 }
 
+void clearException(VM *vm) {
+  vm->exception = W_NIL_VALUE;
+}
+
 Value getException(VM *vm) {
   if (vm->exception == W_NIL_VALUE) {
     explode("handler not set");
@@ -3348,19 +3216,15 @@ VMEvalResult vmEval(VM *vm, CodeUnit *codeUnit) {
 
   VMEvalResult result;
 
-  if (!setjmp(vm->jumpBuf)) { // initial and normal case, no exceptions thrown
-    frameEval(vm);
+  frameEval(vm);
+  if (!hasException(vm)) {
     result.type = RT_RESULT;
     result.value = vm->current->result;
   }
-  else if (vm->exception == W_NIL_VALUE) { // exception thrown and handled, keep evaluating
-    frameEval(vm);
-    result.type = RT_RESULT;
-    result.value = vm->current->result;
-  }
-  else { // exception unhandled
+  else {
     result.type = RT_EXCEPTION;
-    result.value = vm->exception;
+    result.value = getException(vm);
+    clearException(vm);
   }
 
   // clean up
@@ -3373,6 +3237,18 @@ VMEvalResult vmEval(VM *vm, CodeUnit *codeUnit) {
  * builtin procedures
  */
 
+bool isSeq(Value value) {
+  return valueType(value) == VT_LIST || valueType(value) == VT_NIL;
+}
+
+bool isString(Value value) {
+  return valueType(value) == VT_STR;
+}
+
+bool isInt(Value value) {
+  return valueType(value) == VT_UINT;
+}
+
 /*
  * joins a sequence of strings together into one big string
  *
@@ -3383,10 +3259,13 @@ VMEvalResult vmEval(VM *vm, CodeUnit *codeUnit) {
  * pop the args list back off the stack, deref and copy each one into the new list
  * push the new string onto the stack
  */
-void strJoinBuiltin(VM *vm, Frame_t frame) {
+int strJoinBuiltin(VM *vm, Frame_t frame) {
 
   Value strings = popOperand(frame);
-  ASSERT_SEQ(vm, strings);
+  if (!isSeq(strings)) {
+    raise(vm, "expected a list type: %s", getValueTypeName(vm, valueType(strings)));
+    return R_ERROR;
+  }
   pushFrameRoot(vm, &strings);
 
   uint64_t totalLength = 0;
@@ -3396,7 +3275,10 @@ void strJoinBuiltin(VM *vm, Frame_t frame) {
 
     Cons *seq = deref(vm, cursor);
 
-    ASSERT_STR(vm, seq->value);
+    if (!isString(seq->value)) {
+      raise(vm, "expected a list type: %s", getValueTypeName(vm, valueType(seq->value)));
+      goto cleanup;
+    }
 
     String *string = deref(vm, seq->value);
     totalLength += string->length;
@@ -3425,40 +3307,60 @@ void strJoinBuiltin(VM *vm, Frame_t frame) {
 
   popFrameRoot(vm);
   pushOperand(frame, resultRef);
+  return R_SUCCESS;
+
+  cleanup:
+    popFrameRoot(vm);
+    return R_ERROR;
+
 }
 
-void symbolBuiltin(VM *vm, Frame_t frame) {
+int symbolBuiltin(VM *vm, Frame_t frame) {
   Value protectedName = popOperand(frame);
-  ASSERT_STR(vm, protectedName);
+
+  if (!isString(protectedName)) {
+    raise(vm, "expected a string type: %s", getValueTypeName(vm, valueType(protectedName)));
+    return R_ERROR;
+  }
 
   pushFrameRoot(vm, &protectedName);
   Value result = symbolIntern(vm, &protectedName);
   popFrameRoot(vm);
 
   pushOperand(frame, result);
+
+  return R_SUCCESS;
 }
 
-void keywordBuiltin(VM *vm, Frame_t frame) {
+int keywordBuiltin(VM *vm, Frame_t frame) {
   Value protectedName = popOperand(frame);
-  ASSERT_STR(vm, protectedName);
+  if (!isString(protectedName)) {
+    raise(vm, "expected a string type: %s", getValueTypeName(vm, valueType(protectedName)));
+    return R_ERROR;
+  }
 
   pushFrameRoot(vm, &protectedName);
   Value result = keywordIntern(vm, &protectedName);
   popFrameRoot(vm);
 
   pushOperand(frame, result);
+  return R_SUCCESS;
 }
 
-void arrayBuiltin(VM *vm, Frame_t frame) {
+int arrayBuiltin(VM *vm, Frame_t frame) {
   Value sizeValue = popOperand(frame);
-  ASSERT_UINT(vm, sizeValue);
+  if (!isInt(sizeValue)) {
+    raise(vm, "expected a number: %s", getValueTypeName(vm, valueType(sizeValue)));
+    return R_ERROR;
+  }
 
   Array *array = makeArray(vm, unwrapUint(sizeValue));
 
   pushOperand(frame, (Value)array);
+  return R_SUCCESS;
 }
 
-void countBuiltin(VM *vm, Frame_t frame) {
+int countBuiltin(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
 
   Value result = W_NIL_VALUE;
@@ -3492,26 +3394,32 @@ void countBuiltin(VM *vm, Frame_t frame) {
     }
     default:
       raise(vm, "values of this type have no length: %s", getValueTypeName(vm, valueType(value)));
+      return R_ERROR;
   }
 
   pushOperand(frame, result);
+  return R_SUCCESS;
 }
 
 Value mapLookup(VM *vm, Map *map, Value key);
 
-void getBuiltin(VM *vm, Frame_t frame) {
+int getBuiltin(VM *vm, Frame_t frame) {
   Value key = popOperand(frame);
   Value coll = popOperand(frame);
 
   Value result = W_NIL_VALUE;
   switch (valueType(coll)) {
     case VT_ARRAY: {
-      ASSERT_UINT(vm, key);
+      if (!isInt(key)) {
+        raise(vm, "expected a number: %s", getValueTypeName(vm, valueType(key)));
+        return R_ERROR;
+      }
       uint64_t index = unwrapUint(key);
 
       Array *k = deref(vm, coll);
       if (index >= objectHeaderSize(k->header)) {
         raise(vm, "index out of bounds: %" PRIu64, index);
+        return R_ERROR;
       }
 
       Value *elements = arrayElements(k);
@@ -3524,12 +3432,16 @@ void getBuiltin(VM *vm, Frame_t frame) {
       break;
     }
     case VT_RECORD: {
-      ASSERT_UINT(vm, key);
+      if (!isInt(key)) {
+        raise(vm, "expected a number: %s", getValueTypeName(vm, valueType(key)));
+        return R_ERROR;
+      }
       uint64_t index = unwrapUint(key);
 
       Record *record = deref(vm, coll);
       if (index >= objectHeaderSize(record->header)) {
         raise(vm, "index out of bounds: %" PRIu64, index);
+        return R_ERROR;
       }
 
       Value *fields = recordFields(record);
@@ -3538,12 +3450,14 @@ void getBuiltin(VM *vm, Frame_t frame) {
     }
     default:
       raise(vm, "values of this type are not indexed: %s", getValueTypeName(vm, valueType(coll)));
+      return R_ERROR;
   }
 
   pushOperand(frame, result);
+  return R_SUCCESS;
 }
 
-void setBuiltin(VM *vm, Frame_t frame) {
+int setBuiltin(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
   Value key = popOperand(frame);
   Value coll = popOperand(frame);
@@ -3551,12 +3465,16 @@ void setBuiltin(VM *vm, Frame_t frame) {
   Value result;
   switch (valueType(coll)) {
     case VT_ARRAY: {
-      ASSERT_UINT(vm, key);
+      if (!isInt(key)) {
+        raise(vm, "expected a number: %s", getValueTypeName(vm, valueType(key)));
+        return R_ERROR;
+      }
       uint64_t index = unwrapUint(key);
 
       Array *k = deref(vm, coll);
       if (index >= objectHeaderSize(k->header)) {
         raise(vm, "index out of bounds: %" PRIu64, index);
+        return R_ERROR;
       }
 
       Value *elements = arrayElements(k);
@@ -3575,12 +3493,16 @@ void setBuiltin(VM *vm, Frame_t frame) {
       break;
     }
     case VT_RECORD: {
-      ASSERT_UINT(vm, key);
+      if (!isInt(key)) {
+        raise(vm, "expected a number: %s", getValueTypeName(vm, valueType(key)));
+        return R_ERROR;
+      }
       uint64_t index = unwrapUint(key);
 
       Record *record = deref(vm, coll);
       if (index >= objectHeaderSize(record->header)) {
         raise(vm, "index out of bounds: %" PRIu64, index);
+        return R_ERROR;
       }
 
       Value *fields = recordFields(record);
@@ -3589,10 +3511,12 @@ void setBuiltin(VM *vm, Frame_t frame) {
       break;
     }
     default:
-    raise(vm, "values of this type are not indexed: %s", getValueTypeName(vm, valueType(value)));
+      raise(vm, "values of this type are not indexed: %s", getValueTypeName(vm, valueType(value)));
+      return R_ERROR;
   }
 
   pushOperand(frame, result);
+  return R_SUCCESS;
 }
 
 /*
@@ -3636,8 +3560,7 @@ uint32_t hashCode(VM *vm, Value v) {
     case VT_ARRAY:
     case VT_MAP:
     default:
-      raise(vm, "can't hash this value: %s", getValueTypeName(vm, valueType(v)));
-      return 0;
+      explode("can't hash this value: %s", getValueTypeName(vm, valueType(v)));
   }
 }
 
@@ -3831,7 +3754,7 @@ void putMapEntry(VM *vm, Map **protectedMap, Value key, Value insertMe) {
   }
 }
 
-void hashMapBuiltin(VM *vm, Frame_t frame) {
+int hashMapBuiltin(VM *vm, Frame_t frame) {
   Value params = popOperand(frame);
 
   Value result;
@@ -3854,6 +3777,7 @@ void hashMapBuiltin(VM *vm, Frame_t frame) {
         Cons *keyCons = deref(vm, protectedParams);
         if (keyCons->next == W_NIL_VALUE) {
           raise(vm, "hash-map takes an even number of parameters");
+          return R_ERROR;
         }
 
         Cons *valueCons = deref(vm, keyCons->next);
@@ -3872,9 +3796,10 @@ void hashMapBuiltin(VM *vm, Frame_t frame) {
   }
 
   pushOperand(frame, result);
+  return R_SUCCESS;
 }
 
-void vectorBuiltin(VM *vm, Frame_t frame) {
+int vectorBuiltin(VM *vm, Frame_t frame) {
 
   Value params = popOperand(frame);
 
@@ -3914,13 +3839,14 @@ void vectorBuiltin(VM *vm, Frame_t frame) {
       break;
     }
     default:
-    explode("var-args, should have been a list");
+      explode("var-args, should have been a list");
   }
 
   pushOperand(frame, result);
+  return R_SUCCESS;
 }
 
-void recordBuiltin(VM *vm, Frame_t frame) {
+int recordBuiltin(VM *vm, Frame_t frame) {
 
   uint16_t numFields;
   {
@@ -3942,9 +3868,10 @@ void recordBuiltin(VM *vm, Frame_t frame) {
 
   popFrameRoot(vm); // protectedSymbol
   pushOperand(frame, (Value)record);
+  return R_SUCCESS;
 }
 
-void toStringBuiltin(VM *vm, Frame_t frame) {
+int toStringBuiltin(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
 
@@ -3964,6 +3891,8 @@ void toStringBuiltin(VM *vm, Frame_t frame) {
 
     pushOperand(frame, str);
   }
+
+  return R_SUCCESS;
 }
 
 void initCFns(VM *vm) {
