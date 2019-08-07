@@ -172,6 +172,33 @@
 (defmacro do (& forms)
   `(let '() ~@forms))
 
+(defn last (x)
+  (let (remainder (rest x))
+    (if (nil? remainder)
+      (first x)
+      (last (rest x)))))
+
+(defn butlast (x)
+  (let (n (count x))
+    (cond
+      (zero? n) n
+      (= 1 n) '()
+      :else (take (dec n) x))))
+
+(defmacro try (& forms)
+  (let (catch (last forms))
+
+    (if (not (= (first catch) 'catch))
+      (throw "the last form in a try must be a catch"))
+
+    (if (zero? (count (rest catch)))
+      (throw "a catch clause must include the name of the exception binding"))
+
+    (let (e-binding (nth 1 catch)
+          catch-forms (drop 2 catch))
+      `(with-handler (fn (~e-binding) ~@catch-forms)
+         ~@(butlast forms)))))
+
 ;;
 ;; used for testing
 ;;

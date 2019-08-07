@@ -854,6 +854,11 @@ START_TEST(repl)
 
     assertEval(L"(with-handler (fn err (x) (:message x))"
                "   (throw \"WHAT\"))", L"\"WHAT\"");
+
+    assertEval(L"(try "
+               "   (throw \"yarp\")"
+               "   (catch ex (:message ex)))", L"\"yarp\"");
+
   }
 END_TEST
 
