@@ -851,6 +851,9 @@ START_TEST(repl)
     assertEval(L"(with-handler (fn err (x) :there)"
                "  (with-handler (fn err (x) (+ 'a 'b))"
                "    (+ 'x 'y)))", L":there");
+
+    assertEval(L"(with-handler (fn err (x) (:message x))"
+               "   (throw \"WHAT\"))", L"\"WHAT\"");
   }
 END_TEST
 

@@ -1315,16 +1315,7 @@ Value getKeyword(VM *vm, wchar_t *text) {
   return kw;
 }
 
-Value exceptionMake(VM *vm, Raised *raised) {
-
-  String *protectedMessage;
-  {
-//    wchar_t msg[ERROR_MSG_LENGTH];
-//    swprintf(msg, ERROR_MSG_LENGTH, L"unhandled error: %ls", raised->message);
-//    protectedMessage = (String*)makeStringValue(vm, msg, wcslen(msg));
-    protectedMessage = (String*)makeStringValue(vm, L"hi", wcslen(L"hi"));
-    pushFrameRoot(vm, (Value*)&protectedMessage);
-  }
+Value _exceptionMake(VM *vm, Value *protectedMessage, Raised *raised) {
 
   Array *protectedFrames;
   {
@@ -1342,8 +1333,10 @@ Value exceptionMake(VM *vm, Raised *raised) {
       }
     }
 
-    // native frame
-    numFrames++;
+    if (raised != NULL) {
+      // native frame
+      numFrames++;
+    }
 
     protectedFrames = makeArray(vm, numFrames);
     pushFrameRoot(vm, (Value*)&protectedFrames);
@@ -1361,7 +1354,7 @@ Value exceptionMake(VM *vm, Raised *raised) {
   Value protectedLineNumberKw = getKeyword(vm, L"line-number");
   pushFrameRoot(vm, (Value*)&protectedLineNumberKw);
 
-  { // native frame
+  if (raised != NULL) { // native frame
 
     String *protectedFunctionName = (String*) makeString(vm, strlen(raised->functionName) + 1);
     swprintf(stringValue(protectedFunctionName), protectedFunctionName->length, L"%s", raised->functionName);
@@ -1392,9 +1385,15 @@ Value exceptionMake(VM *vm, Raised *raised) {
   }
 
   if (vm->current != NULL) {
+
+    uint64_t start = 0;
+    if (raised != NULL) {
+      start += 1;
+    }
+
     Frame_t current = vm->current;
     uint64_t numFrames = objectHeaderSize(protectedFrames->header);
-    for (uint64_t i = 1; i < numFrames; i++) {
+    for (uint64_t i = start; i < numFrames; i++) {
 
       Map *protectedFrame = makeMap(vm);
       pushFrameRoot(vm, (Value*)&protectedFrame);
@@ -1445,7 +1444,7 @@ Value exceptionMake(VM *vm, Raised *raised) {
   Map *protectedExn = makeMap(vm);
   pushFrameRoot(vm, (Value*)&protectedExn);
 
-  putMapEntry(vm, &protectedExn, getKeyword(vm, L"message"), (Value)protectedMessage);
+  putMapEntry(vm, &protectedExn, getKeyword(vm, L"message"), *protectedMessage);
   putMapEntry(vm, &protectedExn, getKeyword(vm, L"frames"), (Value)protectedFrames);
 
   popFrameRoot(vm); // protectedExn
@@ -1455,9 +1454,29 @@ Value exceptionMake(VM *vm, Raised *raised) {
   popFrameRoot(vm); // protectedUnknownSourceKw
   popFrameRoot(vm); // protectedFunctionKw
   popFrameRoot(vm); // protectedFrames
-  popFrameRoot(vm); // protectedMessage
 
   return (Value)protectedExn;
+}
+
+Value exceptionMake(VM *vm, Value *protectedMessage) {
+  return _exceptionMake(vm, protectedMessage, NULL);
+}
+
+Value exceptionMakeRaised(VM *vm, Raised *raised) {
+
+  String *protectedMessage;
+  if (raised != NULL) {
+    wchar_t msg[ERROR_MSG_LENGTH];
+    swprintf(msg, ERROR_MSG_LENGTH, L"unhandled error: %ls", raised->message);
+    protectedMessage = (String *) makeStringValue(vm, msg, wcslen(msg));
+    pushFrameRoot(vm, (Value *) &protectedMessage);
+  }
+
+  Value v = _exceptionMake(vm, (Value*)&protectedMessage, raised);
+
+  popFrameRoot(vm); // protectedMessage
+
+  return v;
 }
 
 void raisedInitContents(Raised *r) {
@@ -1555,7 +1574,7 @@ bool handleRaise(VM *vm) {
   snprintf(msg, len, str, ##__VA_ARGS__); \
   \
   swprintf(r.message, ERROR_MSG_LENGTH, L"vm raised an exception: %s", msg); \
-  vm->exception = exceptionMake(vm, &r); \
+  vm->exception = exceptionMakeRaised(vm, &r); \
 }
 
 /*
@@ -1735,33 +1754,6 @@ void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invo
 int invokeCFn(VM *vm, Frame_t frame, Value cFn, uint16_t numArgsSupplied) {
   CFn *protectedFn = deref(vm, cFn);
   pushFrameRoot(vm, (Value*)&protectedFn);
-
-  if (wcscmp(L"+", cFnName(protectedFn)) == 0) {
-    printf("stopnow\n");
-
-    Symbol *sym = NULL;
-
-    TableEntry *entries = vm->symbolTable.entries;
-    for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
-      TableEntry *e = &entries[i];
-      if (e->used) {
-        String *name = (String*)e->name; //deref(vm, e->name);
-        if (wcscmp(stringValue(name), L"+") == 0) {
-          sym = (Symbol *) e->value; // deref(vm, e->value);
-          break;
-        }
-      }
-    }
-
-    if (sym == NULL) {
-      explode("oops");
-    }
-
-    Value value = sym->topLevelValue;
-    if (value != cFn) {
-      printf("sanity check gotcha type");
-    }
-  }
 
   int error = validateArguments(vm, protectedFn->numArgs, protectedFn->usesVarArgs, numArgsSupplied);
   if (error) {
@@ -3895,6 +3887,22 @@ int toStringBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
+int throwBuiltin(VM *vm, Frame_t frame) {
+
+  Value protectedMessage = popOperand(frame);
+  if (valueType(protectedMessage) != VT_STR) {
+    raise(vm, "can only throw a string message: %s", getValueTypeName(vm, valueType(protectedMessage)));
+    return R_ERROR;
+  }
+  pushFrameRoot(vm, &protectedMessage);
+
+  Value exception = exceptionMake(vm, &protectedMessage);
+  setException(vm, exception);
+
+  popFrameRoot(vm); // protectedMessage
+  return R_ERROR;
+}
+
 void initCFns(VM *vm) {
 
   defineCFn(vm, L"cons", 2, false, consEval);
@@ -3918,6 +3926,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"vector", 1, true, vectorBuiltin);
   defineCFn(vm, L"record", 2, false, recordBuiltin);
   defineCFn(vm, L"to-string", 1, false, toStringBuiltin);
+  defineCFn(vm, L"throw", 1, false, throwBuiltin);
 }
 
 void vmConfigInitContents(VMConfig *config) {
