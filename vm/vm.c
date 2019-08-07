@@ -5,6 +5,7 @@
 #include <inttypes.h>
 #include <setjmp.h>
 #include "vm.h"
+#include "../bootstrap/print.h"
 #include "../errors.h"
 
 /*
@@ -34,7 +35,7 @@ uint64_t objectHeaderSizeBytes(ObjectHeader h) {
   switch (type) {
     case W_ARRAY_TYPE: {
       uint64_t size = h & W_HEADER_SIZE_MASK;
-      return sizeof(ObjectHeader) + (size * sizeof(Value));
+      return sizeof(Array) + (size * sizeof(Value));
     }
     case W_RECORD_TYPE: {
       uint64_t size = h & W_HEADER_SIZE_MASK;
@@ -728,6 +729,9 @@ void pushOperand(Frame_t frame, Value value);
 Value popOperand(Frame_t frame);
 Value getFnRef(Frame_t frame);
 void setFnRef(VM *vm, Frame_t frame, Value value);
+Value* getFnRefRef(Frame_t frame);
+
+void setFn(VM *vm, Frame_t frame, Fn *fn);
 
 bool hasResult(Frame_t frame);
 bool hasParent(Frame_t frame);
@@ -765,6 +769,9 @@ uint16_t frameHandlerJumpAddr(FrameHandler_t handler);
 FrameHandler_t frameHandlerNext(FrameHandler_t root);
 void pushFrameHandler(VM *vm, Value value, uint16_t jumpAddr);
 void popFrameHandler(VM *vm);
+void popSpecificFrameHandler(Frame_t frame);
+FrameHandler_t currentHandler(Frame_t frame);
+void setCurrentHandler(Frame_t frame, FrameHandler_t currentHandler);
 
 /*
  * value type protocols
@@ -905,9 +912,18 @@ void* deref(VM *vm, Value value) {
   return ptr;
 }
 
+Value sanityCheck(VM *vm);
+
 void relocate(VM *vm, Value *valuePtr) {
 
   Value value = *valuePtr;
+
+  void* ptr = (void*)value;
+  if (ptr >= vm->gc.currentHeap && ptr < (vm->gc.currentHeap + vm->gc.heapSize)) {
+    printf("cannot relocate from current heap");
+  }
+
+  sanityCheck(vm);
 
   if ((value & W_PTR_MASK) != 0) {
     // only relocate heap objects
@@ -915,7 +931,7 @@ void relocate(VM *vm, Value *valuePtr) {
   }
 
   ObjectHeader *header = (ObjectHeader*)value;
-  if (*header & W_GC_FORWARDING_BIT) {
+  if ((*header) & W_GC_FORWARDING_BIT) {
     *valuePtr = (*header << 1u);
   }
   else {
@@ -925,11 +941,21 @@ void relocate(VM *vm, Value *valuePtr) {
     if (_alloc(&vm->gc, size, &newPtr) == R_OOM) {
       explode("out of memory, cannot allocate %" PRIu64 " bytes mid-gc", size);
     }
-    memcpy(newPtr, (void*)value, size);
+
+    sanityCheck(vm);
+
+    memcpy(newPtr, (void*)value, size); // this must somehow be pointing to the CFn + address range
+
+    sanityCheck(vm);
 
     *valuePtr = (Value)newPtr;
     *header = W_GC_FORWARDING_BIT | ((Value)newPtr >> 1u);
+    // TODO: somehow this unrelated root function relocation is nuking sanityCheck
+
+    sanityCheck(vm);
   }
+
+  sanityCheck(vm);
 }
 
 uint64_t now() {
@@ -943,13 +969,131 @@ void relocateTable(VM *vm, Table *table) {
   for (uint64_t i=0; i<table->numAllocatedEntries; i++) {
     TableEntry *entry = &table->entries[i];
     if (entry->used) {
-      relocate(vm, &entry->name);
-      relocate(vm, &entry->value);
+      relocate(vm, &(entry->name));
+      relocate(vm, &(entry->value));
+    }
+  }
+}
+
+Value sanityCheck(VM *vm) {
+
+  Symbol *sym = NULL;
+
+  TableEntry *entries = vm->symbolTable.entries;
+  for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
+    TableEntry *e = &entries[i];
+    if (e->used) {
+      String *name = (String*)e->name; //deref(vm, e->name);
+      if (wcscmp(stringValue(name), L"+") == 0) {
+        sym = (Symbol *) e->value; // deref(vm, e->value);
+        break;
+      }
+    }
+  }
+
+  if (sym != NULL) {
+
+    Value value = sym->topLevelValue;
+    if (value != W_NIL_VALUE) {
+
+      if ((value & W_PTR_MASK) == 0) {
+
+        ObjectHeader *h = (ObjectHeader *) value;
+        bool isForward = (*h) & W_GC_FORWARDING_BIT;
+        if (isForward) {
+          Value forwardValue = (*h << 1u);
+          ObjectHeader *forwardHeader = (ObjectHeader*)forwardValue;
+
+          if (objectHeaderValueType(*forwardHeader) != VT_CFN) {
+            printf("sanity check gotcha type");
+          }
+        }
+        else {
+
+          if (objectHeaderValueType(*h) != VT_CFN) {
+            printf("sanity check gotcha type");
+          }
+
+          if (objectHeaderSizeBytes(*h) > 1000000) {
+            printf("sanity check gotcha A");
+          }
+        }
+      }
+    }
+
+    return value;
+  }
+  else {
+    return NULL;
+  }
+}
+
+//            void *ptr = h;
+//            if (ptr >= vm->gc.allocPtr && ptr <vm->gc.currentHeapEnd) {
+//              printf("sanity check gotcha B");
+//            }
+
+//            void *oldHeap;
+//            if (vm->gc.currentHeap == vm->gc.heapA) {
+//              oldHeap = vm->gc.heapB;
+//            }
+//            else {
+//              oldHeap = vm->gc.heapA;
+//            }
+//            if (ptr >= oldHeap && ptr < (oldHeap + vm->gc.heapSize)) {
+//              printf("found a pointer to wrong heap");
+//            }
+
+void sanityCheckOffSides(VM *vm) {
+  TableEntry *entries = vm->symbolTable.entries;
+  for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
+    TableEntry *e = &entries[i];
+    if (e->used) {
+      String *name = (String*)e->name; //deref(vm, e->name);
+      if (wcscmp(stringValue(name), L"+") == 0) {
+        // found it
+
+        Symbol *sym = (Symbol*)e->value; // deref(vm, e->value);
+        Value value = sym->topLevelValue;
+
+
+        if (value != W_NIL_VALUE) {
+
+          if ((value & W_PTR_MASK) == 0) {
+
+            ObjectHeader *h = (ObjectHeader *) value;
+            if (!(*h & W_GC_FORWARDING_BIT)) {
+
+              void *ptr = h;
+              if (ptr >= vm->gc.allocPtr && ptr < vm->gc.currentHeapEnd) {
+                printf("pointer to unallocated space");
+              }
+
+              void *oldHeap;
+              if (vm->gc.currentHeap == vm->gc.heapA) {
+                oldHeap = vm->gc.heapB;
+              }
+              else {
+                oldHeap = vm->gc.heapA;
+              }
+              if (ptr >= oldHeap && ptr < (oldHeap + vm->gc.heapSize)) {
+                printf("found a pointer to wrong heap");
+              }
+            }
+          }
+        }
+
+        break;
+      }
     }
   }
 }
 
 void collect(VM *vm) {
+
+  sanityCheckOffSides(vm);
+
+  sanityCheck(vm);
 
   uint64_t oldHeapUsed = vm->gc.allocPtr - vm->gc.currentHeap;
 
@@ -967,14 +1111,25 @@ void collect(VM *vm) {
   vm->gc.currentHeapEnd = vm->gc.currentHeap + vm->gc.heapSize;
   vm->gc.allocPtr = vm->gc.currentHeap;
 
-  memset(vm->gc.currentHeap, 0, vm->gc.heapSize);
+  Value _v = sanityCheck(vm);
+
+  memset(vm->gc.currentHeap, 0, vm->gc.heapSize); // TODO: this seems to clobber '+'
+
+  sanityCheck(vm);
 
   // relocate exception, if present
   relocate(vm, &vm->exception);
 
+  sanityCheck(vm);
+
   // relocate tables
   relocateTable(vm, &vm->symbolTable);
+
+  sanityCheck(vm);
+
   relocateTable(vm, &vm->keywordTable);
+
+  sanityCheck(vm);
 
   // relocate noFrameRoots
   FrameRoot_t noFrameRoot = vm->noFrameRoots;
@@ -984,6 +1139,8 @@ void collect(VM *vm) {
     noFrameRoot = frameRootNext(noFrameRoot);
   }
 
+  sanityCheck(vm);
+
   // relocate noFrameHandlers
   FrameHandler_t noFrameHandler = vm->noFrameHandlers;
   while (noFrameHandler != NULL) {
@@ -992,18 +1149,25 @@ void collect(VM *vm) {
     noFrameHandler = frameHandlerNext(noFrameHandler);
   }
 
+  sanityCheck(vm);
+
   // relocate call stack roots
   Frame_t current = vm->current;
   if (current != NULL) {
     while (true) {
 
+      sanityCheck(vm);
+
       // relocate fnRef
       {
-        Value oldFnRef = getFnRef(current);
-        Value newFnRef = oldFnRef;
-        relocate(vm, &newFnRef);
-        setFnRef(vm, current, newFnRef);
+        Value *ref = getFnRefRef(current);
+        relocate(vm, ref);
+
+        Fn *fn = deref(vm, *ref);
+        setFn(vm, current, fn);
       }
+
+      sanityCheck(vm);
 
       uint16_t locals = numLocals(current);
       for (uint16_t i = 0; i < locals; i++) {
@@ -1011,18 +1175,29 @@ void collect(VM *vm) {
         relocate(vm, val);
       }
 
+      sanityCheck(vm);
+
       uint64_t operands = numOperands(current);
       for (uint64_t i = 0; i < operands; i++) {
         Value *val = getOperandRef(current, i);
         relocate(vm, val);
       }
 
+      sanityCheck(vm);
+
       FrameRoot_t root = frameRoots(current);
       while (root != NULL) {
+
+        sanityCheck(vm);
+
         Value *valuePtr = frameRootValue(root);
         relocate(vm, valuePtr);
         root = frameRootNext(root);
+
+        sanityCheck(vm);
       }
+
+      sanityCheck(vm);
 
       FrameHandler_t handler = frameHandlers(current);
       while (handler != NULL) {
@@ -1030,6 +1205,8 @@ void collect(VM *vm) {
         relocate(vm, valuePtr);
         handler = frameHandlerNext(handler);
       }
+
+      sanityCheck(vm);
 
       if (!hasParent(current)) {
         break;
@@ -1041,16 +1218,24 @@ void collect(VM *vm) {
 
   void *scanptr = vm->gc.currentHeap;
 
+  uint64_t count = 0;
+
   // relocate all the objects this object references
   while (scanptr < vm->gc.allocPtr) {
     ObjectHeader *header = scanptr;
 
-    uint8_t type = objectHeaderValueType(*header);
+    ValueType type = objectHeaderValueType(*header);
     uint64_t sizeBytes = objectHeaderSizeBytes(*header);
 
     relocateChildren(vm, type, scanptr);
+
+    sanityCheck(vm);
+
     scanptr += sizeBytes;
+    count++;
   }
+
+  sanityCheck(vm);
 
   uint64_t newHeapUsed = vm->gc.allocPtr - vm->gc.currentHeap;
   uint64_t sizeRecovered = oldHeapUsed - newHeapUsed;
@@ -1058,6 +1243,34 @@ void collect(VM *vm) {
   uint64_t duration = end - start;
 
   printf("gc: completed, %" PRIu64 " bytes recovered, %" PRIu64 " bytes used, took %" PRIu64 "ms\n", sizeRecovered, newHeapUsed, duration);
+
+
+  {
+    TableEntry *entries = vm->symbolTable.entries;
+    for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
+      TableEntry *e = &entries[i];
+      if (e->used) {
+        String *name = deref(vm, e->name);
+        if (wcscmp(stringValue(name), L"+") == 0) {
+          // found it
+
+          Symbol *sym = deref(vm, e->value);
+          Value value = sym->topLevelValue;
+
+          if (value != W_NIL_VALUE) {
+            ObjectHeader *h = (ObjectHeader *) value;
+            if (!(*h & W_GC_FORWARDING_BIT)) {
+              if (objectHeaderSizeBytes(*h) > 1000000) {
+                printf("post gotcha");
+              }
+            }
+          }
+
+          break;
+        }
+      }
+    }
+  }
 }
 
 /*
@@ -1324,10 +1537,10 @@ Value exceptionMake(VM *vm, Raised *raised) {
 
   String *protectedMessage;
   {
-    wchar_t msg[ERROR_MSG_LENGTH];
-    swprintf(msg, ERROR_MSG_LENGTH, L"unhandled error: %ls", raised->message);
-    protectedMessage = (String*)makeStringValue(vm, msg, wcslen(msg));
-    memcpy(stringValue(protectedMessage), &msg, wcslen(msg));
+//    wchar_t msg[ERROR_MSG_LENGTH];
+//    swprintf(msg, ERROR_MSG_LENGTH, L"unhandled error: %ls", raised->message);
+//    protectedMessage = (String*)makeStringValue(vm, msg, wcslen(msg));
+    protectedMessage = (String*)makeStringValue(vm, L"hi", wcslen(L"hi"));
     pushFrameRoot(vm, (Value*)&protectedMessage);
   }
 
@@ -1479,57 +1692,73 @@ void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invo
 void handleRaise(VM *vm, Raised *r) {
   Value exception = exceptionMake(vm, r);
 
-  Frame_t handlingFrame = NULL;
-  Frame_t frameToPop = NULL;
-  if (vm->current != NULL) {
-    Frame_t current = vm->current;
+  if (vm->current != NULL) { // a stack is available, look for a handler
+
+    Frame_t f = vm->current;
+    FrameHandler_t h = NULL;
+    Frame_t frameToPop = NULL;
+
     while (true) {
 
-      if (frameHandlers(current) != NULL) {
-        handlingFrame = current;
-        break;
+      FrameHandler_t current = currentHandler(f);
+      if (current != NULL) { // a handler is already running, start with its immediate parent if it has one
+
+        // discard handler frame
+        frameToPop = f;
+        f = getParent(f);
+
+        // pop current handler from handling frame, since we already used it
+        popSpecificFrameHandler(f);
+
+        // use the parent handler within the handling frame, if any
+        h = frameHandlers(f);
       }
-      else { // no handler, this frame will get popped
-        frameToPop = current;
+      else { // no handler is running, look for the nearest one in the current frame
+        h = frameHandlers(f);
       }
 
-      if (!hasParent(current)) {
+      if (h != NULL) {
         break;
       }
       else {
-        current = getParent(current);
+        if (hasParent(f)) {
+          frameToPop = f;
+          f = getParent(f);
+        } else {
+          break;
+        }
       }
     }
-  }
 
-  if (handlingFrame != NULL) { // found a handler
+    if (h != NULL) { // found a handler
 
-    // pop all the frames off the stack until we are on the frame we're jumping to
-    if (frameToPop != NULL) {
-      popSpecificFrame(vm, frameToPop);
+      // pop all the frames off the stack until we are on the frame we're jumping to
+      if (frameToPop != NULL) {
+        popSpecificFrame(vm, frameToPop);
+      }
+
+      {
+        pushOperand(f, exception);
+
+        Invocable invocable;
+        makeInvocable(vm, *frameHandlerValue(h), &invocable);
+
+        Frame_t handlerFrame = pushFrame(vm, (Value) invocable.fn);
+        invokePopulateLocals(vm, f, handlerFrame, &invocable, 1);
+
+        setCurrentHandler(handlerFrame, h);
+      }
+
+      uint16_t jumpAddr = frameHandlerJumpAddr(h);
+      setPc(f, jumpAddr);
+
+      longjmp(vm->jumpBuf, 1); // eval next instruction
     }
-
-    FrameHandler_t handler = frameHandlers(vm->current);
-
-    {
-      pushOperand(handlingFrame, exception);
-
-      Invocable invocable;
-      makeInvocable(vm, *frameHandlerValue(handler), &invocable);
-
-      Frame_t handlerFrame = pushFrame(vm, (Value) invocable.fn);
-      invokePopulateLocals(vm, handlingFrame, handlerFrame, &invocable, 1);
-    }
-
-    uint16_t jumpAddr = frameHandlerJumpAddr(handler);
-    setPc(handlingFrame, jumpAddr);
-
-    longjmp(vm->jumpBuf, 1); // eval next instruction
   }
-  else {
-    setException(vm, exception); // bomb out
-    longjmp(vm->jumpBuf, 1);
-  }
+
+  // no handler, don't worry about handling the error at all
+  setException(vm, exception); // bomb out
+  longjmp(vm->jumpBuf, 1);
 }
 
 #define raise(vm, str, ...) {\
@@ -1691,9 +1920,91 @@ void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invo
   unprotectInvocable(vm, invocable);
 }
 
+Value CFnValuesMatch(VM *vm) {
+
+  Symbol *sym = NULL;
+
+  TableEntry *entries = vm->symbolTable.entries;
+  for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
+    TableEntry *e = &entries[i];
+    if (e->used) {
+      String *name = (String*)e->name; //deref(vm, e->name);
+      if (wcscmp(stringValue(name), L"+") == 0) {
+        sym = (Symbol *) e->value; // deref(vm, e->value);
+        break;
+      }
+    }
+  }
+
+  if (sym != NULL) {
+
+    Value value = sym->topLevelValue;
+    if (value != W_NIL_VALUE) {
+
+      if ((value & W_PTR_MASK) == 0) {
+
+        ObjectHeader *h = (ObjectHeader *) value;
+        bool isForward = (*h) & W_GC_FORWARDING_BIT;
+        if (isForward) {
+          Value forwardValue = (*h << 1u);
+          ObjectHeader *forwardHeader = (ObjectHeader*)forwardValue;
+
+          if (objectHeaderValueType(*forwardHeader) != VT_CFN) {
+            printf("sanity check gotcha type");
+          }
+        }
+        else {
+
+          if (objectHeaderValueType(*h) != VT_CFN) {
+            printf("sanity check gotcha type");
+          }
+
+          if (objectHeaderSizeBytes(*h) > 1000000) {
+            printf("sanity check gotcha A");
+          }
+        }
+      }
+    }
+
+    return value;
+  }
+  else {
+    return NULL;
+  }
+}
+
 void invokeCFn(VM *vm, Frame_t frame, Value cFn, uint16_t numArgsSupplied) {
   CFn *protectedFn = deref(vm, cFn);
   pushFrameRoot(vm, (Value*)&protectedFn);
+
+  if (wcscmp(L"+", cFnName(protectedFn)) == 0) {
+    printf("stopnow\n");
+
+    Symbol *sym = NULL;
+
+    TableEntry *entries = vm->symbolTable.entries;
+    for (uint64_t i=0; i<vm->symbolTable.numAllocatedEntries; i++) {
+      TableEntry *e = &entries[i];
+      if (e->used) {
+        String *name = (String*)e->name; //deref(vm, e->name);
+        if (wcscmp(stringValue(name), L"+") == 0) {
+          sym = (Symbol *) e->value; // deref(vm, e->value);
+          break;
+        }
+      }
+    }
+
+    if (sym == NULL) {
+      explode("oops");
+    }
+
+    Value value = sym->topLevelValue;
+    if (value != cFn) {
+      printf("sanity check gotcha type");
+    }
+  }
+
+  collect(vm);
 
   preprocessArguments(vm, frame, protectedFn->numArgs, protectedFn->usesVarArgs, numArgsSupplied);
   ((CFnInvoke)protectedFn->ptr)(vm, frame);
@@ -2234,8 +2545,43 @@ void relocateChildrenClosure(VM_t vm, void *obj) {
 
 void relocateChildrenSymbol(VM_t vm, void *obj) {
   Symbol *s = obj;
+
+  {
+    String *name = (String*)s->name;
+    if (wcscmp(stringValue(name), L"+") == 0) {
+      // found it
+
+      Value value = s->topLevelValue;
+      if (value != W_NIL_VALUE) {
+        ObjectHeader *h = (ObjectHeader *) value;
+        if (!(*h & W_GC_FORWARDING_BIT)) {
+          if (objectHeaderSizeBytes(*h) > 1000000) {
+            printf("relocateChildren pre gotcha");
+          }
+        }
+      }
+    }
+  }
+
   relocate(vm, &s->name);
   relocate(vm, &s->topLevelValue);
+
+  {
+    String *name = (String*)s->name;
+    if (wcscmp(stringValue(name), L"+") == 0) {
+      // found it
+
+      Value value = s->topLevelValue;
+      if (value != W_NIL_VALUE) {
+        ObjectHeader *h = (ObjectHeader *) value;
+        if (!(*h & W_GC_FORWARDING_BIT)) {
+          if (objectHeaderSizeBytes(*h) > 1000000) {
+            printf("relocateChildren post gotcha");
+          }
+        }
+      }
+    }
+  }
 }
 
 void relocateChildrenKeyword(VM_t vm, void *obj) {
@@ -2549,6 +2895,16 @@ typedef struct Frame {
   Value result;
   bool resultAvailable;
   uint16_t pc;
+
+  /*
+   * Only non-null if a frame is executing a handler. References a handler in the parent frame.
+   *
+   * This reference is used o handle the case where an exception is thrown through the top
+   * of a handler-function. This allows handleRaise() to pick the next highest handler within
+   * the parent function to handle this problem, if it exists. Otherwise handleRaise() crawls
+   * up the stack as normal.
+   */
+  FrameHandler_t currentHandler;
 } Frame;
 
 void handlerInitContents(ExceptionHandler *h) {
@@ -2572,6 +2928,8 @@ void frameInitContents(Frame *frame) {
 
   frame->roots = NULL;
   frame->handlers = NULL;
+
+  frame->currentHandler = NULL;
 }
 
 uint8_t readInstruction(Frame *frame) {
@@ -2672,9 +3030,17 @@ Value getFnRef(Frame *frame) {
   return frame->fnRef;
 }
 
+Value* getFnRefRef(Frame_t frame) {
+  return &(frame->fnRef);
+}
+
 void setFnRef(VM *vm, Frame *frame, Value value) {
   frame->fnRef = value;
   frame->fn = deref(vm, value);
+}
+
+void setFn(VM *vm, Frame *frame, Fn *fn) {
+  frame->fn = fn;
 }
 
 bool hasResult(Frame *frame) {
@@ -2924,6 +3290,18 @@ void popFrameHandler(VM *vm) {
   else {
     frame->handlers = frame->handlers->next;
   }
+}
+
+void popSpecificFrameHandler(Frame_t frame) {
+  frame->handlers = frame->handlers->next;
+}
+
+FrameHandler_t currentHandler(Frame_t frame) {
+  return frame->currentHandler;
+}
+
+void setCurrentHandler(Frame_t frame, FrameHandler_t currentHandler) {
+  frame->currentHandler = currentHandler;
 }
 
 //bool hasHandler(VM *vm) {
