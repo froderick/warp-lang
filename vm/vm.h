@@ -34,6 +34,8 @@ typedef enum ValueType {
   VT_MAP,
   VT_MAP_ENTRY,
   VT_RECORD,
+  VT_PORT,
+  VT_BYTE_ARRAY,
 } ValueType;
 
 #define W_GC_FORWARDING_BIT      0x8000000000000000L   /* header contains forwarding pointer */
@@ -43,17 +45,19 @@ typedef enum ValueType {
 #define W_HEADER_TYPE_BITS       0x0f00000000000000L
 #define W_HEADER_SIZE_MASK       0x00ffffffffffffffL
 
-#define W_FN_TYPE        0x0u
-#define W_STR_TYPE       0x1u
-#define W_SYMBOL_TYPE    0x2u
-#define W_KEYWORD_TYPE   0x3u
-#define W_LIST_TYPE      0x4u
-#define W_CLOSURE_TYPE   0x5u
-#define W_CFN_TYPE       0x6u
-#define W_ARRAY_TYPE     0x7u
-#define W_MAP_TYPE       0x8u
-#define W_MAP_ENTRY_TYPE 0x9u
-#define W_RECORD_TYPE    0xau
+#define W_FN_TYPE         0x0u
+#define W_STR_TYPE        0x1u
+#define W_SYMBOL_TYPE     0x2u
+#define W_KEYWORD_TYPE    0x3u
+#define W_LIST_TYPE       0x4u
+#define W_CLOSURE_TYPE    0x5u
+#define W_CFN_TYPE        0x6u
+#define W_ARRAY_TYPE      0x7u
+#define W_MAP_TYPE        0x8u
+#define W_MAP_ENTRY_TYPE  0x9u
+#define W_RECORD_TYPE     0xau
+#define W_PORT_TYPE       0xbu
+#define W_BYTE_ARRAY_TYPE 0xcu
 
 /*
  * This is the first field inside all heap objects. It must come first so that the GC can
@@ -182,7 +186,27 @@ typedef struct Record {
   Value symbol;
 } Record;
 
+typedef enum PortType {
+  PT_NONE,
+  PT_FILE
+} PortType;
+
+typedef struct Port {
+  ObjectHeader header;
+  uint8_t type;
+  bool closed;
+  union {
+    FILE *fileDesc;
+  };
+} Port;
+
+typedef struct ByteArray {
+  ObjectHeader header;
+} ByteArray;
+
 Value* arrayElements(Array *array);
+
+uint8_t* byteArrayElements(ByteArray *array);
 
 /*
  * VM code eval contract

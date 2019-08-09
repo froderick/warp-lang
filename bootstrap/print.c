@@ -305,21 +305,47 @@ void printRecord(Ctx *ctx, Value result, Expr *expr) {
   expr->string.value = stringBufferText(b);
 }
 
+void printPort(Ctx *ctx, Value result, Expr *expr) {
+  expr->type = N_STRING;
+  wchar_t function[] = L"<port>";
+  expr->string.length = wcslen(function);
+
+  Error error;
+  errorInitContents(&error);
+  if (tryCopyText(ctx->pool, function, &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
+    explode("copy text");
+  }
+}
+
+void printByteArray(Ctx *ctx, Value result, Expr *expr) {
+  expr->type = N_STRING;
+  wchar_t function[] = L"<byte-array>";
+  expr->string.length = wcslen(function);
+
+  Error error;
+  errorInitContents(&error);
+  if (tryCopyText(ctx->pool, function, &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
+    explode("copy text");
+  }
+}
+
 PrintGeneric getPrintGeneric(Ctx *ctx, ValueType type) {
   switch (type) {
-    case VT_NIL:       return printNil;
-    case VT_UINT:      return printUint;
-    case VT_BOOL:      return printBool;
-    case VT_FN:        return printFn;
-    case VT_STR:       return printStr;
-    case VT_SYMBOL:    return printSymbol;
-    case VT_KEYWORD:   return printKeyword;
-    case VT_LIST:      return printList;
-    case VT_CLOSURE:   return printClosure;
-    case VT_CFN:       return printCFn;
-    case VT_ARRAY:     return printArray;
-    case VT_MAP:       return printMap;
-    case VT_RECORD:    return printRecord;
+    case VT_NIL:        return printNil;
+    case VT_UINT:       return printUint;
+    case VT_BOOL:       return printBool;
+    case VT_FN:         return printFn;
+    case VT_STR:        return printStr;
+    case VT_SYMBOL:     return printSymbol;
+    case VT_KEYWORD:    return printKeyword;
+    case VT_LIST:       return printList;
+    case VT_CLOSURE:    return printClosure;
+    case VT_CFN:        return printCFn;
+    case VT_ARRAY:      return printArray;
+    case VT_MAP:        return printMap;
+    case VT_RECORD:     return printRecord;
+    case VT_PORT:       return printPort;
+    case VT_BYTE_ARRAY: return printByteArray;
     default: explode("unhandled type: %s", getValueTypeName(ctx->vm, type));
   }
 }

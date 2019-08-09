@@ -6,6 +6,7 @@
 #include "vm.h"
 #include "../bootstrap/print.h"
 #include "../errors.h"
+#include <errno.h>
 
 /*
  * VM Data Structures
@@ -36,6 +37,10 @@ uint64_t objectHeaderSizeBytes(ObjectHeader h) {
       uint64_t size = h & W_HEADER_SIZE_MASK;
       return sizeof(Array) + (size * sizeof(Value));
     }
+    case W_BYTE_ARRAY_TYPE: {
+      uint64_t size = h & W_HEADER_SIZE_MASK;
+      return sizeof(Array) + (size * sizeof(uint8_t));
+    }
     case W_RECORD_TYPE: {
       uint64_t size = h & W_HEADER_SIZE_MASK;
       return sizeof(Record) + (size * sizeof(Value));
@@ -58,6 +63,8 @@ ValueType objectHeaderValueType(ObjectHeader header) {
     case W_MAP_TYPE: return VT_MAP;
     case W_MAP_ENTRY_TYPE: return VT_MAP_ENTRY;
     case W_RECORD_TYPE: return VT_RECORD;
+    case W_PORT_TYPE: return VT_PORT;
+    case W_BYTE_ARRAY_TYPE: return VT_BYTE_ARRAY;
     default:
     explode("unknown type: %u", objectHeaderType(header));
   }
@@ -386,6 +393,30 @@ Array* makeArray(VM *vm, uint64_t size) {
   Value *elements = ((void*)array)+ sizeof(Array);
   for (uint64_t i=0; i<size; i++) {
     elements[i] = W_NIL_VALUE;
+  }
+
+  return array;
+}
+
+void byteArrayInitContents(ByteArray *array) {
+  array->header = 0;
+}
+
+uint8_t* byteArrayElements(ByteArray *array) {
+  return ((void*)array) + sizeof(ByteArray);
+}
+
+ByteArray* makeByteArray(VM *vm, uint64_t size) {
+
+  uint64_t sizeBytes = padAllocSize(sizeof(ByteArray) + (size * sizeof(Value)));
+  ByteArray *array = alloc(vm, sizeBytes);
+
+  byteArrayInitContents(array);
+  array->header = makeObjectHeader(W_BYTE_ARRAY_TYPE, size);
+
+  uint8_t *elements = byteArrayElements(array);
+  for (uint64_t i=0; i<size; i++) {
+    elements[i] = 0;
   }
 
   return array;
@@ -2523,6 +2554,12 @@ ValueTypeTable valueTypeTableCreate() {
       [VT_RECORD]    = {.name = "record",
                         .isTruthy = &isTruthyYes,
                         .relocateChildren = &relocateChildrenRecord},
+      [VT_PORT]      = {.name = "port",
+                        .isTruthy = &isTruthyYes,
+                        .relocateChildren = NULL},
+      [VT_BYTE_ARRAY]= {.name = "byte-array",
+                        .isTruthy = &isTruthyYes,
+                        .relocateChildren = NULL},
 
   };
   memcpy(table.valueTypes, valueTypes, sizeof(valueTypes));
@@ -3903,6 +3940,138 @@ int throwBuiltin(VM *vm, Frame_t frame) {
   return R_ERROR;
 }
 
+void portInitContents(Port *port) {
+  port->header = 0;
+  port->type = PT_NONE;
+  port->fileDesc = 0;
+  port->closed = false;
+}
+
+Value makeFilePort(VM *vm, FILE *f) {
+
+  uint64_t size = padAllocSize(sizeof(Port));
+  Port *port = alloc(vm, size);
+
+  portInitContents(port);
+  port->header = makeObjectHeader(W_PORT_TYPE, size);
+  port->type = PT_FILE;
+  port->fileDesc = f;
+
+  return (Value)port;
+}
+
+int openFileBuiltin(VM *vm, Frame_t frame) {
+
+  Value val = popOperand(frame);
+  if (valueType(val) != VT_STR) {
+    raise(vm, "need a string to describe a file path: %s", getValueTypeName(vm, valueType(val)));
+    return R_ERROR;
+  }
+  String *path = deref(vm, val);
+
+  FILE *f = NULL;
+  {
+    size_t bufSize = (sizeof(wchar_t) * path->length) + 1;
+    char *fileName = malloc(bufSize);
+    size_t ret = wcstombs(fileName, stringValue(path), bufSize);
+
+    if (ret < 0) {
+      free(fileName);
+      raise(vm, "failed to convert path string to multibyte char: %s", strerror(errno));
+      return R_ERROR;
+    }
+
+    f = fopen(fileName, "r");
+    if (f == NULL) {
+      raise(vm, "failed to open file: %s", strerror(errno));
+      return R_ERROR;
+    }
+
+    free(fileName);
+  }
+
+  Value port = makeFilePort(vm, f);
+  pushOperand(frame, port);
+  return R_SUCCESS;
+}
+
+int readPortBuiltin(VM *vm, Frame_t frame) {
+
+  Value val = popOperand(frame);
+  if (valueType(val) != VT_PORT) {
+    raise(vm, "takes a port: %s", getValueTypeName(vm, valueType(val)));
+    return R_ERROR;
+  }
+
+  Port *port = deref(vm, val);
+  if (port->closed) {
+    raise(vm, "port is closed");
+    return R_ERROR;
+  }
+
+  uint8_t read[1];
+  size_t result = fread(read, sizeof(uint8_t), 1, port->fileDesc);
+
+  if (result > 0) {
+    pushOperand(frame, wrapUint(read[0]));
+    return R_SUCCESS;
+  }
+  else if (feof(port->fileDesc)) {
+    raise(vm, "eof");
+    return R_ERROR;
+  }
+  else if (ferror(port->fileDesc)) {
+    raise(vm, "error: %s", strerror(errno));
+    return R_ERROR;
+  }
+  else {
+    explode("unhandled read-port outcome");
+  }
+}
+
+/*
+ * (def f (open-file "/Users/ddcmhenry/dev/funtastic/branches/warp-lang/foo.txt"))
+ * (read-port f)
+ * (close-port f)
+ */
+
+int closePortBuiltin(VM *vm, Frame_t frame) {
+
+  Value val = popOperand(frame);
+  if (valueType(val) != VT_PORT) {
+    raise(vm, "takes a port: %s", getValueTypeName(vm, valueType(val)));
+    return R_ERROR;
+  }
+
+  Port *port = deref(vm, val);
+  if (!port->closed) {
+    fclose(port->fileDesc);
+    port->fileDesc = NULL;
+    port->closed = true;
+  }
+
+  pushOperand(frame, (Value)port);
+  return R_SUCCESS;
+}
+
+int byteArrayBuiltin(VM *vm, Frame_t frame) {
+
+  uint64_t length;
+  {
+    Value val = popOperand(frame);
+    if (valueType(val) != VT_UINT) {
+      raise(vm, "need an integer to describe the size of an array: %s", getValueTypeName(vm, valueType(val)));
+      return R_ERROR;
+    }
+    length = unwrapUint(val);
+  }
+
+  ByteArray *array = makeByteArray(vm, length);
+
+  pushOperand(frame, (Value)array);
+  return R_SUCCESS;
+}
+
 void initCFns(VM *vm) {
 
   defineCFn(vm, L"cons", 2, false, consEval);
@@ -3927,6 +4096,10 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"record", 2, false, recordBuiltin);
   defineCFn(vm, L"to-string", 1, false, toStringBuiltin);
   defineCFn(vm, L"throw", 1, false, throwBuiltin);
+  defineCFn(vm, L"open-file", 1, false, openFileBuiltin);
+  defineCFn(vm, L"read-port", 1, false, readPortBuiltin);
+  defineCFn(vm, L"close-port", 1, false, closePortBuiltin);
+  defineCFn(vm, L"byte-array", 1, false, byteArrayBuiltin);
 }
 
 void vmConfigInitContents(VMConfig *config) {
