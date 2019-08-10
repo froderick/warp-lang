@@ -868,6 +868,16 @@ START_TEST(repl)
 
     assertEval(L"'A'", L"'A'");
 
+    assertEval(L"(get \"asdf\" 2)", L"'d'");
+
+    assertEval(L"(> 10 20)", L"false");
+    assertEval(L"(> 20 10)", L"true");
+    assertEval(L"(>= 10 20)", L"false");
+    assertEval(L"(>= 20 10)", L"true");
+    assertEval(L"(>= 20 20)", L"true");
+    assertEval(L"(<= 10 20)", L"true");
+    assertEval(L"(<= 20 10)", L"false");
+    assertEval(L"(<= 20 20)", L"true");
   }
 END_TEST
 

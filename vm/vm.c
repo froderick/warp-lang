@@ -1987,6 +1987,39 @@ int cmpEval(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
+// (8)              | (a, b -> bool)
+int ltEval(VM *vm, Frame_t frame) {
+  Value a = popOperand(frame);
+  Value b = popOperand(frame);
+  Value c = wrapBool(b < a);
+  pushOperand(frame, c);
+  return R_SUCCESS;
+}
+
+int lteEval(VM *vm, Frame_t frame) {
+  Value a = popOperand(frame);
+  Value b = popOperand(frame);
+  Value c = wrapBool(b <= a);
+  pushOperand(frame, c);
+  return R_SUCCESS;
+}
+
+int gtEval(VM *vm, Frame_t frame) {
+  Value a = popOperand(frame);
+  Value b = popOperand(frame);
+  Value c = wrapBool(b > a);
+  pushOperand(frame, c);
+  return R_SUCCESS;
+}
+
+int gteEval(VM *vm, Frame_t frame) {
+  Value a = popOperand(frame);
+  Value b = popOperand(frame);
+  Value c = wrapBool(b >= a);
+  pushOperand(frame, c);
+  return R_SUCCESS;
+}
+
 // (8), offset (16) | (->)
 int jmpEval(VM *vm, Frame_t frame) {
   uint16_t newPc = readIndex(frame);
@@ -3490,7 +3523,7 @@ int getBuiltin(VM *vm, Frame_t frame) {
   Value key = popOperand(frame);
   Value coll = popOperand(frame);
 
-  Value result = W_NIL_VALUE;
+  Value result;
   switch (valueType(coll)) {
     case VT_ARRAY: {
       if (!isInt(key)) {
@@ -3507,6 +3540,23 @@ int getBuiltin(VM *vm, Frame_t frame) {
 
       Value *elements = arrayElements(k);
       result = elements[index];
+      break;
+    }
+    case VT_STR: {
+      if (!isInt(key)) {
+        raise(vm, "expected a number: %s", getValueTypeName(vm, valueType(key)));
+        return R_ERROR;
+      }
+      uint64_t index = unwrapUint(key);
+
+      String *k = deref(vm, coll);
+      if (index >= k->length) {
+        raise(vm, "index out of bounds: %" PRIu64, index);
+        return R_ERROR;
+      }
+
+      wchar_t *chars = stringValue(k);
+      result = wrapChar(chars[index]);
       break;
     }
     case VT_MAP: {
@@ -3592,6 +3642,10 @@ int setBuiltin(VM *vm, Frame_t frame) {
       fields[index] = value;
       result = coll;
       break;
+    }
+    case VT_STR: {
+      raise(vm, "strings are not mutable");
+      return R_ERROR;
     }
     default:
       raise(vm, "values of this type are not indexed: %s", getValueTypeName(vm, valueType(value)));
@@ -4149,6 +4203,36 @@ int readCharBuiltin(VM *vm, Frame_t frame) {
   }
 }
 
+int unreadCharBuiltin(VM *vm, Frame_t frame) {
+
+  Value charVal = popOperand(frame);
+  if (valueType(charVal) != VT_CHAR) {
+    raise(vm, "takes a character: %s", getValueTypeName(vm, valueType(charVal)));
+    return R_ERROR;
+  }
+  wchar_t ch = unwrapChar(charVal);
+
+  Value portVal = popOperand(frame);
+  if (valueType(portVal) != VT_PORT) {
+    raise(vm, "takes a port: %s", getValueTypeName(vm, valueType(portVal)));
+    return R_ERROR;
+  }
+
+  Port *port = deref(vm, portVal);
+  if (port->closed) {
+    raise(vm, "port is closed");
+    return R_ERROR;
+  }
+
+  wint_t result = ungetwc(ch, port->fileDesc);
+  if (result == WEOF) {
+    raise(vm, "failed to push character back onto stream");
+  }
+
+  pushOperand(frame, W_NIL_VALUE);
+  return R_SUCCESS;
+}
+
 /*
  * (def f (open-file "/Users/ddcmhenry/dev/funtastic/branches/warp-lang/foo.txt"))
  * (read-port f)
@@ -4220,8 +4304,13 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"open-file", 1, false, openFileBuiltin);
   defineCFn(vm, L"read-port", 1, false, readPortBuiltin);
   defineCFn(vm, L"read-char", 1, false, readCharBuiltin);
+  defineCFn(vm, L"unread-char", 2, false, unreadCharBuiltin);
   defineCFn(vm, L"close-port", 1, false, closePortBuiltin);
   defineCFn(vm, L"byte-array", 1, false, byteArrayBuiltin);
+  defineCFn(vm, L"<", 2, false, ltEval);
+  defineCFn(vm, L"<=", 2, false, lteEval);
+  defineCFn(vm, L">", 2, false, gtEval);
+  defineCFn(vm, L">=", 2, false, gteEval);
 }
 
 void vmConfigInitContents(VMConfig *config) {
