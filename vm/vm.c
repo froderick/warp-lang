@@ -1360,7 +1360,13 @@ Value getKeyword(VM *vm, wchar_t *text) {
   return kw;
 }
 
-Value _exceptionMake(VM *vm, Value *protectedMessage, Raised *raised) {
+typedef struct ExceptionParams {
+  Value *protectedMessage; // includes a string :message
+  Value *protectedValue;   // includes a :value
+  Raised *raised;          // includes native frame line info
+} ExceptionParams;
+
+Value _exceptionMake(VM *vm, ExceptionParams p) {
 
   Array *protectedFrames;
   {
@@ -1378,7 +1384,7 @@ Value _exceptionMake(VM *vm, Value *protectedMessage, Raised *raised) {
       }
     }
 
-    if (raised != NULL) {
+    if (p.raised != NULL) {
       // native frame
       numFrames++;
     }
@@ -1399,20 +1405,20 @@ Value _exceptionMake(VM *vm, Value *protectedMessage, Raised *raised) {
   Value protectedLineNumberKw = getKeyword(vm, L"line-number");
   pushFrameRoot(vm, (Value*)&protectedLineNumberKw);
 
-  if (raised != NULL) { // native frame
+  if (p.raised != NULL) { // native frame
 
-    String *protectedFunctionName = (String*) makeString(vm, strlen(raised->functionName) + 1);
-    swprintf(stringValue(protectedFunctionName), protectedFunctionName->length, L"%s", raised->functionName);
+    String *protectedFunctionName = (String*) makeString(vm, strlen(p.raised->functionName) + 1);
+    swprintf(stringValue(protectedFunctionName), protectedFunctionName->length, L"%s", p.raised->functionName);
     pushFrameRoot(vm, (Value*)&protectedFunctionName);
 
     Value unknownSource = wrapBool(false);
 
-    char* fileName = basename((char *) raised->fileName);
+    char* fileName = basename((char *) p.raised->fileName);
     String *protectedFileName = (String*) makeString(vm, strlen(fileName) + 1);
     swprintf(stringValue(protectedFileName), protectedFileName->length, L"%s", fileName);
     pushFrameRoot(vm, (Value*)&protectedFileName);
 
-    Value lineNumber = wrapUint(raised->lineNumber);
+    Value lineNumber = wrapUint(p.raised->lineNumber);
 
     Map *protectedFrame = makeMap(vm);
     pushFrameRoot(vm, (Value*)&protectedFrame);
@@ -1432,7 +1438,7 @@ Value _exceptionMake(VM *vm, Value *protectedMessage, Raised *raised) {
   if (vm->current != NULL) {
 
     uint64_t start = 0;
-    if (raised != NULL) {
+    if (p.raised != NULL) {
       start += 1;
     }
 
@@ -1489,7 +1495,12 @@ Value _exceptionMake(VM *vm, Value *protectedMessage, Raised *raised) {
   Map *protectedExn = makeMap(vm);
   pushFrameRoot(vm, (Value*)&protectedExn);
 
-  putMapEntry(vm, &protectedExn, getKeyword(vm, L"message"), *protectedMessage);
+  if (p.protectedMessage != NULL) {
+    putMapEntry(vm, &protectedExn, getKeyword(vm, L"message"), *p.protectedMessage);
+  }
+  if (p.protectedValue != NULL) {
+    putMapEntry(vm, &protectedExn, getKeyword(vm, L"value"), *p.protectedValue);
+  }
   putMapEntry(vm, &protectedExn, getKeyword(vm, L"frames"), (Value)protectedFrames);
 
   popFrameRoot(vm); // protectedExn
@@ -1503,23 +1514,42 @@ Value _exceptionMake(VM *vm, Value *protectedMessage, Raised *raised) {
   return (Value)protectedExn;
 }
 
-Value exceptionMake(VM *vm, Value *protectedMessage) {
-  return _exceptionMake(vm, protectedMessage, NULL);
-}
-
 Value exceptionMakeRaised(VM *vm, Raised *raised) {
 
-  String *protectedMessage;
-  if (raised != NULL) {
-    wchar_t msg[ERROR_MSG_LENGTH];
-    swprintf(msg, ERROR_MSG_LENGTH, L"unhandled error: %ls", raised->message);
-    protectedMessage = (String *) makeStringValue(vm, msg, wcslen(msg));
-    pushFrameRoot(vm, (Value *) &protectedMessage);
-  }
+  wchar_t msg[ERROR_MSG_LENGTH];
+  swprintf(msg, ERROR_MSG_LENGTH, L"unhandled error: %ls", raised->message);
+  Value protectedMessage = makeStringValue(vm, msg, wcslen(msg));
+  pushFrameRoot(vm, (Value *) &protectedMessage);
 
-  Value v = _exceptionMake(vm, (Value*)&protectedMessage, raised);
+  ExceptionParams p;
+  p.protectedMessage = &protectedMessage;
+  p.protectedValue = NULL;
+  p.raised = raised;
+
+  Value v = _exceptionMake(vm, p);
 
   popFrameRoot(vm); // protectedMessage
+
+  return v;
+}
+
+Value exceptionMakeKw(VM *vm, Raised *raised, wchar_t *kwName) {
+
+  Value protectedName = makeStringValue(vm, kwName, wcslen(kwName));
+  pushFrameRoot(vm, &protectedName);
+
+  Value protectedValue = keywordIntern(vm, &protectedName);
+  pushFrameRoot(vm, &protectedValue);
+
+  ExceptionParams p;
+  p.protectedMessage = &protectedName;
+  p.protectedValue = &protectedValue;
+  p.raised = raised;
+
+  Value v = _exceptionMake(vm, p);
+
+  popFrameRoot(vm); // protectedValue
+  popFrameRoot(vm); // protectedName
 
   return v;
 }
@@ -1620,6 +1650,16 @@ bool handleRaise(VM *vm) {
   \
   swprintf(r.message, ERROR_MSG_LENGTH, L"vm raised an exception: %s", msg); \
   vm->exception = exceptionMakeRaised(vm, &r); \
+}
+
+#define raiseKw(vm, kwName) {\
+  Raised r; \
+  raisedInitContents(&r); \
+  r.fileName = __FILE__; \
+  r.lineNumber = __LINE__; \
+  r.functionName = __func__; \
+  \
+  vm->exception = exceptionMakeKw(vm, &r, kwName); \
 }
 
 /*
@@ -3940,16 +3980,50 @@ int toStringBuiltin(VM *vm, Frame_t frame) {
 
 int throwBuiltin(VM *vm, Frame_t frame) {
 
-  Value protectedMessage = popOperand(frame);
-  if (valueType(protectedMessage) != VT_STR) {
-    raise(vm, "can only throw a string message: %s", getValueTypeName(vm, valueType(protectedMessage)));
+  Value msg = popOperand(frame);
+  if (valueType(msg) != VT_STR) {
+    ValueType vt = valueType(msg);
+    raise(vm, "can only throw a string message: %s", getValueTypeName(vm, vt));
     return R_ERROR;
   }
-  pushFrameRoot(vm, &protectedMessage);
 
-  Value exception = exceptionMake(vm, &protectedMessage);
+  ExceptionParams p;
+  p.protectedMessage = &msg;
+  p.protectedValue = NULL;
+  p.raised = NULL;
+
+  pushFrameRoot(vm, p.protectedMessage);
+
+  Value exception = _exceptionMake(vm, p);
   setException(vm, exception);
 
+  popFrameRoot(vm); // protectedMessage
+  return R_ERROR;
+}
+
+int throwValueBuiltin(VM *vm, Frame_t frame) {
+
+  Value v = popOperand(frame);
+
+  Value msg = popOperand(frame);
+  if (valueType(msg) != VT_STR) {
+    ValueType vt = valueType(msg);
+    raise(vm, "can only throw a string message: %s", getValueTypeName(vm, vt));
+    return R_ERROR;
+  }
+
+  ExceptionParams p;
+  p.protectedMessage = &msg;
+  p.protectedValue = &v;
+  p.raised = NULL;
+
+  pushFrameRoot(vm, p.protectedMessage);
+  pushFrameRoot(vm, p.protectedValue);
+
+  Value exception = _exceptionMake(vm, p);
+  setException(vm, exception);
+
+  popFrameRoot(vm); // protectedValue
   popFrameRoot(vm); // protectedMessage
   return R_ERROR;
 }
@@ -4031,7 +4105,7 @@ int readPortBuiltin(VM *vm, Frame_t frame) {
     return R_SUCCESS;
   }
   else if (feof(port->fileDesc)) {
-    raise(vm, "eof");
+    raiseKw(vm, L"eof");
     return R_ERROR;
   }
   else if (ferror(port->fileDesc)) {
@@ -4039,7 +4113,39 @@ int readPortBuiltin(VM *vm, Frame_t frame) {
     return R_ERROR;
   }
   else {
-    explode("unhandled read-port outcome");
+    explode("unhandled outcome");
+  }
+}
+
+int readCharBuiltin(VM *vm, Frame_t frame) {
+
+  Value val = popOperand(frame);
+  if (valueType(val) != VT_PORT) {
+    raise(vm, "takes a port: %s", getValueTypeName(vm, valueType(val)));
+    return R_ERROR;
+  }
+
+  Port *port = deref(vm, val);
+  if (port->closed) {
+    raise(vm, "port is closed");
+    return R_ERROR;
+  }
+
+  wchar_t ch = fgetwc(port->fileDesc);
+  if (ch != WEOF) {
+    pushOperand(frame, wrapChar(ch));
+    return R_SUCCESS;
+  }
+  if (feof(port->fileDesc)) {
+    raiseKw(vm, L"eof");
+    return R_ERROR;
+  }
+  else if (ferror(port->fileDesc)) {
+    raise(vm, "error: %s", strerror(errno));
+    return R_ERROR;
+  }
+  else {
+    explode("unhandled outcome");
   }
 }
 
@@ -4110,8 +4216,10 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"record", 2, false, recordBuiltin);
   defineCFn(vm, L"to-string", 1, false, toStringBuiltin);
   defineCFn(vm, L"throw", 1, false, throwBuiltin);
+  defineCFn(vm, L"throw-value", 2, false, throwValueBuiltin);
   defineCFn(vm, L"open-file", 1, false, openFileBuiltin);
   defineCFn(vm, L"read-port", 1, false, readPortBuiltin);
+  defineCFn(vm, L"read-char", 1, false, readCharBuiltin);
   defineCFn(vm, L"close-port", 1, false, closePortBuiltin);
   defineCFn(vm, L"byte-array", 1, false, byteArrayBuiltin);
 }

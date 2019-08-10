@@ -402,12 +402,31 @@ void print(VM_t vm, Value value) {
   poolFree(pool);
 }
 
+void printBuf(Ctx *ctx, StringBuffer_t b, Value value) {
+  Error error;
+  errorInitContents(&error);
+
+  Expr elem;
+  exprInitContents(&elem);
+  _print(ctx, value, &elem);
+
+  wchar_t *str = NULL;
+  if (tryExprPrnStr(ctx->pool, &elem, &str, &error) != R_SUCCESS) {
+    explode("oops");
+  }
+
+  if (tryStringBufferAppendStr(b, str, &error) != R_SUCCESS) {
+    explode("oops");
+  }
+}
+
 wchar_t* printExceptionValue(Ctx *ctx, Value e) {
 
   Map *exn = deref(ctx->vm, e);
 
-  String *message = (String*)mapLookup(ctx->vm, exn, getKeyword(ctx->vm, L"message"));
-  Array *frames = (Array*)mapLookup(ctx->vm, exn, getKeyword(ctx->vm, L"frames"));
+  Value message = mapLookup(ctx->vm, exn, getKeyword(ctx->vm, L"message"));
+  Value value = mapLookup(ctx->vm, exn, getKeyword(ctx->vm, L"value"));
+  Array *frames = deref(ctx->vm, mapLookup(ctx->vm, exn, getKeyword(ctx->vm, L"frames")));
 
   Error error;
   errorInitContents(&error);
@@ -418,8 +437,22 @@ wchar_t* printExceptionValue(Ctx *ctx, Value e) {
     explode("oops");
   }
 
-  if (tryStringBufferAppendStr(b, stringValue(message), &error) != R_SUCCESS) {
-    explode("oops");
+  if (message != W_NIL_VALUE && value != W_NIL_VALUE) {
+    if (tryStringBufferAppendStr(b, stringValue(deref(ctx->vm, message)), &error) != R_SUCCESS) {
+      explode("oops");
+    }
+    if (tryStringBufferAppendStr(b, L" / ", &error) != R_SUCCESS) {
+      explode("oops");
+    }
+    printBuf(ctx, b, value);
+  }
+  else if (message != W_NIL_VALUE) {
+    if (tryStringBufferAppendStr(b, stringValue(deref(ctx->vm, message)), &error) != R_SUCCESS) {
+      explode("oops");
+    }
+  }
+  else if (value != W_NIL_VALUE) {
+    printBuf(ctx, b, value);
   }
 
   if (tryStringBufferAppendStr(b, L"\n", &error) != R_SUCCESS) {
