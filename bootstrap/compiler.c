@@ -669,6 +669,11 @@ RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *erro
       c->integer = constant->number.value;
       break;
     }
+    case N_CHAR: {
+      c->type = CT_CHAR;
+      c->chr = constant->chr.value;
+      break;
+    }
     case N_NIL: {
       c->type = CT_NIL;
       break;

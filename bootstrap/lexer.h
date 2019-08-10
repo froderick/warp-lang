@@ -15,6 +15,7 @@ typedef enum TokenType {
   T_OPAREN,
   T_CPAREN,
   T_NUMBER,
+  T_CHAR,
   T_STRING,
   T_SYMBOL,
   T_KEYWORD,

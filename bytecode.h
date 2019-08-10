@@ -74,6 +74,7 @@ typedef enum ConstantType {
   CT_NONE,
   CT_BOOL,
   CT_INT,
+  CT_CHAR,
   CT_NIL,
   CT_STR,
   CT_FN,
@@ -143,6 +144,7 @@ typedef struct Constant {
   union {
     uint8_t boolean;
     uint64_t integer;
+    wchar_t chr;
     StringConstant string;
     FnConstant function;
     SymbolConstant symbol;

@@ -46,6 +46,8 @@ const char* tokenName(TokenType type) {
       return "NIL";
     case T_NUMBER:
       return "NUMBER";
+    case T_CHAR:
+      return "CHAR";
     case T_STRING:
       return "STRING";
     case T_KEYWORD:
@@ -225,6 +227,49 @@ RetVal tryReadNumber(Pool_t pool, InputStream_t source, LexerState *s, wchar_t f
 
   failure:
     return ret;
+}
+
+RetVal tryReadCharOrQuote(Pool_t pool, InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
+  RetVal ret;
+
+  wchar_t second;
+  int read = tryInputStreamReadChar(source, &second, error);
+  if (read == R_ERROR) {
+    return R_ERROR;
+  }
+  else if (read == R_EOF) { // quote
+    throws(tryStringBufferAppendChar(s->b, first, error));
+    throws(tryTokenInitFromLexer(pool, s, T_QUOTE, token, error));
+  }
+  else {
+    wchar_t third;
+    int read = tryInputStreamReadChar(source, &third, error);
+    if (read == R_ERROR) {
+      return R_ERROR;
+    }
+    else if (read == R_EOF) { // quote
+      throws(tryInputStreamUnreadChar(source, second, error));
+      throws(tryStringBufferAppendChar(s->b, first, error));
+      throws(tryTokenInitFromLexer(pool, s, T_QUOTE, token, error));
+    }
+    else {
+      if (third == first) {
+        throws(tryStringBufferAppendChar(s->b, second, error));
+        throws(tryTokenInitFromLexer(pool, s, T_CHAR, token, error));
+      }
+      else { // quote
+        throws(tryInputStreamUnreadChar(source, third, error));
+        throws(tryInputStreamUnreadChar(source, second, error));
+        throws(tryStringBufferAppendChar(s->b, first, error));
+        throws(tryTokenInitFromLexer(pool, s, T_QUOTE, token, error));
+      }
+    }
+  }
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
 }
 
 bool isNil(wchar_t *text) {
@@ -442,9 +487,6 @@ RetVal tryTokenRead(Pool_t pool, InputStream_t source, LexerState *s, Token **to
   else if (ch == L'}') {
     throws(tryTokenInit(pool, T_CBRACKET, L"}", s->position, 1, s->lineNumber, s->colNumber, token, error));
   }
-  else if (ch == L'\'') {
-    throws(tryTokenInit(pool, T_QUOTE, L"'", s->position, 1, s->lineNumber, s->colNumber, token, error));
-  }
   else if (ch == L'`') {
     throws(tryTokenInit(pool, T_SYNTAX_QUOTE, L"`", s->position, 1, s->lineNumber, s->colNumber, token, error));
   }
@@ -459,6 +501,9 @@ RetVal tryTokenRead(Pool_t pool, InputStream_t source, LexerState *s, Token **to
   }
   else if (iswdigit(ch)) {
     throws(tryReadNumber(pool, source, s, ch, token, error));
+  }
+  else if (ch == L'\'') {
+    throws(tryReadCharOrQuote(pool, source, s, ch, token, error));
   }
   else if (isSymbolStart(ch)) {
     throws(tryReadSymbol(pool, source, s, ch, token, error));

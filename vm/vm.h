@@ -13,6 +13,7 @@ typedef uint64_t Value;
 #define W_UINT_BITS      0x01u
 #define W_PTR_MASK       0x03u
 #define W_IMMEDIATE_MASK 0x0fu
+#define W_CHARACTER_BITS 0x0au
 #define W_BOOLEAN_BITS   0x06u
 #define W_SPECIAL_MASK   0xf0u
 #define W_NIL_BITS       0x00u
@@ -36,6 +37,7 @@ typedef enum ValueType {
   VT_RECORD,
   VT_PORT,
   VT_BYTE_ARRAY,
+  VT_CHAR,
 } ValueType;
 
 #define W_GC_FORWARDING_BIT      0x8000000000000000L   /* header contains forwarding pointer */
@@ -72,9 +74,10 @@ ValueType valueType(Value v);
 
 Value wrapBool(bool b);
 bool unwrapBool(Value v);
-
 Value wrapUint(uint64_t i);
 uint64_t unwrapUint(Value v);
+Value wrapChar(wchar_t v);
+wchar_t unwrapChar(Value v);
 
 typedef struct CFn {
   ObjectHeader header;

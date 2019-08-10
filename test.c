@@ -142,7 +142,7 @@ END_TEST
 
 START_TEST(parser) {
 
-    wchar_t* input = L"\"str\" 102 \n himom :rocks true nil (true false) 'nil";
+    wchar_t* input = L"\"str\" 102 \n himom :rocks true nil (true false) 'nil 'X'";
 
     Error e;
     errorInitContents(&e);
@@ -216,6 +216,13 @@ START_TEST(parser) {
     ck_assert(wcscmp(expr->list.head->expr->symbol.value, L"quote") == 0);
     // second element
     ck_assert(expr->list.head->next->expr->type == N_NIL);
+
+    // character
+    ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
+    ck_assert(expr->type == N_CHAR);
+    ck_assert_int_eq(expr->chr.value, L'X');
+    ck_assert_int_eq(expr->source.lineNumber, 2);
+    ck_assert_int_eq(expr->source.colNumber, 34);
 
     ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_EOF);
 
@@ -858,6 +865,8 @@ START_TEST(repl)
     assertEval(L"(try "
                "   (throw \"yarp\")"
                "   (catch ex (:message ex)))", L"\"yarp\"");
+
+    assertEval(L"'A'", L"'A'");
 
   }
 END_TEST

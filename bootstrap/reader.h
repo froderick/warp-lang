@@ -22,6 +22,10 @@ typedef struct ExprNumber {
   uint64_t value;
 } ExprNumber;
 
+typedef struct ExprChar {
+  wchar_t value;
+} ExprChar;
+
 typedef struct ExprSymbol {
   wchar_t *value;
   uint64_t length;
@@ -69,6 +73,7 @@ typedef enum ExprType {
   N_NONE,
   N_STRING,
   N_NUMBER,
+  N_CHAR,
   N_SYMBOL,
   N_KEYWORD,
   N_BOOLEAN,
@@ -83,6 +88,7 @@ typedef struct Expr {
   union {
     ExprString string;
     ExprNumber number;
+    ExprChar chr;
     ExprSymbol symbol;
     ExprKeyword keyword;
     ExprBoolean boolean;

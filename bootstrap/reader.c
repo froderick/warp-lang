@@ -120,6 +120,51 @@ RetVal tryNumberRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error
     return ret;
 }
 
+RetVal tryCharMake(Pool_t pool, wchar_t value, Expr **ptr, Error *error) {
+  RetVal ret;
+
+  Expr *expr;
+  tryPalloc(pool, expr, sizeof(Expr), "Expr");
+
+  expr->type = N_CHAR;
+  expr->chr.value = value;
+  expr->source.isSet = false;
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
+RetVal tryCharRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+
+  RetVal ret;
+  Token *token;
+
+  throws(tryStreamNext(pool, stream, &token, error));
+
+  if (token->type != T_CHAR) {
+    throwSyntaxError(error, token->source.position, "Token is not a type of T_CHAR: %u", token->type);
+  }
+
+  if (wcslen(token->text) != 1) {
+    throwSyntaxError(error, token->source.position, "Token of type T_CHAR must be 1 in length: %lu",
+        wcslen(token->text));
+  }
+
+  Expr *expr = NULL;
+  throws(tryCharMake(pool, token->text[0], &expr, error));
+
+  expr->source = token->source;
+
+  *ptr = expr;
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 /*
  * This is for dynamically creating symbols, for instance to handle the reader
  * macros where certain tokens (like '`') expand into special forms.
@@ -852,6 +897,9 @@ RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) 
     case T_NUMBER:
       throws(tryNumberRead(pool, stream, ptr, error));
       break;
+    case T_CHAR:
+      throws(tryCharRead(pool, stream, ptr, error));
+      break;
     case T_SYMBOL:
       throws(trySymbolRead(pool, stream, ptr, error));
       break;
@@ -925,6 +973,9 @@ RetVal tryExprDeepCopy(Pool_t pool, Expr *from, Expr **ptr, Error *error) {
       break;
     case N_NUMBER:
       throws(tryNumberMake(pool, from->number.value, &to, error));
+      break;
+    case N_CHAR:
+      throws(tryCharMake(pool, from->chr.value, &to, error));
       break;
     case N_SYMBOL:
       throws(trySymbolMake(pool, from->symbol.value, from->symbol.length, &to, error));
@@ -1006,6 +1057,12 @@ RetVal tryExprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable, Error *err
       wchar_t text[256];
       swprintf(text, sizeof(text), L"%" PRIu64, expr->number.value);
       throws(tryStringBufferAppendStr(b, text, error));
+      break;
+    }
+    case N_CHAR: {
+      throws(tryStringBufferAppendChar(b, L'\'', error));
+      throws(tryStringBufferAppendChar(b, expr->chr.value, error));
+      throws(tryStringBufferAppendChar(b, L'\'', error));
       break;
     }
     case N_BOOLEAN:

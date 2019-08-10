@@ -85,6 +85,9 @@ ValueType valueType(Value v) {
   if (imm == W_BOOLEAN_BITS) {
     return VT_BOOL;
   }
+  else if (imm == W_CHARACTER_BITS) {
+    return VT_CHAR;
+  }
   else {
     uint8_t special = v & W_SPECIAL_MASK;
     if (special == W_NIL_BITS) {
@@ -109,6 +112,14 @@ Value wrapUint(uint64_t i) {
 
 uint64_t unwrapUint(Value v) {
   return v >> 1u;
+}
+
+Value wrapChar(wchar_t v) {
+  return (v << 4u) | W_CHARACTER_BITS;
+}
+
+wchar_t unwrapChar(Value v) {
+  return v >> 4u;
 }
 
 typedef struct Frame *Frame_t;
@@ -1297,6 +1308,9 @@ Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c) {
       break;
     case CT_INT:
       v = wrapUint(c.integer);
+      break;
+    case CT_CHAR:
+      v = wrapChar(c.chr);
       break;
     case CT_NIL:
       v = W_NIL_VALUE;

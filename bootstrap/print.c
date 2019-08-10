@@ -32,6 +32,11 @@ void printUint(Ctx *ctx, Value result, Expr *expr) {
   expr->number.value = unwrapUint(result);
 }
 
+void printChar(Ctx *ctx, Value result, Expr *expr) {
+  expr->type = N_CHAR;
+  expr->chr.value = unwrapChar(result);
+}
+
 void printBool(Ctx *ctx, Value result, Expr *expr) {
   expr->type = N_BOOLEAN;
   expr->boolean.value = unwrapBool(result);
@@ -333,6 +338,7 @@ PrintGeneric getPrintGeneric(Ctx *ctx, ValueType type) {
   switch (type) {
     case VT_NIL:        return printNil;
     case VT_UINT:       return printUint;
+    case VT_CHAR:       return printChar;
     case VT_BOOL:       return printBool;
     case VT_FN:         return printFn;
     case VT_STR:        return printStr;

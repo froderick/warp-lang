@@ -1334,6 +1334,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
     // constants
     case N_STRING:
     case N_NUMBER:
+    case N_CHAR:
     case N_KEYWORD:
     case N_BOOLEAN:
     case N_NIL: {
