@@ -1803,18 +1803,22 @@ void preprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarA
   }
 }
 
+void populateArgs(Frame_t from, Frame_t to, uint16_t numArgs) {
+  for (uint16_t i = 0; i < numArgs; i++) {
+    Value arg = popOperand(from);
+
+    uint16_t idx = numArgs - (1 + i);
+    setLocal(to, idx, arg);
+  }
+}
+
 void invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invocable, uint16_t numArgsSupplied) {
 
   protectInvocable(vm, invocable);
 
   preprocessArguments(vm, parent, invocable->fn->numArgs, invocable->fn->usesVarArgs, numArgsSupplied);
 
-  for (uint16_t i = 0; i < invocable->fn->numArgs; i++) {
-    Value arg = popOperand(parent);
-
-    uint16_t idx = invocable->fn->numArgs - (1 + i);
-    setLocal(child, idx, arg);
-  }
+  populateArgs(parent, child, invocable->fn->numArgs);
 
   uint16_t numCaptures = 0;
 
@@ -1968,6 +1972,14 @@ int invokeDynTailEval(VM *vm, Frame_t frame) {
     }
   }
 
+  return R_SUCCESS;
+}
+
+// (8)              | (args... -> ...)
+int invokeDynTailEvalRecurse(VM *vm, Frame_t frame) {
+  uint16_t numArgs = readIndex(frame);
+  populateArgs(frame, frame, numArgs);
+  setPc(frame, 0);
   return R_SUCCESS;
 }
 
@@ -2400,6 +2412,7 @@ InstTable instTableCreate() {
       [I_STORE_LOCAL]      = { .name = "I_STORE_LOCAL",     .print = printInstAndIndex,   .eval = storeLocalEval },
       [I_INVOKE_DYN]       = { .name = "I_INVOKE_DYN",      .print = printInstAndIndex,   .eval = invokeDynEval },
       [I_INVOKE_DYN_TAIL]  = { .name = "I_INVOKE_DYN_TAIL", .print = printInstAndIndex,   .eval = invokeDynTailEval },
+      [I_INVOKE_DYN_TAIL_RECURSE]  = { .name = "I_INVOKE_DYN_TAIL_RECURSE", .print = printInst,   .eval = invokeDynTailEvalRecurse},
       [I_RET]              = { .name = "I_RET",             .print = printInst,           .eval = retEval },
       [I_CMP]              = { .name = "I_CMP",             .print = printInst,           .eval = cmpEval },
       [I_JMP]              = { .name = "I_JMP",             .print = printInstAndIndex,   .eval = jmpEval },

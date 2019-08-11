@@ -373,6 +373,12 @@ uint64_t computeOpStackSize(uint8_t *code, uint16_t length) {
         // history ends for stack
         break;
       }
+      case I_INVOKE_DYN_TAIL_RECURSE: {
+        code++;
+        uint16_t numArgs = (code[0] << 8) | code[1];
+        currentOpStack -= numArgs;
+        break;
+      }
       case I_RET:
         code++;
         currentOpStack--;
@@ -941,25 +947,32 @@ RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
   RetVal ret;
 
   // push the arguments in evaluation (left-to-right) order
-  for (uint16_t i = 0; i<form->fnCall.args.numForms; i++) {
+  for (uint16_t i = 0; i < form->fnCall.args.numForms; i++) {
     throws(tryCompile(&form->fnCall.args.forms[i], output, error));
   }
 
-  // push the callable
-  throws(tryCompile(form->fnCall.fnCallable, output, error));
-
-  // invoke
-
-  uint8_t inst;
-  if (form->fnCall.tailPosition) {
-    inst = I_INVOKE_DYN_TAIL;
+  if (form->fnCall.tailPosition && form->fnCall.recurses) {
+    uint16_t numForms = form->fnCall.args.numForms;
+    uint8_t code[] = {I_INVOKE_DYN_TAIL_RECURSE, numForms >> 8, numForms & 0xFF};
+    throws(tryCodeAppend(output, sizeof(code), code, error));
   }
   else {
-    inst = I_INVOKE_DYN;
+
+    // push the callable
+    throws(tryCompile(form->fnCall.fnCallable, output, error));
+
+    // invoke
+
+    uint8_t inst;
+    if (form->fnCall.tailPosition) {
+      inst = I_INVOKE_DYN_TAIL;
+    } else {
+      inst = I_INVOKE_DYN;
+    }
+    uint16_t numForms = form->fnCall.args.numForms;
+    uint8_t code[] = {inst, numForms >> 8, numForms & 0xFF};
+    throws(tryCodeAppend(output, sizeof(code), code, error));
   }
-  uint16_t numForms = form->fnCall.args.numForms;
-  uint8_t code[] = { inst, numForms >> 8, numForms & 0xFF };
-  throws(tryCodeAppend(output, sizeof(code), code, error));
 
   return R_SUCCESS;
 

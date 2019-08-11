@@ -181,11 +181,11 @@ ResolverBinding* findResolverBinding(ResolverStack *stack, wchar_t *bindingName)
   return NULL;
 }
 
-void getCurrentBindingTableIndex(AnalyzerContext *ctx, uint16_t *idx) {
+uint16_t getCurrentBindingTableIndex(AnalyzerContext *ctx) {
   if (ctx->bindingTables.usedSpace == 0) {
     explode("no current binding table found");
   }
-  *idx = ctx->bindingTables.usedSpace - 1;
+  return ctx->bindingTables.usedSpace - 1;
 }
 
 void createBinding(AnalyzerContext *ctx, Binding binding, uint16_t *bindingIndexPtr) {
@@ -793,6 +793,26 @@ RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Expr *expr, FormFnCall *fnCall, Er
     argExpr = argExpr->next;
   }
 
+  /*
+   * if we are inside a function, and if the fnCallable is an env-var that points to
+   * this function refeference, this is recursion
+   */
+
+  if (fnCall->fnCallable->type == F_ENV_REF) {
+
+    FormEnvRef *envRef = &fnCall->fnCallable->envRef;
+
+    uint16_t currentTableIndex = getCurrentBindingTableIndex(ctx);
+    BindingTable *current = ctx->bindingTables.tables[currentTableIndex];
+    Binding *binding = &current->bindings[envRef->bindingIndex];
+
+    if (binding->source == BS_LOCAL) {
+      if (binding->local.type == BT_FN_REF) {
+        fnCall->recurses = true;
+      }
+    }
+  }
+
   return R_SUCCESS;
 
   failure:
@@ -1048,8 +1068,7 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *err
   if ((resolved = findResolverBinding(&ctx->resolverStack, sym)) != NULL) {
     form->type = F_ENV_REF;
 
-    uint16_t currentTableIndex;
-    getCurrentBindingTableIndex(ctx, &currentTableIndex);
+    uint16_t currentTableIndex = getCurrentBindingTableIndex(ctx);
 
     if (resolved->tableIndex == currentTableIndex) {
       throws(tryEnvRefAnalyze(ctx, expr, resolved->bindingIndex, &form->envRef, error));
