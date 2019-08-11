@@ -69,6 +69,7 @@ typedef struct LetBinding {
 } LetBinding;
 
 typedef struct FormLet {
+  Text *name;
   LetBinding *bindings;
   uint16_t numBindings;
   Forms forms;
@@ -117,6 +118,7 @@ typedef struct FormFnCall {
   Form *fnCallable;
   Forms args;
   bool tailPosition;
+  bool recurses;
 } FormFnCall;
 
 /*

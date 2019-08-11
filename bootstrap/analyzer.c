@@ -61,19 +61,17 @@ void bindingTablesInitContents(BindingTables *tables) {
   tables->tables = NULL;
 }
 
-RetVal tryAddBinding(Pool_t pool, BindingTable *table, Binding binding, Error *error) {
-  RetVal ret;
-
+void addBinding(Pool_t pool, BindingTable *table, Binding binding) {
   if (table->bindings == NULL) {
     uint16_t len = 16;
-    tryPalloc(pool, table->bindings, len * sizeof(Binding), "Binding array");
+    palloc(pool, table->bindings, len * sizeof(Binding), "Binding array");
     table->allocatedSpace = len;
   }
   else if (table->usedSpace == table->allocatedSpace) {
     uint64_t newAllocatedLength = table->allocatedSpace * 2;
 
     Binding *resized = NULL;
-    tryPalloc(pool, resized, newAllocatedLength * sizeof(Binding), "Binding array");
+    palloc(pool, resized, newAllocatedLength * sizeof(Binding), "Binding array");
     memcpy(resized, table->bindings, table->usedSpace * sizeof(Binding));
 
     table->allocatedSpace = newAllocatedLength;
@@ -83,26 +81,19 @@ RetVal tryAddBinding(Pool_t pool, BindingTable *table, Binding binding, Error *e
   uint64_t index = table->usedSpace;
   table->bindings[index] = binding;
   table->usedSpace = index + 1;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
-RetVal tryPushBindingTable(Pool_t pool, BindingTables *tables, BindingTable *table, Error *error) {
-  RetVal ret;
-
+void pushBindingTable(Pool_t pool, BindingTables *tables, BindingTable *table) {
   if (tables->tables == NULL) {
     uint16_t len = 16;
-    tryPalloc(pool, tables->tables, len * sizeof(BindingTable*), "BindingTable pointer array");
+    palloc(pool, tables->tables, len * sizeof(BindingTable*), "BindingTable pointer array");
     tables->allocatedSpace = len;
   }
   else if (tables->usedSpace == tables->allocatedSpace) {
     uint64_t newAllocatedLength = tables->allocatedSpace * 2;
 
     BindingTable **resized = NULL;
-    tryPalloc(pool, resized, newAllocatedLength * sizeof(BindingTable*), "BindingTable pointer array");
+    palloc(pool, resized, newAllocatedLength * sizeof(BindingTable*), "BindingTable pointer array");
     memcpy(resized, tables->tables, tables->usedSpace * sizeof(BindingTable*));
 
     tables->allocatedSpace = newAllocatedLength;
@@ -112,27 +103,14 @@ RetVal tryPushBindingTable(Pool_t pool, BindingTables *tables, BindingTable *tab
   uint64_t index = tables->usedSpace;
   tables->tables[index] = table;
   tables->usedSpace = index + 1;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
-RetVal tryPopBindingTable(BindingTables *tables, Error *error) {
-  RetVal ret;
-
+void popBindingTable(BindingTables *tables) {
   if (tables->usedSpace == 0) {
-    throwInternalError(error, "cannot pop binding table from empty stack");
+    explode("cannot pop binding table from empty stack");
   }
-
   tables->tables[tables->usedSpace - 1] = NULL;
   tables->usedSpace = tables->usedSpace - 1;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 Binding* findBinding(BindingTables *tables, wchar_t *bindingName) {
@@ -163,19 +141,18 @@ void resolverStackInitContents(ResolverStack *stack) {
   stack->bindings = NULL;
 }
 
-RetVal tryPushResolverBinding(Pool_t pool, ResolverStack *stack, ResolverBinding binding, Error *error) {
-  RetVal ret;
+void pushResolverBinding(Pool_t pool, ResolverStack *stack, ResolverBinding binding) {
 
   if (stack->bindings == NULL) {
     uint16_t len = 16;
-    tryPalloc(pool, stack->bindings, len * sizeof(ResolverBinding), "ResolverBinding array");
+    palloc(pool, stack->bindings, len * sizeof(ResolverBinding), "ResolverBinding array");
     stack->allocatedSpace = len;
   }
   else if (stack->usedSpace == stack->allocatedSpace) {
     uint64_t newAllocatedLength = stack->allocatedSpace * 2;
 
     ResolverBinding *resized = NULL;
-    tryPalloc(pool, resized, newAllocatedLength * sizeof(ResolverBinding), "BindingTable pointer array");
+    palloc(pool, resized, newAllocatedLength * sizeof(ResolverBinding), "BindingTable pointer array");
     memcpy(resized, stack->bindings, stack->usedSpace * sizeof(ResolverBinding));
 
     stack->allocatedSpace = newAllocatedLength;
@@ -185,64 +162,40 @@ RetVal tryPushResolverBinding(Pool_t pool, ResolverStack *stack, ResolverBinding
   uint64_t index = stack->usedSpace;
   stack->bindings[index] = binding;
   stack->usedSpace = index + 1;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
-RetVal tryPopResolverBindings(ResolverStack *stack, uint16_t numBindings, Error *error) {
-  RetVal ret;
-
+void popResolverBindings(ResolverStack *stack, uint16_t numBindings) {
   if (stack->usedSpace < numBindings) {
-    throwInternalError(error, "cannot pop more bindings than exist");
+    explode("cannot pop more bindings than exist");
   }
-
   stack->usedSpace = stack->usedSpace - numBindings;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 ResolverBinding* findResolverBinding(ResolverStack *stack, wchar_t *bindingName) {
-
   for (uint16_t i=0; i<stack->usedSpace; i++) {
     ResolverBinding *b = &stack->bindings[stack->usedSpace - (i + 1)];
-
     if (wcscmp(bindingName, b->binding->name.value) == 0) {
       return b;
     }
   }
-
   return NULL;
 }
 
-RetVal tryGetCurrentBindingTableIndex(AnalyzerContext *ctx, uint16_t *idx, Error *error) {
-  RetVal ret;
-
+void getCurrentBindingTableIndex(AnalyzerContext *ctx, uint16_t *idx) {
   if (ctx->bindingTables.usedSpace == 0) {
-    throwInternalError(error, "no current binding table found");
+    explode("no current binding table found");
   }
-
   *idx = ctx->bindingTables.usedSpace - 1;
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
-RetVal tryCreateBinding(AnalyzerContext *ctx, Binding binding, uint16_t *bindingIndexPtr, Error *error) {
-  RetVal ret;
-
+void createBinding(AnalyzerContext *ctx, Binding binding, uint16_t *bindingIndexPtr) {
   if (ctx->bindingTables.usedSpace == 0) {
-    throwInternalError(error, "no current binding table found");
+    explode("no current binding table found");
   }
 
   uint16_t tableIndex = ctx->bindingTables.usedSpace - 1;
   BindingTable *table = ctx->bindingTables.tables[tableIndex];
-  throws(tryAddBinding(ctx->pool, table, binding, error));
+  addBinding(ctx->pool, table, binding);
   uint16_t bindingIndex = table->usedSpace - 1;
   Binding *b = &table->bindings[bindingIndex];
 
@@ -252,41 +205,14 @@ RetVal tryCreateBinding(AnalyzerContext *ctx, Binding binding, uint16_t *binding
   resolver.bindingIndex = bindingIndex;
   resolver.binding = b;
 
-  throws(tryPushResolverBinding(ctx->pool, &ctx->resolverStack, resolver, error));
+  pushResolverBinding(ctx->pool, &ctx->resolverStack, resolver);
 
   *bindingIndexPtr = bindingIndex;
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
-RetVal tryPopBindings(AnalyzerContext *ctx, uint16_t numBindings, Error *error) {
-  RetVal ret;
-
-  throws(tryPopResolverBindings(&ctx->resolverStack, numBindings, error));
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+void popBindings(AnalyzerContext *ctx, uint16_t numBindings) {
+  popResolverBindings(&ctx->resolverStack, numBindings);
 }
-
-//RetVal addFnBinding(EnvBindingStack *stack, FormFn *fn, Error *error) {
-//  RetVal ret;
-//
-//  EnvBinding e;
-//  e.nameLength = fn->nameLength;
-//  throws(tryCopyText(fn->name, &e.name, e.nameLength, error));
-//  e.type = RT_FN;
-//  e.index = fn->id;
-//
-//  throws(addEnvBinding(stack, e, BC_FN, error));
-//
-//  return R_SUCCESS;
-//
-//  failure:
-//  return ret;
-//}
 
 /*
  * Analyzers for the different types of forms.
@@ -351,22 +277,16 @@ void formsInitContents(Forms *forms) {
   forms->forms = NULL;
 }
 
-RetVal tryFormsAllocate(Pool_t pool, Forms *forms, uint16_t length, Error *error) {
-  RetVal ret;
-
+void formsAllocate(Pool_t pool, Forms *forms, uint16_t length) {
   forms->numForms = length;
-  tryPalloc(pool, forms->forms, sizeof(Form) * forms->numForms, "Forms array");
+  palloc(pool, forms->forms, sizeof(Form) * forms->numForms, "Forms array");
   for (uint16_t i=0; i<forms->numForms; i++) {
       formInitContents(&forms->forms[i]);
   }
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
 void letInitContents(FormLet *let) {
+  let->name = NULL;
   let->numBindings = 0;
   let->bindings = NULL;
   formsInitContents(&let->forms);
@@ -381,16 +301,26 @@ void letBindingInitContents(LetBinding *b) {
 RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *error) {
   RetVal ret;
 
-  uint16_t numBindingsPushed = 0;
-
   letInitContents(let);
-
-  // sanity checking
   uint64_t pos = getExprPosition(letExpr);
-  if (letExpr->list.length < 2) {
+  ListElement *next = letExpr->list.head->next;
+
+  if (next != NULL && next->expr->type == N_SYMBOL){
+    Text *text = NULL;
+    palloc(ctx->pool, text, sizeof(Text), "text");
+    text->length = next->expr->symbol.length;
+    text->value = next->expr->symbol.value;
+
+    let->name = text;
+    next = next->next;
+  }
+
+  if (next == NULL) {
     throwSyntaxError(error, pos, "the 'let' special form requires at least one parameter");
   }
-  Expr *bindingsExpr = letExpr->list.head->next->expr;
+
+  // sanity checking
+  Expr *bindingsExpr = next->expr;
   if (bindingsExpr->type != N_LIST) {
     throwSyntaxError(error, pos, "the 'let' special form requires the first parameter to be a list");
   }
@@ -426,15 +356,21 @@ RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *e
     binding.local.type = BT_LET;
     binding.local.typeIndex = i;
 
-    throws(tryCreateBinding(ctx, binding, &b->bindingIndex, error));
+    createBinding(ctx, binding, &b->bindingIndex);
 
     bindingElem = bindingElem->next->next;
   }
+  next = next->next;
 
   // create the forms within this lexical scope
-  throws(tryFormsAllocate(ctx->pool, &let->forms, letExpr->list.length - 2, error));
+  uint64_t numForms = 0;
+  for (ListElement *e = next; e != NULL; e = e->next) {
+    numForms++;
+  }
 
-  ListElement *exprElem = letExpr->list.head->next->next;
+  formsAllocate(ctx->pool, &let->forms, numForms);
+
+  ListElement *exprElem = next;
   for (int i=0; i<let->forms.numForms; i++) {
     Form *thisForm = let->forms.forms + i;
     throws(tryFormAnalyzeContents(ctx, exprElem->expr, thisForm, error));
@@ -442,7 +378,7 @@ RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *e
   }
 
   // discard the registered bindings from the environment stack
-  throws(tryPopBindings(ctx, let->numBindings, error));
+  popBindings(ctx, let->numBindings);
 
   return R_SUCCESS;
   failure:
@@ -682,7 +618,7 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
 
   // create new binding stack, initialized with the fn args as the first bindings
 
-  throws(tryPushBindingTable(ctx->pool, &ctx->bindingTables, &fn->table, error));
+  pushBindingTable(ctx->pool, &ctx->bindingTables, &fn->table);
   uint16_t numBindingsPushed = 0;
 
   if (fn->hasName) {
@@ -694,7 +630,7 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
     binding.local.type = BT_FN_REF;
     binding.local.typeIndex = 0;
 
-    throws(tryCreateBinding(ctx, binding, &fn->bindingIndex, error));
+    createBinding(ctx, binding, &fn->bindingIndex);
     numBindingsPushed = numBindingsPushed + 1;
   }
 
@@ -707,12 +643,12 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
     binding.local.type = BT_FN_ARG;
     binding.local.typeIndex = i;
 
-    throws(tryCreateBinding(ctx, binding, &fn->args[i].bindingIndex, error));
+    createBinding(ctx, binding, &fn->args[i].bindingIndex);
     numBindingsPushed = numBindingsPushed + 1;
   }
 
   // create the forms within this fn lexical scope
-  throws(tryFormsAllocate(ctx->pool, &fn->forms, fn->forms.numForms, error));
+  formsAllocate(ctx->pool, &fn->forms, fn->forms.numForms);
   for (int i=0; i<fn->forms.numForms; i++) {
     Expr expr = formElements[i];
     Form *thisForm = fn->forms.forms + i;
@@ -724,8 +660,8 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
   fn->numCaptures = bindingTableCaptures(&fn->table);
   fn->isClosure = fn->numCaptures > 0;
 
-  throws(tryPopBindings(ctx, numBindingsPushed, error));
-  throws(tryPopBindingTable(&ctx->bindingTables, error));
+  popBindings(ctx, numBindingsPushed);
+  popBindingTable(&ctx->bindingTables);
 
   return R_SUCCESS;
   failure:
@@ -750,7 +686,7 @@ RetVal tryBuiltinAnalyze(AnalyzerContext *ctx, Expr *expr, FormBuiltin *builtin,
 
   throws(tryTextMake(ctx->pool, name->keyword.value, &builtin->name, name->keyword.length, error));
 
-  throws(tryFormsAllocate(ctx->pool, &builtin->args, expr->list.length - 2, error));
+  formsAllocate(ctx->pool, &builtin->args, expr->list.length - 2);
 
   ListElement *argExpr = expr->list.head->next->next;
   for (int i=0; i<builtin->args.numForms; i++) {
@@ -837,6 +773,7 @@ void fnCallInitContents(FormFnCall *fnCall) {
   fnCall->fnCallable = NULL;
   formsInitContents(&fnCall->args);
   fnCall->tailPosition = false;
+  fnCall->recurses = false;
 }
 
 RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Expr *expr, FormFnCall *fnCall, Error *error) {
@@ -847,7 +784,7 @@ RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Expr *expr, FormFnCall *fnCall, Er
 
   throws(_tryFormAnalyze(ctx, expr->list.head->expr, &fnCall->fnCallable, error));
   throws(assertFnCallable(fnCall->fnCallable, error));
-  throws(tryFormsAllocate(ctx->pool, &fnCall->args, expr->list.length - 1, error));
+  formsAllocate(ctx->pool, &fnCall->args, expr->list.length - 1);
 
   ListElement *argExpr = expr->list.head->next;
   for (int i=0; i<fnCall->args.numForms; i++) {
@@ -985,7 +922,7 @@ RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form
     form->type = F_FN_CALL;
     fnCallInitContents(&form->fnCall);
     form->fnCall.fnCallable = fnCallable;
-    throws(tryFormsAllocate(ctx->pool, &form->fnCall.args, numArgs, error));
+    formsAllocate(ctx->pool, &form->fnCall.args, numArgs);
   }
 
   uint16_t nextArg = 0;
@@ -1010,9 +947,8 @@ RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form
       if (listContainer->type == F_NONE) {
         listContainer->type = F_LIST;
         _listInitContents(&listContainer->list);
-        throws(
-            tryFormsAllocate(ctx->pool, &listContainer->list.forms, quoted->list.length, error)); // allocate max it could ever be
-        listContainer->list.forms.numForms = 0;                                           // pretend it is empty
+        formsAllocate(ctx->pool, &listContainer->list.forms, quoted->list.length); // allocate max it could ever be
+        listContainer->list.forms.numForms = 0;                                    // pretend it is empty
       }
 
       if (args[nextArg].type != F_LIST) {
@@ -1113,7 +1049,7 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *err
     form->type = F_ENV_REF;
 
     uint16_t currentTableIndex;
-    throws(tryGetCurrentBindingTableIndex(ctx, &currentTableIndex, error));
+    getCurrentBindingTableIndex(ctx, &currentTableIndex);
 
     if (resolved->tableIndex == currentTableIndex) {
       throws(tryEnvRefAnalyze(ctx, expr, resolved->bindingIndex, &form->envRef, error));
@@ -1154,7 +1090,7 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *err
         binding.source = BS_CAPTURED;
         binding.captured.bindingIndex = resolved->bindingIndex;
 
-        throws(tryAddBinding(ctx->pool, this, binding, error));
+        addBinding(ctx->pool, this, binding);
 
         captured = binding;
       }
@@ -1308,7 +1244,7 @@ RetVal tryHandlerAnalyze(AnalyzerContext *ctx, Expr* expr, FormHandler *handler,
   palloc(ctx->pool, handler->handler, sizeof(Form), "Form");
   throws(tryFormAnalyzeContents(ctx, expr->list.head->next->expr, handler->handler, error));
 
-  throws(tryFormsAllocate(ctx->pool, &handler->forms, expr->list.length - 2, error));
+  formsAllocate(ctx->pool, &handler->forms, expr->list.length - 2);
 
   ListElement *exprElem = expr->list.head->next->next;
   for (int i=0; i<handler->forms.numForms; i++) {
@@ -1498,13 +1434,13 @@ RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, Pool_t pool, Fo
   ctx.pool = pool;
 
   FormRoot *root = NULL;
-  tryPalloc(pool, root, sizeof(FormRoot), "FormRoot");
+  palloc(pool, root, sizeof(FormRoot), "FormRoot");
   rootInitContents(root);
-  throws(tryPushBindingTable(ctx.pool, &ctx.bindingTables, &root->table, error));
+  pushBindingTable(ctx.pool, &ctx.bindingTables, &root->table);
 
   throws(_tryFormAnalyze(&ctx, expr, &root->form, error));
 
-  throws(tryPopBindingTable(&ctx.bindingTables, error));
+  popBindingTable(&ctx.bindingTables);
 
   if (options.hasFileName) {
     root->hasFileName = true;
