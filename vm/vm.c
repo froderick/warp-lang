@@ -2412,7 +2412,7 @@ InstTable instTableCreate() {
       [I_STORE_LOCAL]      = { .name = "I_STORE_LOCAL",     .print = printInstAndIndex,   .eval = storeLocalEval },
       [I_INVOKE_DYN]       = { .name = "I_INVOKE_DYN",      .print = printInstAndIndex,   .eval = invokeDynEval },
       [I_INVOKE_DYN_TAIL]  = { .name = "I_INVOKE_DYN_TAIL", .print = printInstAndIndex,   .eval = invokeDynTailEval },
-      [I_INVOKE_DYN_TAIL_RECURSE]  = { .name = "I_INVOKE_DYN_TAIL_RECURSE", .print = printInst,   .eval = invokeDynTailEvalRecurse},
+      [I_INVOKE_DYN_TAIL_RECURSE]  = { .name = "I_INVOKE_DYN_TAIL_RECURSE", .print = printInstAndIndex,   .eval = invokeDynTailEvalRecurse},
       [I_RET]              = { .name = "I_RET",             .print = printInst,           .eval = retEval },
       [I_CMP]              = { .name = "I_CMP",             .print = printInst,           .eval = cmpEval },
       [I_JMP]              = { .name = "I_JMP",             .print = printInstAndIndex,   .eval = jmpEval },
@@ -4289,6 +4289,12 @@ int byteArrayBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
+int symbolEval(VM *vm, Frame_t frame) {
+  Value a = popOperand(frame);
+  pushOperand(frame, wrapBool(valueType(a) == VT_SYMBOL));
+  return R_SUCCESS;
+}
+
 void initCFns(VM *vm) {
 
   defineCFn(vm, L"cons", 2, false, consEval);
@@ -4324,6 +4330,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"<=", 2, false, lteEval);
   defineCFn(vm, L">", 2, false, gtEval);
   defineCFn(vm, L">=", 2, false, gteEval);
+  defineCFn(vm, L"symbol?", 1, false, symbolEval);
 }
 
 void vmConfigInitContents(VMConfig *config) {

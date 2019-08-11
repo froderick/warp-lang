@@ -305,15 +305,15 @@ RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *e
   uint64_t pos = getExprPosition(letExpr);
   ListElement *next = letExpr->list.head->next;
 
-  if (next != NULL && next->expr->type == N_SYMBOL){
-    Text *text = NULL;
-    palloc(ctx->pool, text, sizeof(Text), "text");
-    text->length = next->expr->symbol.length;
-    text->value = next->expr->symbol.value;
-
-    let->name = text;
-    next = next->next;
-  }
+//  if (next != NULL && next->expr->type == N_SYMBOL){
+//    Text *text = NULL;
+//    palloc(ctx->pool, text, sizeof(Text), "text");
+//    text->length = next->expr->symbol.length;
+//    text->value = next->expr->symbol.value;
+//
+//    let->name = text;
+//    next = next->next;
+//  }
 
   if (next == NULL) {
     throwSyntaxError(error, pos, "the 'let' special form requires at least one parameter");
@@ -321,46 +321,50 @@ RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *e
 
   // sanity checking
   Expr *bindingsExpr = next->expr;
-  if (bindingsExpr->type != N_LIST) {
-    throwSyntaxError(error, pos, "the 'let' special form requires the first parameter to be a list");
-  }
-  if (bindingsExpr->list.length % 2 != 0) {
-    throwSyntaxError(error, pos, "the 'let' special form requires the first parameter to be a list with an even number of arguments");
-  }
-
-  // create the bindings
-  let->numBindings = bindingsExpr->list.length / 2;
-  tryPalloc(ctx->pool, let->bindings, sizeof(LetBinding) * let->numBindings, "LetBinding array");
-
-  // add the bindings to the current binding table
-  // push the bindings on the current binding stack
-
-  // initialize the bindings
-  ListElement *bindingElem = bindingsExpr->list.head;
-  for (int i=0; bindingElem != NULL; i++) {
-
-    if (bindingElem->expr->type != N_SYMBOL) {
-      throwSyntaxError(error, pos, "only symbols can be bound as names");
+  if (bindingsExpr->type != N_NIL) {
+    if (bindingsExpr->type != N_LIST) {
+      throwSyntaxError(error, pos, "the 'let' special form requires the first parameter to be a list");
+    }
+    if (bindingsExpr->list.length % 2 != 0) {
+      throwSyntaxError(error, pos,
+                       "the 'let' special form requires the first parameter to be a list with an even number of arguments");
     }
 
-    LetBinding *b = let->bindings + i;
-    letBindingInitContents(b);
-    throws(tryTextMake(ctx->pool, bindingElem->expr->symbol.value, &b->name, bindingElem->expr->symbol.length, error));
-    b->source = bindingElem->expr->source;
-    throws(_tryFormAnalyze(ctx, bindingElem->next->expr, &b->value, error));
+    // create the bindings
+    let->numBindings = bindingsExpr->list.length / 2;
+    tryPalloc(ctx->pool, let->bindings, sizeof(LetBinding) * let->numBindings, "LetBinding array");
 
-    Binding binding;
-    bindingInitContents(&binding);
-    throws(tryTextCopy(ctx->pool, &b->name, &binding.name, error));
-    binding.source = BS_LOCAL;
-    binding.local.type = BT_LET;
-    binding.local.typeIndex = i;
+    // add the bindings to the current binding table
+    // push the bindings on the current binding stack
 
-    createBinding(ctx, binding, &b->bindingIndex);
+    // initialize the bindings
+    ListElement *bindingElem = bindingsExpr->list.head;
+    for (int i = 0; bindingElem != NULL; i++) {
 
-    bindingElem = bindingElem->next->next;
+      if (bindingElem->expr->type != N_SYMBOL) {
+        throwSyntaxError(error, pos, "only symbols can be bound as names");
+      }
+
+      LetBinding *b = let->bindings + i;
+      letBindingInitContents(b);
+      throws(
+          tryTextMake(ctx->pool, bindingElem->expr->symbol.value, &b->name, bindingElem->expr->symbol.length, error));
+      b->source = bindingElem->expr->source;
+      throws(_tryFormAnalyze(ctx, bindingElem->next->expr, &b->value, error));
+
+      Binding binding;
+      bindingInitContents(&binding);
+      throws(tryTextCopy(ctx->pool, &b->name, &binding.name, error));
+      binding.source = BS_LOCAL;
+      binding.local.type = BT_LET;
+      binding.local.typeIndex = i;
+
+      createBinding(ctx, binding, &b->bindingIndex);
+
+      bindingElem = bindingElem->next->next;
+    }
+    next = next->next;
   }
-  next = next->next;
 
   // create the forms within this lexical scope
   uint64_t numForms = 0;
@@ -1332,7 +1336,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
           break;
         }
 
-        if (wcscmp(sym, L"let") == 0) {
+        if (wcscmp(sym, L"let*") == 0) {
           form->type = F_LET;
           throws(tryLetAnalyze(ctx, expr, &form->let, error));
           break;

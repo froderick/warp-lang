@@ -292,12 +292,12 @@ START_TEST(analyzer) {
     ck_assert_int_eq(root->form->type, F_IF);
 
     // let
-    ck_assert_int_eq(tryParse(pool, L"(let (a nil) true)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryParse(pool, L"(let* (a nil) true)", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
     ck_assert_int_eq(root->form->type, F_LET);
 
     // env-ref
-    ck_assert_int_eq(tryParse(pool, L"(let (a nil) a)", &expr, &e), R_SUCCESS);
+    ck_assert_int_eq(tryParse(pool, L"(let* (a nil) a)", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
     ck_assert_int_eq(root->form->type, F_LET);
     ck_assert_int_eq(root->form->let.forms.forms[0].type, F_ENV_REF);
@@ -441,7 +441,7 @@ START_TEST(compilerBasic) {
 
     // let
     {
-      ck_assert_int_eq(tryTestCompile(L"(let (x 12) x)", &codeUnit, &e), R_SUCCESS);
+      ck_assert_int_eq(tryTestCompile(L"(let* (x 12) x)", &codeUnit, &e), R_SUCCESS);
 
       ck_assert_int_eq(codeUnit.numConstants, 1);
       ck_assert_int_eq(codeUnit.constants[0].type, CT_INT);
@@ -468,8 +468,8 @@ START_TEST(compilerBasic) {
 
     // let (nested)
     {
-      ck_assert_int_eq(tryTestCompile(L"(let (x 12 "
-                                       "      y (let (z 100) z)) "
+      ck_assert_int_eq(tryTestCompile(L"(let* (x 12 "
+                                       "      y (let* (z 100) z)) "
                                        "  y)", &codeUnit, &e), R_SUCCESS);
 
       ck_assert_int_eq(codeUnit.numConstants, 2);
@@ -503,7 +503,7 @@ START_TEST(compilerBasic) {
 
     // let fn and call
     {
-      ck_assert_int_eq(tryTestCompile(L"(let (x (fn (y) (builtin :add y 50)))"
+      ck_assert_int_eq(tryTestCompile(L"(let* (x (fn (y) (builtin :add y 50)))"
                                        "  (x 100))", &codeUnit, &e), R_SUCCESS);
 
       //printCodeUnit(&codeUnit);
@@ -536,7 +536,7 @@ START_TEST(compilerBasic) {
 
     // define, var-ref
     {
-      ck_assert_int_eq(tryTestCompile(L"(let ()"
+      ck_assert_int_eq(tryTestCompile(L"(let* ()"
                                        "  (def x 100)"
                                        "  (builtin :add x 50))", &codeUnit, &e), R_SUCCESS);
 
@@ -878,6 +878,17 @@ START_TEST(repl)
     assertEval(L"(<= 10 20)", L"true");
     assertEval(L"(<= 20 10)", L"false");
     assertEval(L"(<= 20 20)", L"true");
+
+    assertEval(L"(map inc '(1 2 3))", L"(2 3 4)");
+
+    assertEval(L"(split '(a b c d))", L"((a c) (b d))");
+    assertEval(L"(partition '(a b c d))", L"((a b) (c d))");
+
+    assertEval(L"(let loop (y 0)"
+               "   (if (= y 5)"
+               "     :done"
+               "     (loop (inc y))))",
+               L":done");
   }
 END_TEST
 
@@ -903,7 +914,7 @@ END_TEST
 START_TEST(gc) {
 
     // this was failing because of stupid memory errors
-    assertEvalNoStd(L"(let () "
+    assertEvalNoStd(L"(let* () "
                     "   (def x (fn () \"hi\"))"
                     "   (gc)"
                     "   (gc))", L"nil");

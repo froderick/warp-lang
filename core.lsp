@@ -19,29 +19,29 @@
                (drop (dec i) (rest seq)))))
 
 (def reverse (fn reverse (seq)
-                 (let (_reverse (fn _reverse (old new)
+                 (let* (_reverse (fn _reverse (old new)
                                     (if (nil? old)
                                         new
-                                      (let (n (first old)
+                                      (let* (n (first old)
                                               old (rest old))
                                         (_reverse old (cons n new))))))
                    (_reverse seq nil))))
 
 (def concat (fn concat (& seqs)
-              (let (concat-two (fn concat-two (seq-a seq-b)
+              (let* (concat-two (fn concat-two (seq-a seq-b)
                                  (if (nil? seq-a)
                                    seq-b
                                    (concat-two (rest seq-a) (cons (first seq-a) seq-b))))
                     concat-n (fn concat-n (concated remaining)
                                (if (nil? remaining)
                                  concated
-                                 (let (next (first remaining)
+                                 (let* (next (first remaining)
                                        todo (rest remaining))
                                    (concat-n (concat-two (reverse concated) next) todo)))))
                 (concat-n '() seqs))))
 
 (def str (fn str (& args)
-           (let (_str (fn _str (strings remaining)
+           (let* (_str (fn _str (strings remaining)
                         (if (empty? remaining)
                           (join (reverse strings))
                           (_str (cons (to-string (first remaining)) strings)
@@ -51,14 +51,14 @@
 (def gensym-state 0)
 
 (def gensym (fn gensym ()
-              (let (n gensym-state
+              (let* (n gensym-state
                     _ (def gensym-state (inc n)))
                 (symbol (str "gensym-" n)))))
 
 ; TODO: add auto-gensym support with macro-syntax for generating bindings with it to avoid lexical capture
 ; https://www.braveclojure.com/writing-macros/
 (def defmacro (fn defmacro (name fnargs & forms)
-                `(let '()
+                `(let* '()
                    (def ~name (fn ~name ~fnargs ~@forms))
                    (set-macro (quote ~name)))))
 (set-macro 'defmacro)
@@ -76,13 +76,13 @@
 (defmacro and (& seq)
   (if (empty? seq)
     true
-    (let (n (first seq)
+    (let* (n (first seq)
           seq (rest seq)
           sym (gensym))
       (if (empty? seq)
-        `(let (~sym ~n)
+        `(let* (~sym ~n)
            (if ~sym true false))
-        `(let (~sym ~n)
+        `(let* (~sym ~n)
            (if ~sym
              (and ~@seq)
              false))))))
@@ -90,12 +90,12 @@
 (defmacro or (& seq)
   (if (empty? seq)
     nil
-    (let (n (first seq)
+    (let* (n (first seq)
           seq (rest seq)
           sym (gensym))
       (if (empty? seq)
-        `(let (~sym ~n) ~sym))
-        `(let (~sym ~n)
+        `(let* (~sym ~n) ~sym))
+        `(let* (~sym ~n)
            (if ~sym
              ~sym
              (or ~@seq))))))
@@ -103,7 +103,7 @@
 (defmacro list (& seq)
   (if (empty? seq)
     nil
-    (let (n (first seq)
+    (let* (n (first seq)
           seq (rest seq))
       (if (empty? seq)
         `(cons ~n nil)
@@ -113,14 +113,14 @@
   (if a false true))
 
 (defn list? (x)
-  (let (t (get-type x))
+  (let* (t (get-type x))
     (or (eq t 0) (eq t 7))))
 
 (defmacro -> (x & exprs)
-  (let (->helper (fn ->helper (x exprs)
+  (let* (->helper (fn ->helper (x exprs)
                    (if (nil? exprs)
                      x
-                     (let (expr (first exprs)
+                     (let* (expr (first exprs)
                            val (if (list? expr)
                                  `(~(first expr) ~x ~@(rest expr))
                                  (list expr x)))
@@ -128,7 +128,7 @@
   (->helper x exprs)))
 
 (defn take (n coll)
-  (let (_take (fn _take (accum n coll)
+  (let* (_take (fn _take (accum n coll)
                  (if (or (zero? n) (nil? coll))
                    (reverse accum)
                    (_take (cons (first coll) accum)
@@ -137,7 +137,7 @@
     (_take nil n coll)))
 
 ;; (defn count (seq)
-;;   (let (_count (fn _count (i remaining)
+;;   (let* (_count (fn _count (i remaining)
 ;;                  (if (empty? remaining)
 ;;                    i
 ;;                    (_count (inc i) (rest remaining)))))
@@ -148,7 +148,7 @@
 (defmacro cond (& seq)
   (if (empty? seq)
     nil
-    (let (test (first seq)
+    (let* (test (first seq)
           expr (second seq)
           seq (drop 2 seq))
       `(if ~test
@@ -157,7 +157,7 @@
 
 (defn = (x y)
   (if (and (list? x) (list? y))
-    (let (_equal-all (fn _equal-all (x y)
+    (let* (_equal-all (fn _equal-all (x y)
                        (cond
                          (and (empty? x) (empty? y)) true
                          (and (empty? x)) false
@@ -170,23 +170,23 @@
 ;; todo: print-bytecode for vars and for arbitrary expressions, deref vars / @, macroexpand
 
 (defmacro do (& forms)
-  `(let '() ~@forms))
+  `(let* '() ~@forms))
 
 (defn last (x)
-  (let (remainder (rest x))
+  (let* (remainder (rest x))
     (if (nil? remainder)
       (first x)
       (last (rest x)))))
 
 (defn butlast (x)
-  (let (n (count x))
+  (let* (n (count x))
     (cond
       (zero? n) n
       (= 1 n) '()
       :else (take (dec n) x))))
 
 (defmacro try (& forms)
-  (let (catch (last forms))
+  (let* (catch (last forms))
 
     (if (not (= (first catch) 'catch))
       (throw "the last form in a try must be a catch"))
@@ -194,7 +194,7 @@
     (if (zero? (count (rest catch)))
       (throw "a catch clause must include the name of the exception binding"))
 
-    (let (e-binding (nth 1 catch)
+    (let* (e-binding (nth 1 catch)
           catch-forms (drop 2 catch))
       `(with-handler (fn (~e-binding) ~@catch-forms)
          ~@(butlast forms)))))
@@ -204,14 +204,14 @@
 ;;
 
 (defn fib (n)
-  (let (_fib (fn _fib (prev1 prev2 n)
+  (let* (_fib (fn _fib (prev1 prev2 n)
                  (if (= n 0)
                      prev2
                    (_fib prev2 (+ prev1 prev2) (- n 1)))))
     (_fib 0 1 n)))
 
 (defn large (n)
-  (let (_large (fn _large (n seq)
+  (let* (_large (fn _large (n seq)
                   (if (zero? n)
                     seq
                     (_large (dec n) (cons n seq)))))
@@ -220,6 +220,39 @@
 (defn example ()
   (and (+ 1 2) (+ 3 'x)))
 
+(defn map (f coll)
+  (let* (_map (fn _map (old new)
+                 (if (empty? old)
+                     new
+                     (_map (rest old) (cons (f (first old)) new)))))
 
+    (reverse (_map coll (list)))))
 
+(defn split (coll)
+  (let* (_split (fn _split (old coll-a coll-b)
+                  (cond
+                    (empty? old) (list (reverse coll-a) (reverse coll-b))
+                    (= (count old) 1) (throw "requires a list with an even number of items")
+                    :else (_split (drop 2 old) (cons (first old) coll-a) (cons (second old) coll-b)))))
+    (_split coll '() '())))
+
+(defn partition (coll)
+  (let* (_partition (fn _partition (old new)
+                      (cond
+                        (empty? old) (reverse new)
+                        (= (count old) 1) (throw "requires a list with an even number of items")
+                        :else (_partition (drop 2 old) (cons (list (first old) (second old)) new)))))
+    (_partition coll '())))
+
+(defmacro let (& forms)
+  (if (symbol? (first forms))
+    (let* (fn-name (first forms)
+           bindings (second forms)
+           forms (rest forms)
+           arg-parts (partition bindings)
+           arg-names (map first arg-parts)
+           arg-values (map second arg-parts))
+      `(let* (~fn-name (fn ~fn-name ~arg-names ~@(rest forms)))
+         (~fn-name ~@arg-values)))
+      `(let* ~@forms)))
 
