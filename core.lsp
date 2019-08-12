@@ -116,55 +116,65 @@
   (let* (t (get-type x))
     (or (eq t 0) (eq t 7))))
 
-(defmacro -> (x & exprs)
-  (let* (->helper (fn ->helper (x exprs)
-                   (if (nil? exprs)
-                     x
-                     (let* (expr (first exprs)
-                           val (if (list? expr)
-                                 `(~(first expr) ~x ~@(rest expr))
-                                 (list expr x)))
-                       (->helper val (rest exprs))))))
-  (->helper x exprs)))
-
-(defn take (n coll)
-  (let* (_take (fn _take (accum n coll)
-                 (if (or (zero? n) (nil? coll))
-                   (reverse accum)
-                   (_take (cons (first coll) accum)
-                          (dec n)
-                          (rest coll)))))
-    (_take nil n coll)))
-
-;; (defn count (seq)
-;;   (let* (_count (fn _count (i remaining)
-;;                  (if (empty? remaining)
-;;                    i
-;;                    (_count (inc i) (rest remaining)))))
-;;     (_count 0 seq)))
-
-
 ;; todo: throw exceptions on invalid input
 (defmacro cond (& seq)
   (if (empty? seq)
     nil
     (let* (test (first seq)
-          expr (second seq)
-          seq (drop 2 seq))
+           expr (second seq)
+           seq (drop 2 seq))
       `(if ~test
          ~expr
          (cond ~@seq)))))
 
+(defn map (f coll)
+  (let* (_map (fn _map (old new)
+                 (if (empty? old)
+                     new
+                     (_map (rest old) (cons (f (first old)) new)))))
+
+    (reverse (_map coll (list)))))
+
+(defn partition (coll)
+  (let* (_partition (fn _partition (old new)
+                      (cond
+                        (empty? old) (reverse new)
+                        (eq (count old) 1) (throw "requires a list with an even number of items")
+                        :else (_partition (drop 2 old) (cons (list (first old) (second old)) new)))))
+    (_partition coll '())))
+
+(defmacro let (& forms)
+  (if (symbol? (first forms))
+    (let* (fn-name (first forms)
+           bindings (second forms)
+           forms (rest forms)
+           arg-parts (partition bindings)
+           arg-names (map first arg-parts)
+           arg-values (map second arg-parts))
+      `(let* (~fn-name (fn ~fn-name ~arg-names ~@(rest forms)))
+         (~fn-name ~@arg-values)))
+      `(let* ~@forms)))
+
+(defmacro -> (x & exprs)
+  (let loop (x x
+             exprs exprs)
+    (if (nil? exprs)
+      x
+      (let* (expr (first exprs)
+            val (if (list? expr)
+                  `(~(first expr) ~x ~@(rest expr))
+                  (list expr x)))
+        (loop val (rest exprs))))))
+
 (defn = (x y)
   (if (and (list? x) (list? y))
-    (let* (_equal-all (fn _equal-all (x y)
-                       (cond
-                         (and (empty? x) (empty? y)) true
-                         (and (empty? x)) false
-                         (and (empty? y)) false
-                         (not (= (first x) (first y))) false
-                         :else (_equal-all (rest x) (rest y)))))
-      (_equal-all x y))
+    (let loop (x* x y* y)
+      (cond
+        (and (empty? x*) (empty? y*)) true
+        (and (empty? x*)) false
+        (and (empty? y*)) false
+        (not (= (first x*) (first y*))) false
+        :else (loop (rest x*) (rest y*))))
     (eq x y)))
 
 ;; todo: print-bytecode for vars and for arbitrary expressions, deref vars / @, macroexpand
@@ -178,11 +188,21 @@
       (first x)
       (last (rest x)))))
 
+(defn take (n coll)
+  (let loop (accum nil
+        n n
+        coll coll)
+    (if (or (zero? n) (nil? coll))
+      (reverse accum)
+      (loop (cons (first coll) accum)
+            (dec n)
+            (rest coll)))))
+
 (defn butlast (x)
-  (let* (n (count x))
+  (let (n (count x))
     (cond
       (zero? n) n
-      (= 1 n) '()
+      (eq 1 n) '()
       :else (take (dec n) x))))
 
 (defmacro try (& forms)
@@ -210,6 +230,14 @@
                    (_fib prev2 (+ prev1 prev2) (- n 1)))))
     (_fib 0 1 n)))
 
+(defn fib2 (start)
+  (let loop (prev1 0
+             prev2 1
+             n start)
+    (if (= n 0)
+      prev2
+      (loop prev2 (+ prev1 prev2) (- n 1)))))
+
 (defn large (n)
   (let* (_large (fn _large (n seq)
                   (if (zero? n)
@@ -220,39 +248,21 @@
 (defn example ()
   (and (+ 1 2) (+ 3 'x)))
 
-(defn map (f coll)
-  (let* (_map (fn _map (old new)
-                 (if (empty? old)
-                     new
-                     (_map (rest old) (cons (f (first old)) new)))))
-
-    (reverse (_map coll (list)))))
-
 (defn split (coll)
-  (let* (_split (fn _split (old coll-a coll-b)
-                  (cond
-                    (empty? old) (list (reverse coll-a) (reverse coll-b))
-                    (= (count old) 1) (throw "requires a list with an even number of items")
-                    :else (_split (drop 2 old) (cons (first old) coll-a) (cons (second old) coll-b)))))
-    (_split coll '() '())))
+  (let loop (old coll
+             coll-a '()
+             coll-b '())
+    (cond
+      (empty? old) (list (reverse coll-a) (reverse coll-b))
+      (= (count old) 1) (throw "requires a list with an even number of items")
+      :else (loop
+              (drop 2 old)
+              (cons (first old) coll-a)
+              (cons (second old) coll-b)))))
 
-(defn partition (coll)
-  (let* (_partition (fn _partition (old new)
-                      (cond
-                        (empty? old) (reverse new)
-                        (= (count old) 1) (throw "requires a list with an even number of items")
-                        :else (_partition (drop 2 old) (cons (list (first old) (second old)) new)))))
-    (_partition coll '())))
-
-(defmacro let (& forms)
-  (if (symbol? (first forms))
-    (let* (fn-name (first forms)
-           bindings (second forms)
-           forms (rest forms)
-           arg-parts (partition bindings)
-           arg-names (map first arg-parts)
-           arg-values (map second arg-parts))
-      `(let* (~fn-name (fn ~fn-name ~arg-names ~@(rest forms)))
-         (~fn-name ~@arg-values)))
-      `(let* ~@forms)))
-
+;; (defn count (seq)
+;;   (let* (_count (fn _count (i remaining)
+;;                  (if (empty? remaining)
+;;                    i
+;;                    (_count (inc i) (rest remaining)))))
+;;     (_count 0 seq)))
