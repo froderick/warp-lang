@@ -3949,6 +3949,18 @@ int hashMapBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
+int listBuiltin(VM *vm, Frame_t frame) {
+
+  Value params = popOperand(frame);
+  if (!isSeq(params)) {
+    raise(vm, "expected a list: %s", getValueTypeName(vm, valueType(params)));
+    return R_ERROR;
+  }
+
+  pushOperand(frame, params);
+  return R_SUCCESS;
+}
+
 int vectorBuiltin(VM *vm, Frame_t frame) {
 
   Value params = popOperand(frame);
@@ -4315,6 +4327,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"get", 2, false, getBuiltin);
   defineCFn(vm, L"set", 3, false, setBuiltin);
   defineCFn(vm, L"hash-map", 1, true, hashMapBuiltin);
+  defineCFn(vm, L"list", 1, true, listBuiltin);
   defineCFn(vm, L"vector", 1, true, vectorBuiltin);
   defineCFn(vm, L"record", 2, false, recordBuiltin);
   defineCFn(vm, L"to-string", 1, false, toStringBuiltin);

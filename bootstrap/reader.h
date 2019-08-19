@@ -103,7 +103,6 @@ void exprInitContents(Expr *expr);
 
 RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Expr **expr, Error *error);
 
-RetVal tryExprDeepCopy(Pool_t pool, Expr *from, Expr **ptr, Error *error);
 
 RetVal tryExprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable, Error *error);
 RetVal tryExprPrnBuf(Expr *expr, StringBuffer_t b, Error *error);
@@ -118,5 +117,14 @@ RetVal tryVecAppend(Pool_t pool, ExprVec *list, Expr *expr, Error *error);
 
 void mapInitContents(ExprMap *map);
 RetVal tryMapPut(Pool_t pool, ExprMap *map, Expr *key, Expr *value, Error *error);
+
+RetVal tryStringMake(Pool_t pool, wchar_t *input, uint64_t length, Expr **ptr, Error *error);
+RetVal tryNumberMake(Pool_t pool, uint64_t value, Expr **ptr, Error *error);
+RetVal tryCharMake(Pool_t pool, wchar_t value, Expr **ptr, Error *error);
+RetVal trySymbolMake(Pool_t pool, wchar_t *name, uint64_t len, Expr **ptr, Error *error);
+RetVal tryKeywordMake(Pool_t pool, wchar_t *name, uint64_t len, Expr **ptr, Error *error);
+RetVal tryBooleanMake(Pool_t pool, bool value, Expr **ptr, Error *error);
+RetVal tryNilMake(Pool_t pool, Expr **ptr, Error *error);
+RetVal tryListMake(Pool_t pool, Expr **ptr, Error *error);
 
 #endif //WARP_LANG_READER_H

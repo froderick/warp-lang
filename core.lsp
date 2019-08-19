@@ -100,14 +100,14 @@
              ~sym
              (or ~@seq))))))
 
-(defmacro list (& seq)
-  (if (empty? seq)
-    nil
-    (let* (n (first seq)
-          seq (rest seq))
-      (if (empty? seq)
-        `(cons ~n nil)
-        `(cons ~n (list ~@seq))))))
+;;(defmacro list (& seq)
+;;  (if (empty? seq)
+;;    nil
+;;    (let* (n (first seq)
+;;          seq (rest seq))
+;;      (if (empty? seq)
+;;        `(cons ~n nil)
+;;        `(cons ~n (list ~@seq))))))
 
 (defn not (a)
   (if a false true))

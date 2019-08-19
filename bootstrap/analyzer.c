@@ -37,6 +37,8 @@ typedef struct AnalyzerContext {
   AnalyzeOptions options;
   BindingTables bindingTables;
   ResolverStack resolverStack;
+  bool inQuote;
+  bool inSyntaxQuote;
 } AnalyzerContext;
 
 void formInitContents(Form *form) {
@@ -304,16 +306,6 @@ RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *e
   letInitContents(let);
   uint64_t pos = getExprPosition(letExpr);
   ListElement *next = letExpr->list.head->next;
-
-//  if (next != NULL && next->expr->type == N_SYMBOL){
-//    Text *text = NULL;
-//    palloc(ctx->pool, text, sizeof(Text), "text");
-//    text->length = next->expr->symbol.length;
-//    text->value = next->expr->symbol.value;
-//
-//    let->name = text;
-//    next = next->next;
-//  }
 
   if (next == NULL) {
     throwSyntaxError(error, pos, "the 'let' special form requires at least one parameter");
@@ -823,18 +815,7 @@ RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Expr *expr, FormFnCall *fnCall, Er
     return ret;
 }
 
-RetVal tryConstantAnalyze(Pool_t pool, Expr* expr, Expr **constant, Error *error) {
-
-  RetVal ret;
-
-  throws(tryExprDeepCopy(pool, expr, constant, error));
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
-RetVal tryQuoteAnalyze(Pool_t pool, Expr* expr, Expr **constant, Error *error) {
+RetVal tryQuoteAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *error) {
 
   RetVal ret;
 
@@ -843,14 +824,15 @@ RetVal tryQuoteAnalyze(Pool_t pool, Expr* expr, Expr **constant, Error *error) {
                      expr->list.length - 1);
   }
 
-  throws(tryConstantAnalyze(pool, expr->list.head->next->expr, constant, error));
-  return R_SUCCESS;
+  bool lastInQuote = ctx->inQuote;
+  ctx->inQuote = true;
+  throws(tryFormAnalyzeContents(ctx, expr->list.head->next->expr, form, error));
+  ctx->inQuote = lastInQuote;
 
+  return R_SUCCESS;
   failure:
     return ret;
 }
-
-RetVal _trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form, Error *error);
 
 bool isSplicingUnquote(Expr *elem) {
   return
@@ -859,7 +841,6 @@ bool isSplicingUnquote(Expr *elem) {
       && elem->list.head->expr->type == N_SYMBOL
       && wcscmp(elem->list.head->expr->symbol.value, L"splicing-unquote") == 0;
 }
-
 
 uint16_t numSyntaxQuotedListArgs(Expr *quoted) {
 
@@ -891,41 +872,7 @@ uint16_t numSyntaxQuotedListArgs(Expr *quoted) {
   return numArgs;
 }
 
-// figure out how many arguments we'll have to concat
-// allocate those arguments
-//
-// make a counter indicating the 'next' element in the quoted list
-// iterate over the arguments we'll have to concat
-// - look at the 'next' element
-//   - if it is splicing-quoted
-//     - if the argument is initialized, move to the next argument
-//     - initialize the argument, analyzing the splicing-uquoted value as normal
-//     - move to the next argument
-//   - else
-//     - initialize the argument as a list if it isn't already initialized as one. if it is not a list or
-//       empty, explode
-//     - analyze the element as quoted and add it to the list argument
-
-/*
- * if I made concat a macro, supporting var-args, this would probably work in the repl, but not the tests:
- * `(1 2 ~(builtin :add 3 1))
- *
- * figure out how we're going to support this concat functionality, and finish testing this feature
- *
- * perhaps supporting var-args is easier than dealing with meta macros
- * X lexer emits & as its own symbol
- * X analyzer check for ampersand in arg list for fn definition
- *   - must come immediately before last argument, or error
- *   - mark var-arg with flag in form
- * X compiler must emit fn code with var-arg flag
- * - vm honors var-arg flag
- *   - sees var-arg flag on invocable
- *   - pops all static arguments into local slot
- *   - pops number indicating number of extra arguments
- *   - pops number of extra arguments into a list, sets as final argument in local slot
- */
-
-RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form, Error *error) {
+RetVal trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr *quoted, Form *form, Error *error) {
   RetVal ret;
 
   uint16_t numArgs = numSyntaxQuotedListArgs(quoted);
@@ -962,7 +909,10 @@ RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form
       if (argInitialized) {
         nextArg++;
       }
+      bool last = ctx->inSyntaxQuote;
+      ctx->inSyntaxQuote = false;
       throws(tryFormAnalyzeContents(ctx, elemExpr->list.head->next->expr, &args[nextArg], error));
+      ctx->inSyntaxQuote = last;
       nextArg++;
     } else {
 
@@ -980,7 +930,7 @@ RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form
       }
 
       uint16_t index = listContainer->list.forms.numForms;
-      throws(_trySyntaxQuoteAnalyze(ctx, elemExpr, &listContainer->list.forms.forms[index], error));
+      throws(tryFormAnalyzeContents(ctx, elemExpr, &listContainer->list.forms.forms[index], error));
       listContainer->list.forms.numForms++;
 
     }
@@ -994,68 +944,21 @@ RetVal _trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form
     return ret;
 }
 
-RetVal _trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* quoted, Form *form, Error *error) {
-  RetVal ret;
-
-  switch (quoted->type) {
-
-    case N_STRING:
-    case N_NUMBER:
-    case N_KEYWORD:
-    case N_BOOLEAN:
-    case N_NIL:
-      form->type = F_CONST;
-      throws(tryConstantAnalyze(ctx->pool, quoted, &form->constant, error));
-      break;
-
-    case N_SYMBOL:
-      form->type = F_CONST;
-      // TODO: this should namespace the symbol, but for that we'd have to know what the current namespace is
-      throws(tryConstantAnalyze(ctx->pool, quoted, &form->constant, error));
-      break;
-
-    case N_LIST: {
-
-      bool unquoted =
-          quoted->list.length > 0
-          && quoted->list.head->expr->type == N_SYMBOL
-          && wcscmp(quoted->list.head->expr->symbol.value, L"unquote") == 0;
-
-      if (unquoted) {
-        if (quoted->list.length != 2) {
-          throwSyntaxError(error, quoted->source.position, "unquote takes 1 argument");
-        }
-        throws(tryFormAnalyzeContents(ctx, quoted->list.head->next->expr, form, error));
-      }
-      else {
-        _trySyntaxQuoteListAnalyze(ctx, quoted, form, error);
-      }
-
-      break;
-    }
-
-    default:
-    throwSyntaxError(error, quoted->source.position, "unsupported expr type: %u", quoted->type);
-  }
-
-  done:
-    return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
 RetVal trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *error) {
   RetVal ret;
 
   if (expr->list.length != 2) {
-    throwSyntaxError(error, expr->source.position, "wrong number of args passed to syntax-quote (%" PRIu64 " instead of 1)",
-                     expr->list.length - 1);
+    throwSyntaxError(error, expr->source.position, "wrong number of args passed to syntax-quote (%" PRIu64
+                     " instead of 1)", expr->list.length - 1);
   }
 
-  Expr *quoted = expr->list.head->next->expr;
+  bool lastValue = ctx->inSyntaxQuote;
+  ctx->inSyntaxQuote = true;
 
-  throws(_trySyntaxQuoteAnalyze(ctx, quoted, form, error));
+  Expr *quoted = expr->list.head->next->expr;
+  throws(tryFormAnalyzeContents(ctx, quoted, form, error));
+
+  ctx->inSyntaxQuote = lastValue;
 
   return R_SUCCESS;
 
@@ -1161,6 +1064,48 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *err
   return ret;
 }
 
+RetVal tryListAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error) {
+  RetVal ret;
+
+  if (expr->type != N_LIST) {
+    explode("not a list");
+  }
+
+  Form *fnCallable = NULL;
+  {
+    wchar_t hashMap[] = L"list";
+    palloc(ctx->pool, fnCallable, sizeof(Form), "list callable");
+    formInitContents(fnCallable);
+    fnCallable->type = F_VAR_REF;
+    throws(tryTextMake(ctx->pool, hashMap, &fnCallable->varRef.name, wcslen(hashMap), error));
+  }
+
+  Forms args;
+  formsInitContents(&args);
+  args.numForms = expr->list.length;
+  palloc(ctx->pool, args.forms, sizeof(Form) * args.numForms, "Form array");
+
+  ListElement *argExpr = expr->list.head;
+  for (int i=0; argExpr != NULL; i++) {
+
+    Form *arg = args.forms + i;
+    formInitContents(arg);
+    throws(tryFormAnalyzeContents(ctx, argExpr->expr, arg, error));
+
+    argExpr = argExpr->next;
+  }
+
+  form->type = F_FN_CALL;
+  fnCallInitContents(&form->fnCall);
+  form->fnCall.fnCallable = fnCallable;
+  form->fnCall.args = args;
+
+  return R_SUCCESS;
+
+  failure:
+  return ret;
+}
+
 RetVal tryVecAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error) {
   RetVal ret;
 
@@ -1182,7 +1127,7 @@ RetVal tryVecAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error)
   args.numForms = expr->vec.length;
   tryPalloc(ctx->pool, args.forms, sizeof(Form) * args.numForms, "Form array");
 
-  ListElement *argExpr = expr->list.head;
+  ListElement *argExpr = expr->vec.head;
   for (int i=0; argExpr != NULL; i++) {
 
     Form *arg = args.forms + i;
@@ -1290,17 +1235,31 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
 
   switch (expr->type) {
 
-    // constants
+    // always-constants
     case N_STRING:
-    case N_NUMBER:
-    case N_CHAR:
-    case N_KEYWORD:
-    case N_BOOLEAN:
-    case N_NIL: {
       form->type = F_CONST;
-      throws(tryConstantAnalyze(ctx->pool, expr, &form->constant, error));
+      throws(tryStringMake(ctx->pool, expr->string.value, expr->string.length, &form->constant, error));
       break;
-    }
+    case N_NUMBER:
+      form->type = F_CONST;
+      throws(tryNumberMake(ctx->pool, expr->number.value, &form->constant, error));
+      break;
+    case N_CHAR:
+      form->type = F_CONST;
+      throws(tryCharMake(ctx->pool, expr->chr.value, &form->constant, error));
+      break;
+    case N_KEYWORD:
+      form->type = F_CONST;
+      throws(tryKeywordMake(ctx->pool, expr->keyword.value, expr->keyword.length, &form->constant, error));
+      break;
+    case N_BOOLEAN:
+      form->type = F_CONST;
+      throws(tryBooleanMake(ctx->pool, expr->boolean.value, &form->constant, error));
+      break;
+    case N_NIL:
+      form->type = F_CONST;
+      throws(tryNilMake(ctx->pool, &form->constant, error));
+      break;
 
     case N_VEC: {
       throws(tryVecAnalyze(ctx, expr, form, error));
@@ -1313,16 +1272,50 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
     }
 
     case N_SYMBOL: {
-      throws(trySymbolAnalyze(ctx, expr, form, error));
+      if (ctx->inQuote) {
+        form->type = F_CONST;
+        // TODO: this should namespace the symbol, but for that we'd have to know what the current namespace is
+        throws(trySymbolMake(ctx->pool, expr->symbol.value, expr->symbol.length, &form->constant, error));
+      }
+      else if (ctx->inSyntaxQuote) {
+        form->type = F_CONST;
+        // TODO: this should namespace the symbol, but for that we'd have to know what the current namespace is
+        throws(trySymbolMake(ctx->pool, expr->symbol.value, expr->symbol.length, &form->constant, error));
+      }
+      else {
+        throws(trySymbolAnalyze(ctx, expr, form, error));
+      }
       break;
     }
 
     case N_LIST: {
 
-      // empty list
-      if (expr->list.length == 0) {
-        form->type = F_CONST;
-        throws(tryConstantAnalyze(ctx->pool, expr, &form->constant, error));
+      if (expr->list.length == 0 || ctx->inQuote) {
+        throws(tryListAnalyze(ctx, expr, form, error));
+        break;
+      }
+
+      if (ctx->inSyntaxQuote) {
+        Expr *quoted = expr;
+
+        bool unquoted =
+            quoted->list.length > 0
+            && quoted->list.head->expr->type == N_SYMBOL
+            && wcscmp(quoted->list.head->expr->symbol.value, L"unquote") == 0;
+
+        if (unquoted) {
+          if (quoted->list.length != 2) {
+            throwSyntaxError(error, quoted->source.position, "unquote takes 1 argument");
+          }
+          bool last = ctx->inSyntaxQuote;
+          ctx->inSyntaxQuote = false;
+          throws(tryFormAnalyzeContents(ctx, quoted->list.head->next->expr, form, error));
+          ctx->inSyntaxQuote = last;
+        }
+        else {
+          trySyntaxQuoteListAnalyze(ctx, quoted, form, error);
+        }
+
         break;
       }
 
@@ -1356,7 +1349,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
 
         if (wcscmp(sym, L"quote") == 0) {
           form->type = F_CONST;
-          throws(tryQuoteAnalyze(ctx->pool, expr, &form->constant, error));
+          throws(tryQuoteAnalyze(ctx, expr, form, error));
           form->source = form->constant->source;
           break;
         }
@@ -1440,6 +1433,8 @@ void analyzerContextInitContents(AnalyzerContext *ctx) {
   bindingTablesInitContents(&ctx->bindingTables);
   resolverStackInitContents(&ctx->resolverStack);
   analyzeOptionsInitContents(&ctx->options);
+  ctx->inQuote = false;
+  ctx->inSyntaxQuote = false;
 }
 
 void analyzeOptionsInitContents(AnalyzeOptions *options) {

@@ -937,7 +937,7 @@ Suite * suite(void) {
   tcase_add_test(tc_core, gc);
 
   if (config.gcOnAlloc) {
-    tcase_set_timeout(tc_core, 20);
+    tcase_set_timeout(tc_core, 30);
   }
 
   Suite *s = suite_create("lexer");
