@@ -4,7 +4,7 @@
 #include "ast.h"
 #include "../vm/vm.h"
 
-Expr* printToReader(VM_t vm, Pool_t pool, Value result);
+Form* printToReader(VM_t vm, Pool_t pool, Value result);
 
 void print(VM_t vm, Value result);
 

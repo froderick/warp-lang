@@ -148,7 +148,7 @@ START_TEST(parser) {
     errorInitContents(&e);
     InputStream_t source;
     TokenStream_t stream;
-    Expr *expr;
+    Form *expr;
     Pool_t pool = NULL;
 
     ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
@@ -158,7 +158,7 @@ START_TEST(parser) {
 
     // string
     ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
-    ck_assert(expr->type == N_STRING);
+    ck_assert(expr->type == F_STRING);
     ck_assert(wcscmp(expr->string.value, L"str") == 0);
     ck_assert_int_eq(expr->string.length, 3);
     ck_assert_int_eq(expr->source.lineNumber, 1);
@@ -166,14 +166,14 @@ START_TEST(parser) {
 
     // number
     ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
-    ck_assert(expr->type == N_NUMBER);
+    ck_assert(expr->type == F_NUMBER);
     ck_assert_int_eq(expr->number.value, 102);
     ck_assert_int_eq(expr->source.lineNumber, 1);
     ck_assert_int_eq(expr->source.colNumber, 6);
 
     // symbol
     ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
-    ck_assert(expr->type == N_SYMBOL);
+    ck_assert(expr->type == F_SYMBOL);
     ck_assert(wcscmp(expr->symbol.value, L"himom") == 0);
     ck_assert_int_eq(expr->symbol.length, 5);
     ck_assert_int_eq(expr->source.lineNumber, 2);
@@ -181,45 +181,45 @@ START_TEST(parser) {
 
     // keyword
     ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
-    ck_assert(expr->type == N_KEYWORD);
+    ck_assert(expr->type == F_KEYWORD);
     ck_assert(wcscmp(expr->keyword.value, L"rocks") == 0);
     ck_assert_int_eq(expr->keyword.length, 5);
 
     // boolean
     ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
-    ck_assert(expr->type == N_BOOLEAN);
+    ck_assert(expr->type == F_BOOLEAN);
     ck_assert(expr->boolean.value == true);
 
     // nil
     ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
-    ck_assert(expr->type == N_NIL);
+    ck_assert(expr->type == F_NIL);
 
     // list
     ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
-    ck_assert(expr->type == N_LIST);
+    ck_assert(expr->type == F_LIST);
     ck_assert(expr->list.length == 2);
     // first element
-    ck_assert(expr->list.head->expr->type == N_BOOLEAN);
+    ck_assert(expr->list.head->expr->type == F_BOOLEAN);
     ck_assert(expr->list.head->expr->boolean.value == true);
     // second element
-    ck_assert(expr->list.head->next->expr->type == N_BOOLEAN);
+    ck_assert(expr->list.head->next->expr->type == F_BOOLEAN);
     ck_assert(expr->list.head->next->expr->boolean.value == false);
     // verify second element is tail
     ck_assert(expr->list.tail == expr->list.head->next);
 
     // quote (reader macro)
     ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
-    ck_assert(expr->type == N_LIST);
+    ck_assert(expr->type == F_LIST);
     ck_assert(expr->list.length == 2);
     // first element
-    ck_assert(expr->list.head->expr->type == N_SYMBOL);
+    ck_assert(expr->list.head->expr->type == F_SYMBOL);
     ck_assert(wcscmp(expr->list.head->expr->symbol.value, L"quote") == 0);
     // second element
-    ck_assert(expr->list.head->next->expr->type == N_NIL);
+    ck_assert(expr->list.head->next->expr->type == F_NIL);
 
     // character
     ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
-    ck_assert(expr->type == N_CHAR);
+    ck_assert(expr->type == F_CHAR);
     ck_assert_int_eq(expr->chr.value, L'X');
     ck_assert_int_eq(expr->source.lineNumber, 2);
     ck_assert_int_eq(expr->source.colNumber, 34);
@@ -230,13 +230,13 @@ START_TEST(parser) {
   }
 END_TEST
 
-RetVal tryParse(Pool_t pool, wchar_t *input, Expr **ptr, Error *error) {
+RetVal tryParse(Pool_t pool, wchar_t *input, Form **ptr, Error *error) {
 
   RetVal ret;
 
   InputStream_t source;
   TokenStream_t stream;
-  Expr *expr;
+  Form *expr;
 
   throws(tryStringInputStreamMake(pool, input, wcslen(input), &source, error));
   throws(tryStreamMake(pool, source, &stream, error));
@@ -256,7 +256,7 @@ START_TEST(exprPrnTest)
   {
 
     Error e;
-    Expr *expr;
+    Form *expr;
     errorInitContents(&e);
 
     Pool_t pool = NULL;
@@ -275,7 +275,7 @@ START_TEST(analyzer) {
 
     Error e;
     Pool_t pool = NULL;
-    Expr *expr;
+    Form *expr;
     FormRoot *root;
 
     errorInitContents(&e);
@@ -284,7 +284,7 @@ START_TEST(analyzer) {
     // constant
     ck_assert_int_eq(tryParse(pool, L"\"str\"", &expr, &e), R_SUCCESS);
     ck_assert_int_eq(tryFormAnalyze(expr, pool, &root, &e), R_SUCCESS);
-    ck_assert_int_eq(root->form->type, F_CONST);
+    ck_assert_int_eq(root->form->type, F_STRING);
 
     // if
     ck_assert_int_eq(tryParse(pool, L"(if true 10 20)", &expr, &e), R_SUCCESS);
@@ -340,7 +340,7 @@ RetVal tryTestCompile(wchar_t *input, CodeUnit *codeUnit, Error *error) {
   RetVal ret;
 
   Pool_t pool;
-  Expr *expr;
+  Form *expr;
   FormRoot *root;
 
   throws(tryPoolCreate(&pool, ONE_MB, error));

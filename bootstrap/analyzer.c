@@ -220,10 +220,10 @@ void popBindings(AnalyzerContext *ctx, uint16_t numBindings) {
  * Analyzers for the different types of forms.
  */
 
-RetVal _tryFormAnalyze(AnalyzerContext *ctx, Expr* expr, Form **ptr, Error *error);
-RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Error *error);
+RetVal _tryFormAnalyze(AnalyzerContext *ctx, Form* expr, Form **ptr, Error *error);
+RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Form* expr, Form *form, Error *error);
 
-uint64_t getExprPosition(Expr *expr) {
+uint64_t getExprPosition(Form *expr) {
   return expr->source.position;
 }
 
@@ -231,7 +231,7 @@ uint64_t getFormPosition(Form *form) {
   return form->source.position;
 }
 
-RetVal tryIfAnalyze(AnalyzerContext *ctx, Expr* ifExpr, FormIf *iff, Error *error) {
+RetVal tryIfAnalyze(AnalyzerContext *ctx, Form* ifExpr, FormIf *iff, Error *error) {
 
   iff->test = NULL;
   iff->ifBranch = NULL;
@@ -250,15 +250,15 @@ RetVal tryIfAnalyze(AnalyzerContext *ctx, Expr* ifExpr, FormIf *iff, Error *erro
     throwSyntaxError(error, pos, "the 'if' special form only supports an 'if' and 'else' branch");
   }
 
-  Expr *testExpr = ifExpr->list.head->next->expr;
-  Expr *ifBranchExpr = ifExpr->list.head->next->next->expr;
+  Form *testExpr = ifExpr->list.head->next->expr;
+  Form *ifBranchExpr = ifExpr->list.head->next->next->expr;
 
   throws(_tryFormAnalyze(ctx, testExpr, &iff->test, error));
   throws(_tryFormAnalyze(ctx, ifBranchExpr, &iff->ifBranch, error));
 
   bool hasElse = ifExpr->list.length == 4;
   if (hasElse) {
-    Expr *elseBranchExpr = ifExpr->list.head->next->next->next->expr;
+    Form *elseBranchExpr = ifExpr->list.head->next->next->next->expr;
     throws(_tryFormAnalyze(ctx, elseBranchExpr, &iff->elseBranch, error));
   }
 
@@ -300,7 +300,7 @@ void letBindingInitContents(LetBinding *b) {
   b->value = NULL;
 }
 
-RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *error) {
+RetVal tryLetAnalyze(AnalyzerContext *ctx, Form* letExpr, FormLet *let, Error *error) {
   RetVal ret;
 
   letInitContents(let);
@@ -312,9 +312,9 @@ RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *e
   }
 
   // sanity checking
-  Expr *bindingsExpr = next->expr;
-  if (bindingsExpr->type != N_NIL) {
-    if (bindingsExpr->type != N_LIST) {
+  Form *bindingsExpr = next->expr;
+  if (bindingsExpr->type != F_NIL) {
+    if (bindingsExpr->type != F_LIST) {
       throwSyntaxError(error, pos, "the 'let' special form requires the first parameter to be a list");
     }
     if (bindingsExpr->list.length % 2 != 0) {
@@ -333,7 +333,7 @@ RetVal tryLetAnalyze(AnalyzerContext *ctx, Expr* letExpr, FormLet *let, Error *e
     ListElement *bindingElem = bindingsExpr->list.head;
     for (int i = 0; bindingElem != NULL; i++) {
 
-      if (bindingElem->expr->type != N_SYMBOL) {
+      if (bindingElem->expr->type != F_SYMBOL) {
         throwSyntaxError(error, pos, "only symbols can be bound as names");
       }
 
@@ -386,7 +386,7 @@ void defInitContents(FormDef *def) {
   def->value = NULL;
 }
 
-RetVal tryDefAnalyze(AnalyzerContext *ctx, Expr* defExpr, FormDef *def, Error *error) {
+RetVal tryDefAnalyze(AnalyzerContext *ctx, Form* defExpr, FormDef *def, Error *error) {
   RetVal ret;
 
   defInitContents(def);
@@ -399,8 +399,8 @@ RetVal tryDefAnalyze(AnalyzerContext *ctx, Expr* defExpr, FormDef *def, Error *e
   if (defExpr->list.length > 3) {
     throwSyntaxError(error, pos, "the 'def' special form takes at most two parameters");
   }
-  Expr *symbol = defExpr->list.head->next->expr;
-  if (symbol->type != N_SYMBOL) {
+  Form *symbol = defExpr->list.head->next->expr;
+  if (symbol->type != F_SYMBOL) {
     throwSyntaxError(error, pos, "the 'let' special form requires the first parameter to be a symbol");
   }
 
@@ -434,7 +434,7 @@ void fnArgInitContents(FormFnArg *arg) {
   sourceLocationInitContents(&arg->source);
 }
 
-RetVal tryFnValidateArgs(Expr *argsExpr, uint16_t *numArgsPtr, bool *varArgsPtr, Error *error) {
+RetVal tryFnValidateArgs(Form *argsExpr, uint16_t *numArgsPtr, bool *varArgsPtr, Error *error) {
   RetVal ret;
 
   uint16_t numArgs = 0;
@@ -457,7 +457,7 @@ RetVal tryFnValidateArgs(Expr *argsExpr, uint16_t *numArgsPtr, bool *varArgsPtr,
       varArgs = true;
     }
     else { // acutal argument
-      if (argElem->expr->type != N_SYMBOL) {
+      if (argElem->expr->type != F_SYMBOL) {
         throwSyntaxError(error, pos, "only symbols can be used as function arguments");
       }
       if (varArgs) {
@@ -478,12 +478,12 @@ RetVal tryFnValidateArgs(Expr *argsExpr, uint16_t *numArgsPtr, bool *varArgsPtr,
     return ret;
 }
 
-RetVal tryFnParseArgs(Pool_t pool, Expr *argsExpr, FormFn *fn, Error *error) {
+RetVal tryFnParseArgs(Pool_t pool, Form *argsExpr, FormFn *fn, Error *error) {
   RetVal ret;
 
   uint64_t pos = getExprPosition(argsExpr);
 
-  if (argsExpr->type == N_LIST) {
+  if (argsExpr->type == F_LIST) {
 
     throws(tryFnValidateArgs(argsExpr, &fn->numArgs, &fn->usesVarArgs, error));
     tryPalloc(pool, fn->args, sizeof(FormFnArg) * fn->numArgs, "FormFnArg array");
@@ -503,11 +503,11 @@ RetVal tryFnParseArgs(Pool_t pool, Expr *argsExpr, FormFn *fn, Error *error) {
       argElem = argElem->next;
     }
   }
-  else if (argsExpr->type == N_NIL) {
+  else if (argsExpr->type == F_NIL) {
     // leave args empty
   }
   else {
-    throwSyntaxError(error, pos, "the 'fn' requires an arg list of the type N_LIST or N_NIL: %u",
+    throwSyntaxError(error, pos, "the 'fn' requires an arg list of the type F_LIST or F_NIL: %u",
                      argsExpr->type);
   }
 
@@ -517,7 +517,7 @@ RetVal tryFnParseArgs(Pool_t pool, Expr *argsExpr, FormFn *fn, Error *error) {
     return ret;
 }
 
-RetVal tryFnParse(Pool_t pool, Expr* fnExpr, FormFn *fn, Expr **formElements, Error *error) {
+RetVal tryFnParse(Pool_t pool, Form* fnExpr, FormFn *fn, Form **formElements, Error *error) {
   RetVal ret;
 
   uint64_t pos = getExprPosition(fnExpr);
@@ -528,7 +528,7 @@ RetVal tryFnParse(Pool_t pool, Expr* fnExpr, FormFn *fn, Expr **formElements, Er
   }
 
   // the optional function name
-  if (itr->expr->type == N_SYMBOL) {
+  if (itr->expr->type == F_SYMBOL) {
     throws(tryTextMake(pool, itr->expr->symbol.value, &fn->name, itr->expr->symbol.length, error));
     fn->hasName = true;
     itr = itr->next;
@@ -539,7 +539,7 @@ RetVal tryFnParse(Pool_t pool, Expr* fnExpr, FormFn *fn, Expr **formElements, Er
     throwSyntaxError(error, pos, "the 'fn' special form requires an argument list");
   }
 
-  Expr *argsExpr = itr->expr;
+  Form *argsExpr = itr->expr;
   throws(tryFnParseArgs(pool, argsExpr, fn, error));
   itr = itr->next;
 
@@ -549,7 +549,7 @@ RetVal tryFnParse(Pool_t pool, Expr* fnExpr, FormFn *fn, Expr **formElements, Er
   }
 
   fn->forms.numForms = fnExpr->list.length - nonFormElems;
-  tryPalloc(pool, *formElements, sizeof(Expr) * fn->forms.numForms, "Expr array");
+  tryPalloc(pool, *formElements, sizeof(Form) * fn->forms.numForms, "Expr array");
 
   for (int i=0; i<fn->forms.numForms; i++) {
     *formElements[i] = *itr->expr;
@@ -603,11 +603,11 @@ uint16_t bindingTableCaptures(BindingTable *table) {
   return numCaptures;
 }
 
-RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error) {
+RetVal tryFnAnalyze(AnalyzerContext *ctx, Form* fnExpr, FormFn *fn, Error *error) {
   RetVal ret;
 
   // things that get cleaned up always
-  Expr *formElements = NULL;
+  Form *formElements = NULL;
 
   formFnInitContents(fn);
   throws(tryFnParse(ctx->pool, fnExpr, fn, &formElements, error));
@@ -646,7 +646,7 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Expr* fnExpr, FormFn *fn, Error *error
   // create the forms within this fn lexical scope
   formsAllocate(ctx->pool, &fn->forms, fn->forms.numForms);
   for (int i=0; i<fn->forms.numForms; i++) {
-    Expr expr = formElements[i];
+    Form expr = formElements[i];
     Form *thisForm = fn->forms.forms + i;
     throws(tryFormAnalyzeContents(ctx, &expr, thisForm, error));
   }
@@ -669,14 +669,14 @@ void builtinInitContents(FormBuiltin *builtin) {
   formsInitContents(&builtin->args);
 }
 
-RetVal tryBuiltinAnalyze(AnalyzerContext *ctx, Expr *expr, FormBuiltin *builtin, Error *error) {
+RetVal tryBuiltinAnalyze(AnalyzerContext *ctx, Form *expr, FormBuiltin *builtin, Error *error) {
 
   RetVal ret;
 
   builtinInitContents(builtin);
 
-  Expr *name = expr->list.head->next->expr;
-  if (name->type != N_KEYWORD) {
+  Form *name = expr->list.head->next->expr;
+  if (name->type != F_KEYWORD) {
     throwSyntaxError(error, name->source.position, "the 'builtin' special form requires the first parameter to be a keyword");
   }
 
@@ -697,11 +697,7 @@ RetVal tryBuiltinAnalyze(AnalyzerContext *ctx, Expr *expr, FormBuiltin *builtin,
     return ret;
 }
 
-void _listInitContents(FormList *list) {
-  formsInitContents(&list->forms);
-}
-
-RetVal tryEnvRefAnalyze(AnalyzerContext *ctx, Expr *expr, uint16_t bindingIndex, FormEnvRef *envRef, Error *error) {
+RetVal tryEnvRefAnalyze(AnalyzerContext *ctx, Form *expr, uint16_t bindingIndex, FormEnvRef *envRef, Error *error) {
   envRef->bindingIndex = bindingIndex;
   return R_SUCCESS;
 }
@@ -710,12 +706,12 @@ void varRefInitContents(FormVarRef *varRef) {
   textInitContents(&varRef->name);
 }
 
-RetVal tryVarRefAnalyze(AnalyzerContext *ctx, Expr *expr, FormVarRef *varRef, Error *error) {
+RetVal tryVarRefAnalyze(AnalyzerContext *ctx, Form *expr, FormVarRef *varRef, Error *error) {
   RetVal ret;
 
   varRefInitContents(varRef);
 
-  if (expr->type != N_SYMBOL) {
+  if (expr->type != F_SYMBOL) {
     throwSyntaxError(error, getExprPosition(expr), "var refs must be symbols: '%i'", expr->type);
   }
 
@@ -748,15 +744,12 @@ RetVal assertFnCallable(Form *form, Error *error) {
 //      }
       break;
 
-    case F_CONST:
-      if (form->constant->type != N_KEYWORD) {
-        throwSyntaxError(error, getFormPosition(form),
-                         "first list element cannot be called as a function: '%i'", form->constant->type);
-      }
+    case F_KEYWORD:
       break;
 
     default:
-      throwInternalError(error, "unhandled case %i", form->type);
+      throwSyntaxError(error, getFormPosition(form),
+        "first list element cannot be called as a function: '%i'", form->type);
   }
 
   return R_SUCCESS;
@@ -772,7 +765,7 @@ void fnCallInitContents(FormFnCall *fnCall) {
   fnCall->recurses = false;
 }
 
-RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Expr *expr, FormFnCall *fnCall, Error *error) {
+RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Form *expr, FormFnCall *fnCall, Error *error) {
 
   RetVal ret;
 
@@ -815,7 +808,7 @@ RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Expr *expr, FormFnCall *fnCall, Er
     return ret;
 }
 
-RetVal tryQuoteAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *error) {
+RetVal tryQuoteAnalyze(AnalyzerContext *ctx, Form* expr, Form *form, Error *error) {
 
   RetVal ret;
 
@@ -834,22 +827,22 @@ RetVal tryQuoteAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *erro
     return ret;
 }
 
-bool isSplicingUnquote(Expr *elem) {
+bool isSplicingUnquote(Form *elem) {
   return
-      elem->type == N_LIST
+      elem->type == F_LIST
       && elem->list.length > 0
-      && elem->list.head->expr->type == N_SYMBOL
+      && elem->list.head->expr->type == F_SYMBOL
       && wcscmp(elem->list.head->expr->symbol.value, L"splicing-unquote") == 0;
 }
 
-uint16_t numSyntaxQuotedListArgs(Expr *quoted) {
+uint16_t numSyntaxQuotedListArgs(Form *quoted) {
 
   uint16_t numArgs = 0;
   uint16_t listElementsSeen = 0;
 
   ListElement *argExpr = quoted->list.head;
   for (int i = 0; i < quoted->list.length ; i++) {
-    Expr *elem = argExpr->expr;
+    Form *elem = argExpr->expr;
 
     if (isSplicingUnquote(elem)) {
       if (listElementsSeen > 0) {
@@ -872,7 +865,7 @@ uint16_t numSyntaxQuotedListArgs(Expr *quoted) {
   return numArgs;
 }
 
-RetVal trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr *quoted, Form *form, Error *error) {
+RetVal trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Form *quoted, Form *form, Error *error) {
   RetVal ret;
 
   uint16_t numArgs = numSyntaxQuotedListArgs(quoted);
@@ -900,7 +893,7 @@ RetVal trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr *quoted, Form *form,
   ListElement *elem= quoted->list.head;
   while (elem != NULL) {
 
-    Expr *elemExpr = elem->expr;
+    Form *elemExpr = elem->expr;
     Form *args = form->fnCall.args.forms;
 
     bool argInitialized = args[nextArg].type != F_NONE;
@@ -920,19 +913,16 @@ RetVal trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr *quoted, Form *form,
 
       if (listContainer->type == F_NONE) {
         listContainer->type = F_LIST;
-        _listInitContents(&listContainer->list);
-        formsAllocate(ctx->pool, &listContainer->list.forms, quoted->list.length); // allocate max it could ever be
-        listContainer->list.forms.numForms = 0;                                    // pretend it is empty
+        listInitContents(&listContainer->list);
       }
 
       if (args[nextArg].type != F_LIST) {
         throwSyntaxError(error, quoted->source.position, "this argument should have been a list");
       }
 
-      uint16_t index = listContainer->list.forms.numForms;
-      throws(tryFormAnalyzeContents(ctx, elemExpr, &listContainer->list.forms.forms[index], error));
-      listContainer->list.forms.numForms++;
-
+      Form *f = exprMake(ctx->pool);
+      throws(tryFormAnalyzeContents(ctx, elemExpr, f, error));
+      listAppend(ctx->pool, &listContainer->list, f);
     }
 
     elem = elem->next;
@@ -944,7 +934,7 @@ RetVal trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Expr *quoted, Form *form,
     return ret;
 }
 
-RetVal trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *error) {
+RetVal trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Form* expr, Form *form, Error *error) {
   RetVal ret;
 
   if (expr->list.length != 2) {
@@ -955,7 +945,7 @@ RetVal trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error
   bool lastValue = ctx->inSyntaxQuote;
   ctx->inSyntaxQuote = true;
 
-  Expr *quoted = expr->list.head->next->expr;
+  Form *quoted = expr->list.head->next->expr;
   throws(tryFormAnalyzeContents(ctx, quoted, form, error));
 
   ctx->inSyntaxQuote = lastValue;
@@ -966,7 +956,7 @@ RetVal trySyntaxQuoteAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error
     return ret;
 }
 
-RetVal trySymbolAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *error) {
+RetVal trySymbolAnalyze(AnalyzerContext *ctx, Form* expr, Form *form, Error *error) {
   RetVal ret;
 
   wchar_t *sym = expr->symbol.value;
@@ -1035,10 +1025,10 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Expr* expr, Form *form, Error *err
     return ret;
 }
 
-RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error) {
+RetVal tryExpandAnalyze(AnalyzerContext *ctx, Form *expr, Form *form, Error *error) {
   RetVal ret;
 
-  if (expr->type != N_LIST) {
+  if (expr->type != F_LIST) {
     throwInternalError(error, "the contents of a macro argumet must be a list: %u", expr->type);
   }
 
@@ -1048,15 +1038,15 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *err
   macroName.length = sym.length;
   macroName.value = sym.value;
 
-  Expr input;
+  Form input;
   exprInitContents(&input);
-  input.type = N_LIST;
+  input.type = F_LIST;
   listInitContents(&input.list);
   input.list.length = expr->list.length - 1;
   input.list.head = expr->list.head->next;
   input.list.tail = expr->list.tail;
 
-  Expr *output = NULL;
+  Form *output = NULL;
   throws(tryExpand(ctx->options.expander, macroName, &input, &output, error));
   throws(tryFormAnalyzeContents(ctx, output, form, error));
 
@@ -1064,132 +1054,83 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *err
   return ret;
 }
 
-RetVal tryListAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error) {
+RetVal tryListAnalyze(AnalyzerContext *ctx, Form *expr, Form *form, Error *error) {
   RetVal ret;
 
-  if (expr->type != N_LIST) {
-    explode("not a list");
+  if (expr->type != F_LIST) {
+    explode("not a map");
   }
 
-  Form *fnCallable = NULL;
-  {
-    wchar_t hashMap[] = L"list";
-    palloc(ctx->pool, fnCallable, sizeof(Form), "list callable");
-    formInitContents(fnCallable);
-    fnCallable->type = F_VAR_REF;
-    throws(tryTextMake(ctx->pool, hashMap, &fnCallable->varRef.name, wcslen(hashMap), error));
-  }
-
-  Forms args;
-  formsInitContents(&args);
-  args.numForms = expr->list.length;
-  palloc(ctx->pool, args.forms, sizeof(Form) * args.numForms, "Form array");
+  form->type = F_LIST;
+  listInitContents(&form->list);
 
   ListElement *argExpr = expr->list.head;
   for (int i=0; argExpr != NULL; i++) {
 
-    Form *arg = args.forms + i;
-    formInitContents(arg);
-    throws(tryFormAnalyzeContents(ctx, argExpr->expr, arg, error));
+    Form *value = exprMake(ctx->pool);
+    throws(tryFormAnalyzeContents(ctx, argExpr->expr, value, error));
+
+    listAppend(ctx->pool, &form->list, value);
 
     argExpr = argExpr->next;
   }
 
-  form->type = F_FN_CALL;
-  fnCallInitContents(&form->fnCall);
-  form->fnCall.fnCallable = fnCallable;
-  form->fnCall.args = args;
-
   return R_SUCCESS;
-
   failure:
   return ret;
 }
 
-RetVal tryVecAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error) {
+RetVal tryVecAnalyze(AnalyzerContext *ctx, Form *expr, Form *form, Error *error) {
   RetVal ret;
 
-  if (expr->type != N_VEC) {
-    explode("not a vec");
+  if (expr->type != F_VEC) {
+    explode("not a map");
   }
 
-  Form *fnCallable = NULL;
-  {
-    wchar_t hashMap[] = L"vector";
-    tryPalloc(ctx->pool, fnCallable, sizeof(Form), "vector callable");
-    formInitContents(fnCallable);
-    fnCallable->type = F_VAR_REF;
-    throws(tryTextMake(ctx->pool, hashMap, &fnCallable->varRef.name, wcslen(hashMap), error));
-  }
-
-  Forms args;
-  formsInitContents(&args);
-  args.numForms = expr->vec.length;
-  tryPalloc(ctx->pool, args.forms, sizeof(Form) * args.numForms, "Form array");
+  form->type = F_VEC;
+  vecInitContents(&form->vec);
 
   ListElement *argExpr = expr->vec.head;
   for (int i=0; argExpr != NULL; i++) {
 
-    Form *arg = args.forms + i;
-    formInitContents(arg);
-    throws(tryFormAnalyzeContents(ctx, argExpr->expr, arg, error));
+    Form *value = exprMake(ctx->pool);
+    throws(tryFormAnalyzeContents(ctx, argExpr->expr, value, error));
+
+    vecAppend(ctx->pool, &form->vec, value);
 
     argExpr = argExpr->next;
   }
 
-  form->type = F_FN_CALL;
-  fnCallInitContents(&form->fnCall);
-  form->fnCall.fnCallable = fnCallable;
-  form->fnCall.args = args;
-
   return R_SUCCESS;
-
   failure:
   return ret;
 }
 
-RetVal tryMapAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *error) {
+RetVal tryMapAnalyze(AnalyzerContext *ctx, Form *expr, Form *form, Error *error) {
   RetVal ret;
 
-  if (expr->type != N_MAP) {
+  if (expr->type != F_MAP) {
     explode("not a map");
   }
 
-  Form *fnCallable = NULL;
-  {
-    wchar_t hashMap[] = L"hash-map";
-    tryPalloc(ctx->pool, fnCallable, sizeof(Form), "hashmap callable");
-    formInitContents(fnCallable);
-    fnCallable->type = F_VAR_REF;
-    throws(tryTextMake(ctx->pool, hashMap, &fnCallable->varRef.name, wcslen(hashMap), error));
-  }
-
-  Forms args;
-  formsInitContents(&args);
-  args.numForms = expr->map.length * 2;
-  tryPalloc(ctx->pool, args.forms, sizeof(Form) * args.numForms, "Form array");
+  form->type = F_MAP;
+  mapInitContents(&form->map);
 
   MapElement *argExpr = expr->map.head;
   for (int i=0; argExpr != NULL; i+=2) {
 
-    Form *keyArg = args.forms + i;
-    formInitContents(keyArg);
-    throws(tryFormAnalyzeContents(ctx, argExpr->key, keyArg, error));
+    Form *key = exprMake(ctx->pool);
+    throws(tryFormAnalyzeContents(ctx, argExpr->key, key, error));
 
-    Form *valArg = args.forms + i + 1;
-    formInitContents(valArg);
-    throws(tryFormAnalyzeContents(ctx, argExpr->value, valArg, error));
+    Form *value = exprMake(ctx->pool);
+    throws(tryFormAnalyzeContents(ctx, argExpr->value, value, error));
+
+    mapPut(ctx->pool, &form->map, key, value);
 
     argExpr = argExpr->next;
   }
 
-  form->type = F_FN_CALL;
-  fnCallInitContents(&form->fnCall);
-  form->fnCall.fnCallable = fnCallable;
-  form->fnCall.args = args;
-
   return R_SUCCESS;
-
   failure:
   return ret;
 }
@@ -1199,7 +1140,7 @@ void _handlerInitContents(FormHandler *h) {
   formsInitContents(&h->forms);
 }
 
-RetVal tryHandlerAnalyze(AnalyzerContext *ctx, Expr* expr, FormHandler *handler, Error *error) {
+RetVal tryHandlerAnalyze(AnalyzerContext *ctx, Form* expr, FormHandler *handler, Error *error) {
   RetVal ret;
 
   _handlerInitContents(handler);
@@ -1226,7 +1167,7 @@ RetVal tryHandlerAnalyze(AnalyzerContext *ctx, Expr* expr, FormHandler *handler,
   return ret;
 }
 
-RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Error *error) {
+RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Form* expr, Form *form, Error *error) {
 
   // copy expression source metadata
   form->source = expr->source;
@@ -1236,51 +1177,29 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
   switch (expr->type) {
 
     // always-constants
-    case N_STRING:
-      form->type = F_CONST;
-      form->constant = stringMake(ctx->pool, expr->string.value, expr->string.length);
-      break;
-    case N_NUMBER:
-      form->type = F_CONST;
-      form->constant = numberMake(ctx->pool, expr->number.value);
-      break;
-    case N_CHAR:
-      form->type = F_CONST;
-      form->constant = charMake(ctx->pool, expr->chr.value);
-      break;
-    case N_KEYWORD:
-      form->type = F_CONST;
-      form->constant = keywordMake(ctx->pool, expr->keyword.value, expr->keyword.length);
-      break;
-    case N_BOOLEAN:
-      form->type = F_CONST;
-      form->constant = booleanMake(ctx->pool, expr->boolean.value);
-      break;
-    case N_NIL:
-      form->type = F_CONST;
-      form->constant = nilMake(ctx->pool);
+    case F_STRING:
+    case F_NUMBER:
+    case F_CHAR:
+    case F_KEYWORD:
+    case F_BOOLEAN:
+    case F_NIL:
+      *form = *expr;
       break;
 
-    case N_VEC: {
+    case F_VEC: {
       throws(tryVecAnalyze(ctx, expr, form, error));
       break;
     }
 
-    case N_MAP: {
+    case F_MAP: {
       throws(tryMapAnalyze(ctx, expr, form, error));
       break;
     }
 
-    case N_SYMBOL: {
-      if (ctx->inQuote) {
-        form->type = F_CONST;
+    case F_SYMBOL: {
+      if (ctx->inQuote || ctx->inSyntaxQuote) {
         // TODO: this should namespace the symbol, but for that we'd have to know what the current namespace is
-        form->constant = symbolMake(ctx->pool, expr->symbol.value, expr->symbol.length);
-      }
-      else if (ctx->inSyntaxQuote) {
-        form->type = F_CONST;
-        // TODO: this should namespace the symbol, but for that we'd have to know what the current namespace is
-        form->constant = symbolMake(ctx->pool, expr->symbol.value, expr->symbol.length);
+        *form = *expr;
       }
       else {
         throws(trySymbolAnalyze(ctx, expr, form, error));
@@ -1288,7 +1207,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
       break;
     }
 
-    case N_LIST: {
+    case F_LIST: {
 
       if (expr->list.length == 0 || ctx->inQuote) {
         throws(tryListAnalyze(ctx, expr, form, error));
@@ -1296,11 +1215,11 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
       }
 
       if (ctx->inSyntaxQuote) {
-        Expr *quoted = expr;
+        Form *quoted = expr;
 
         bool unquoted =
             quoted->list.length > 0
-            && quoted->list.head->expr->type == N_SYMBOL
+            && quoted->list.head->expr->type == F_SYMBOL
             && wcscmp(quoted->list.head->expr->symbol.value, L"unquote") == 0;
 
         if (unquoted) {
@@ -1320,7 +1239,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
       }
 
       // special forms
-      if (expr->list.head->expr->type == N_SYMBOL) {
+      if (expr->list.head->expr->type == F_SYMBOL) {
         wchar_t *sym = expr->list.head->expr->symbol.value;
 
         if (wcscmp(sym, L"if") == 0) {
@@ -1348,9 +1267,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
         }
 
         if (wcscmp(sym, L"quote") == 0) {
-          form->type = F_CONST;
           throws(tryQuoteAnalyze(ctx, expr, form, error));
-          form->source = form->constant->source;
           break;
         }
 
@@ -1404,7 +1321,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
     return ret;
 }
 
-RetVal _tryFormAnalyze(AnalyzerContext *ctx, Expr* expr, Form **ptr, Error *error) {
+RetVal _tryFormAnalyze(AnalyzerContext *ctx, Form* expr, Form **ptr, Error *error) {
 
   RetVal ret;
 
@@ -1443,7 +1360,7 @@ void analyzeOptionsInitContents(AnalyzeOptions *options) {
   textInitContents(&options->fileName);
 }
 
-RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, Pool_t pool, FormRoot **ptr, Error *error) {
+RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Form* expr, Pool_t pool, FormRoot **ptr, Error *error) {
   RetVal ret;
   AnalyzerContext ctx;
 
@@ -1472,7 +1389,7 @@ RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Expr* expr, Pool_t pool, Fo
     return ret;
 }
 
-RetVal tryFormAnalyze(Expr* expr, Pool_t pool, FormRoot **ptr, Error *error) {
+RetVal tryFormAnalyze(Form* expr, Pool_t pool, FormRoot **ptr, Error *error) {
   AnalyzeOptions options;
   analyzeOptionsInitContents(&options);
   return tryFormAnalyzeOptions(options, expr, pool, ptr, error);

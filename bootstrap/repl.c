@@ -16,7 +16,7 @@ RetVal tryReplCompile(Pool_t outputPool, TokenStream_t stream, FileInfo fileInfo
 
   RetVal ret;
 
-  Expr *expr = NULL;
+  Form *expr = NULL;
   FormRoot *form = NULL;
   Expander_t expander = NULL;
 
@@ -80,7 +80,7 @@ RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputTe
   result = vmEval(vm, &unit);
 
   if (result.type == RT_RESULT) {
-    Expr *expr = printToReader(vm, pool, result.value);
+    Form *expr = printToReader(vm, pool, result.value);
     *outputText = exprPrnStr(outputPool, expr);
   }
   else {

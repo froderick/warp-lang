@@ -81,9 +81,6 @@ typedef enum ConstantType {
   CT_FN,
   CT_SYMBOL,
   CT_KEYWORD,
-  CT_LIST,
-  CT_VEC,
-  CT_MAP
 } ConstantType;
 
 typedef struct Constant Constant;

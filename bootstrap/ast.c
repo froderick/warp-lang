@@ -6,86 +6,86 @@
  * Here is the basic AST implementation.
  */
 
-void exprInitContents(Expr *expr) {
-  expr->type = N_NONE;
+void exprInitContents(Form *expr) {
+  expr->type = F_NONE;
   sourceLocationInitContents(&expr->source);
 }
 
-Expr* exprMake(Pool_t pool) {
-  Expr *expr;
-  palloc(pool, expr, sizeof(Expr), "Expr");
+Form* exprMake(Pool_t pool) {
+  Form *expr;
+  palloc(pool, expr, sizeof(Form), "Expr");
   exprInitContents(expr);
   return expr;
 }
 
-Expr* stringMake(Pool_t pool, wchar_t *input, uint64_t length) {
-  Expr *expr = exprMake(pool);
-  expr->type = N_STRING;
+Form* stringMake(Pool_t pool, wchar_t *input, uint64_t length) {
+  Form *expr = exprMake(pool);
+  expr->type = F_STRING;
   expr->string.length = length;
   expr->string.value = copyText(pool, input, length);
   expr->source.isSet = false;
   return expr;
 }
 
-Expr* numberMake(Pool_t pool, uint64_t value) {
-  Expr *expr = exprMake(pool);
-  expr->type = N_NUMBER;
+Form* numberMake(Pool_t pool, uint64_t value) {
+  Form *expr = exprMake(pool);
+  expr->type = F_NUMBER;
   expr->number.value = value;
   expr->source.isSet = false;
   return expr;
 }
 
-Expr* charMake(Pool_t pool, wchar_t value) {
-  Expr *expr = exprMake(pool);
-  expr->type = N_CHAR;
+Form* charMake(Pool_t pool, wchar_t value) {
+  Form *expr = exprMake(pool);
+  expr->type = F_CHAR;
   expr->chr.value = value;
   expr->source.isSet = false;
   return expr;
 }
 
-Expr* symbolMake(Pool_t pool, wchar_t *name, uint64_t len) {
-  Expr *expr = exprMake(pool);
-  expr->type = N_SYMBOL;
+Form* symbolMake(Pool_t pool, wchar_t *name, uint64_t len) {
+  Form *expr = exprMake(pool);
+  expr->type = F_SYMBOL;
   expr->symbol.value = copyText(pool, name, len);
   expr->symbol.length = len;
   expr->source.isSet = false;
   return expr;
 }
 
-Expr* keywordMake(Pool_t pool, wchar_t *name, uint64_t len) {
-  Expr *expr = exprMake(pool);
-  expr->type = N_KEYWORD;
+Form* keywordMake(Pool_t pool, wchar_t *name, uint64_t len) {
+  Form *expr = exprMake(pool);
+  expr->type = F_KEYWORD;
   expr->keyword.length = len;
   expr->keyword.value = copyText(pool, name, len);
   expr->source.isSet = false;
   return expr;
 }
 
-Expr* booleanMake(Pool_t pool, bool value) {
-  Expr *expr = exprMake(pool);
-  expr->type = N_BOOLEAN;
+Form* booleanMake(Pool_t pool, bool value) {
+  Form *expr = exprMake(pool);
+  expr->type = F_BOOLEAN;
   expr->boolean.value = value;
   expr->source.isSet = false;
   return expr;
 }
 
-Expr* nilMake(Pool_t pool) {
-  Expr *expr = exprMake(pool);
-  expr->type = N_NIL;
+Form* nilMake(Pool_t pool) {
+  Form *expr = exprMake(pool);
+  expr->type = F_NIL;
   expr->source.isSet = false;
   return expr;
 }
 
 // valid for zero length list
-void listInitContents(ExprList *list) {
+void listInitContents(FormList *list) {
   list->length = 0;
   list->head = NULL;
   list->tail = NULL;
 }
 
-Expr* listMake(Pool_t pool) {
-  Expr *expr = exprMake(pool);
-  expr->type = N_LIST;
+Form* listMake(Pool_t pool) {
+  Form *expr = exprMake(pool);
+  expr->type = F_LIST;
   expr->list.length = 0;
 
   expr->list.head = NULL;
@@ -98,7 +98,7 @@ Expr* listMake(Pool_t pool) {
   return expr;
 }
 
-void listAppend(Pool_t pool, ExprList *list, Expr *expr) {
+void listAppend(Pool_t pool, FormList *list, Form *expr) {
   ListElement *elem;
   palloc(pool, elem, sizeof(ListElement), "ExprList");
 
@@ -123,9 +123,9 @@ void listAppend(Pool_t pool, ExprList *list, Expr *expr) {
 
 // vectors
 
-Expr* vecMake(Pool_t pool) {
-  Expr *expr = exprMake(pool);
-  expr->type = N_VEC;
+Form* vecMake(Pool_t pool) {
+  Form *expr = exprMake(pool);
+  expr->type = F_VEC;
   expr->list.length = 0;
 
   // valid for zero length list
@@ -137,13 +137,13 @@ Expr* vecMake(Pool_t pool) {
   return expr;
 }
 
-void vecInitContents(ExprVec *vec) {
+void vecInitContents(FormVec *vec) {
   vec->length = 0;
   vec->head = NULL;
   vec->tail = NULL;
 }
 
-void vecAppend(Pool_t pool, ExprVec *vec, Expr *expr) {
+void vecAppend(Pool_t pool, FormVec *vec, Form *expr) {
   ListElement *elem;
   palloc(pool, elem, sizeof(ListElement), "ListElement");
 
@@ -168,7 +168,7 @@ void vecAppend(Pool_t pool, ExprVec *vec, Expr *expr) {
 
 // maps
 
-void mapInitContents(ExprMap *map) {
+void mapInitContents(FormMap *map) {
   map->length = 0;
   map->head = NULL;
   map->tail = NULL;
@@ -180,9 +180,9 @@ void mapElementInitContents(MapElement *e) {
   e->next = NULL;
 }
 
-Expr* mapMake(Pool_t pool) {
-  Expr *expr = exprMake(pool);
-  expr->type = N_MAP;
+Form* mapMake(Pool_t pool) {
+  Form *expr = exprMake(pool);
+  expr->type = F_MAP;
   expr->source.isSet = false;
 
   // valid for zero length map
@@ -191,7 +191,7 @@ Expr* mapMake(Pool_t pool) {
   return expr;
 }
 
-void mapPut(Pool_t pool, ExprMap *map, Expr *key, Expr *value) {
+void mapPut(Pool_t pool, FormMap *map, Form *key, Form *value) {
   MapElement *elem;
   palloc(pool, elem, sizeof(MapElement), "MapElement");
 
@@ -216,24 +216,24 @@ void mapPut(Pool_t pool, ExprMap *map, Expr *key, Expr *value) {
   map->length = map->length + 1;
 }
 
-void exprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable) {
+void exprPrnBufConf(Form *expr, StringBuffer_t b, bool readable) {
   switch (expr->type) {
-    case N_NIL:
+    case F_NIL:
       stringBufferAppendStr(b, L"nil");
       break;
-    case N_NUMBER: {
+    case F_NUMBER: {
       wchar_t text[256];
       swprintf(text, sizeof(text), L"%" PRIu64, expr->number.value);
       stringBufferAppendStr(b, text);
       break;
     }
-    case N_CHAR: {
+    case F_CHAR: {
       stringBufferAppendChar(b, L'\'');
       stringBufferAppendChar(b, expr->chr.value);
       stringBufferAppendChar(b, L'\'');
       break;
     }
-    case N_BOOLEAN:
+    case F_BOOLEAN:
       if (expr->boolean.value == 0) {
         stringBufferAppendStr(b, L"false");
       }
@@ -241,7 +241,7 @@ void exprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable) {
         stringBufferAppendStr(b, L"true");
       }
       break;
-    case N_STRING: {
+    case F_STRING: {
       if (readable) {
         stringBufferAppendChar(b, L'"');
         stringBufferAppendStr(b, expr->string.value);
@@ -252,16 +252,16 @@ void exprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable) {
       }
       break;
     }
-    case N_SYMBOL: {
+    case F_SYMBOL: {
       stringBufferAppendStr(b, expr->symbol.value);
       break;
     }
-    case N_KEYWORD: {
+    case F_KEYWORD: {
       stringBufferAppendChar(b, L':');
       stringBufferAppendStr(b, expr->keyword.value);
       break;
     }
-    case N_LIST: {
+    case F_LIST: {
       stringBufferAppendChar(b, L'(');
 
       ListElement *elem = expr->list.head;
@@ -279,7 +279,7 @@ void exprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable) {
       stringBufferAppendChar(b, L')');
       break;
     }
-    case N_VEC: {
+    case F_VEC: {
       stringBufferAppendChar(b, L'[');
 
       ListElement *elem = expr->vec.head;
@@ -297,7 +297,7 @@ void exprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable) {
       stringBufferAppendChar(b, L']');
       break;
     }
-    case N_MAP: {
+    case F_MAP: {
       stringBufferAppendChar(b, L'{');
 
       MapElement *elem = expr->map.head;
@@ -322,17 +322,17 @@ void exprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable) {
   }
 }
 
-void exprPrnBuf(Expr *expr, StringBuffer_t b) {
+void exprPrnBuf(Form *expr, StringBuffer_t b) {
   return exprPrnBufConf(expr, b, true);
 }
 
-wchar_t* exprPrnStr(Pool_t pool, Expr *expr) {
+wchar_t* exprPrnStr(Pool_t pool, Form *expr) {
   StringBuffer_t b = stringBufferMake(pool);
   exprPrnBuf(expr, b);
   return copyText(pool, stringBufferText(b), stringBufferLength(b));
 }
 
-void exprPrn(Pool_t pool, Expr *expr) {
+void exprPrn(Pool_t pool, Form *expr) {
   wchar_t *str = exprPrnStr(pool, expr);
   printf("%ls", str);
 }

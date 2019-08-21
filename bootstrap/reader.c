@@ -18,7 +18,7 @@
  * Reader Begins
  */
 
-RetVal tryStringRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryStringRead(Pool_t pool, TokenStream_t stream, Form **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -37,7 +37,7 @@ RetVal tryStringRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error
   wchar_t *text = token->text + 1;
   uint64_t len = token->source.length - 2;
 
-  Expr *expr = stringMake(pool, text, len);
+  Form *expr = stringMake(pool, text, len);
   expr->source = token->source;
 
   *ptr = expr;
@@ -47,7 +47,7 @@ RetVal tryStringRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error
     return ret;
 }
 
-RetVal tryNumberRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryNumberRead(Pool_t pool, TokenStream_t stream, Form **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -67,7 +67,7 @@ RetVal tryNumberRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error
     throwSyntaxError(error, token->source.position, "Cannot represent a number literal larger than 64 bits unsigned");
   }
 
-  Expr *expr = numberMake(pool, value);
+  Form *expr = numberMake(pool, value);
   expr->source = token->source;
 
   *ptr = expr;
@@ -77,7 +77,7 @@ RetVal tryNumberRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error
     return ret;
 }
 
-RetVal tryCharRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryCharRead(Pool_t pool, TokenStream_t stream, Form **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -93,7 +93,7 @@ RetVal tryCharRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) 
         wcslen(token->text));
   }
 
-  Expr *expr = charMake(pool, token->text[0]);
+  Form *expr = charMake(pool, token->text[0]);
   expr->source = token->source;
 
   *ptr = expr;
@@ -103,7 +103,7 @@ RetVal tryCharRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) 
   return ret;
 }
 
-RetVal trySymbolRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal trySymbolRead(Pool_t pool, TokenStream_t stream, Form **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -114,7 +114,7 @@ RetVal trySymbolRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error
     throwSyntaxError(error, token->source.position, "Token is not a type of T_SYMBOL: %u", token->type);
   }
 
-  Expr *expr = symbolMake(pool, token->text, token->source.length);
+  Form *expr = symbolMake(pool, token->text, token->source.length);
   expr->source = token->source;
 
   *ptr = expr;
@@ -124,7 +124,7 @@ RetVal trySymbolRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error
     return ret;
 }
 
-RetVal tryKeywordRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryKeywordRead(Pool_t pool, TokenStream_t stream, Form **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -138,7 +138,7 @@ RetVal tryKeywordRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *erro
   uint64_t len = token->source.length - 1;
   wchar_t *text = token->text + 1;
 
-  Expr *expr = keywordMake(pool, text, len);
+  Form *expr = keywordMake(pool, text, len);
   expr->source = token->source;
 
   *ptr = expr;
@@ -149,7 +149,7 @@ RetVal tryKeywordRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *erro
 }
 
 
-RetVal tryBooleanRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryBooleanRead(Pool_t pool, TokenStream_t stream, Form **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -162,7 +162,7 @@ RetVal tryBooleanRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *erro
 
   bool value = token->type == T_TRUE;
 
-  Expr *expr = booleanMake(pool, value);
+  Form *expr = booleanMake(pool, value);
   expr->source = token->source;
 
   *ptr = expr;
@@ -172,7 +172,7 @@ RetVal tryBooleanRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *erro
     return ret;
 }
 
-RetVal tryNilRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryNilRead(Pool_t pool, TokenStream_t stream, Form **ptr, Error *error) {
 
   RetVal ret;
   Token *token;
@@ -183,7 +183,7 @@ RetVal tryNilRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
     throwSyntaxError(error, token->source.position, "Token is not a type of T_NIL: %u", token->type);
   }
 
-  Expr *expr = nilMake(pool);
+  Form *expr = nilMake(pool);
   expr->source = token->source;
 
   *ptr = expr;
@@ -195,19 +195,19 @@ RetVal tryNilRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
 
 // Lists
 
-RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error);
+RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Form **ptr, Error *error);
 
 // Assume the opening paren has aready been read.
 // Allocate a list, continue to read expressions and add them to it until a
 // closed-paren is found.
 
-RetVal tryListRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryListRead(Pool_t pool, TokenStream_t stream, Form **ptr, Error *error) {
   RetVal ret;
 
   // these get cleaned up on failure
   Token *oParen = NULL, *cParen = NULL;
-  Expr *expr = NULL;
-  Expr *subexpr = NULL;
+  Form *expr = NULL;
+  Form *subexpr = NULL;
 
   // convenience
 
@@ -253,13 +253,13 @@ RetVal tryListRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) 
     return ret;
 }
 
-RetVal tryVecRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryVecRead(Pool_t pool, TokenStream_t stream, Form **ptr, Error *error) {
   RetVal ret;
 
   // these get cleaned up on failure
   Token *oParen = NULL, *cParen = NULL;
-  Expr *expr = NULL;
-  Expr *subexpr = NULL;
+  Form *expr = NULL;
+  Form *subexpr = NULL;
 
   // convenience
 
@@ -305,12 +305,12 @@ RetVal tryVecRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
   return ret;
 }
 
-RetVal tryMapRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryMapRead(Pool_t pool, TokenStream_t stream, Form **ptr, Error *error) {
   RetVal ret;
 
   // these get cleaned up on failure
   Token *oParen = NULL, *cParen = NULL;
-  Expr *expr = NULL;
+  Form *expr = NULL;
 
   // convenience
 
@@ -343,7 +343,7 @@ RetVal tryMapRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
       break;
     }
     else { // read a new entry and add it to the map
-      Expr *key = NULL, *value = NULL;
+      Form *key = NULL, *value = NULL;
       throws(tryExprRead(pool, stream, &key, error));
       throws(tryExprRead(pool, stream, &value, error));
       mapPut(pool, &expr->map, key, value);
@@ -356,14 +356,14 @@ RetVal tryMapRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
   return ret;
 }
 
-RetVal tryQuoteRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryQuoteRead(Pool_t pool, TokenStream_t stream, Form **ptr, Error *error) {
 
   RetVal ret;
 
   Token *token;
-  Expr *quote;
-  Expr *subexpr;
-  Expr *expr;
+  Form *quote;
+  Form *subexpr;
+  Form *expr;
 
   throws(tryStreamNext(pool, stream, &token, error));
 
@@ -392,13 +392,13 @@ RetVal tryQuoteRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error)
     return ret;
 }
 
-RetVal tryWrapperRead(Pool_t pool, TokenStream_t stream, wchar_t *symbolName, Expr **ptr, Error *error) {
+RetVal tryWrapperRead(Pool_t pool, TokenStream_t stream, wchar_t *symbolName, Form **ptr, Error *error) {
   RetVal ret;
 
   Token *token;
-  Expr *quote;
-  Expr *subexpr;
-  Expr *expr;
+  Form *quote;
+  Form *subexpr;
+  Form *expr;
 
   throws(tryStreamNext(pool, stream, &token, error));
 
@@ -432,7 +432,7 @@ RetVal tryWrapperRead(Pool_t pool, TokenStream_t stream, wchar_t *symbolName, Ex
 // if it is a symbol, create a symbol
 // else, explode
 
-RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Expr **ptr, Error *error) {
+RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Form **ptr, Error *error) {
   RetVal ret;
 
   Token *peek;

@@ -8,122 +8,7 @@
 #include "source.h"
 #include "utils.h"
 
-typedef struct Expr Expr;
-
-typedef struct FormString {
-  wchar_t *value;
-  uint64_t length;
-} FormString;
-
-typedef struct FormNumber {
-  uint64_t value;
-} FormNumber;
-
-typedef struct FormChar {
-  wchar_t value;
-} FormChar;
-
-typedef struct FormSymbol {
-  wchar_t *value;
-  uint64_t length;
-} FormSymbol;
-
-typedef struct FormKeyword {
-  wchar_t *value;
-  uint64_t length;
-} FormKeyword;
-
-typedef struct FormBoolean {
-  bool value;
-} FormBoolean;
-
-typedef struct ListElement {
-  struct Expr *expr;
-  struct ListElement *next;
-} ListElement;
-
-typedef struct ExprList {
-  uint64_t length;
-  ListElement *head;
-  ListElement *tail;
-} ExprList;
-
-typedef struct ExprVec {
-  uint64_t length;
-  ListElement *head;
-  ListElement *tail;
-} ExprVec;
-
-typedef struct MapElement {
-  Expr *key;
-  Expr *value;
-  struct MapElement *next;
-} MapElement;
-
-typedef struct ExprMap {
-  uint64_t length;
-  MapElement *head;
-  MapElement *tail;
-} ExprMap;
-
-typedef enum ExprType {
-  N_NONE,
-  N_STRING,
-  N_NUMBER,
-  N_CHAR,
-  N_SYMBOL,
-  N_KEYWORD,
-  N_BOOLEAN,
-  N_NIL,
-  N_LIST,
-  N_VEC,
-  N_MAP
-} ExprType;
-
-typedef struct Expr {
-  ExprType type;
-  union {
-    FormString string;
-    FormNumber number;
-    FormChar chr;
-    FormSymbol symbol;
-    FormKeyword keyword;
-    FormBoolean boolean;
-    ExprList list;
-    ExprVec vec;
-    ExprMap map;
-  };
-  SourceLocation source;
-} Expr;
-
-Expr* exprMake(Pool_t pool);
-
-Expr* stringMake(Pool_t pool, wchar_t *input, uint64_t length);
-Expr* numberMake(Pool_t pool, uint64_t value);
-Expr* charMake(Pool_t pool, wchar_t value);
-Expr* symbolMake(Pool_t pool, wchar_t *name, uint64_t len);
-Expr* keywordMake(Pool_t pool, wchar_t *name, uint64_t len);
-Expr* booleanMake(Pool_t pool, bool value);
-Expr* nilMake(Pool_t pool);
-Expr* listMake(Pool_t pool);
-Expr* vecMake(Pool_t pool);
-Expr* mapMake(Pool_t pool);
-
-void exprInitContents(Expr *expr);
-void listInitContents(ExprList *list);
-void listAppend(Pool_t pool, ExprList *list, Expr *expr);
-void vecInitContents(ExprVec *list);
-void vecAppend(Pool_t pool, ExprVec *list, Expr *expr);
-void mapInitContents(ExprMap *map);
-void mapPut(Pool_t pool, ExprMap *map, Expr *key, Expr *value);
-
-void exprPrnBufConf(Expr *expr, StringBuffer_t b, bool readable);
-void exprPrnBuf(Expr *expr, StringBuffer_t b);
-wchar_t* exprPrnStr(Pool_t pool, Expr *expr);
-void exprPrn(Pool_t pool, Expr* expr);
-
-
-/*typedef struct Form Form;
+typedef struct Form Form;
 
 //
 // reader forms
@@ -174,8 +59,8 @@ typedef struct FormVec {
 } FormVec;
 
 typedef struct MapElement {
-  struct Form *key;
-  struct Form *value;
+  Form *key;
+  Form *value;
   struct MapElement *next;
 } MapElement;
 
@@ -225,6 +110,8 @@ typedef struct BindingTable {
   uint16_t usedSpace;
   Binding *bindings;
 } BindingTable;
+
+typedef struct Form Form;
 
 typedef struct Forms {
   uint16_t numForms;
@@ -297,12 +184,12 @@ typedef struct FormFnCall {
   bool recurses;
 } FormFnCall;
 
-//
-// `builtin` is a special form that allows code to invoke compile-target specific functionality.
-// Analyzer does not interpret builtins, they are handled exclusively by the compiler/code emitter.
-//
-// (builtin :add 10 20)
-//
+/*
+ * `builtin` is a special form that allows code to invoke compile-target specific functionality.
+ * Analyzer does not interpret builtins, they are handled exclusively by the compiler/code emitter.
+ *
+ * (builtin :add 10 20)
+ */
 typedef struct FormBuiltin {
   Text name;
   Forms args;
@@ -367,7 +254,34 @@ typedef struct FormRoot {
   Text fileName;
   bool hasFileName;
 } FormRoot;
- */
 
+void formInitContents(Form *form);
+void formsInitContents(Forms *forms);
+
+Form* exprMake(Pool_t pool);
+
+Form* stringMake(Pool_t pool, wchar_t *input, uint64_t length);
+Form* numberMake(Pool_t pool, uint64_t value);
+Form* charMake(Pool_t pool, wchar_t value);
+Form* symbolMake(Pool_t pool, wchar_t *name, uint64_t len);
+Form* keywordMake(Pool_t pool, wchar_t *name, uint64_t len);
+Form* booleanMake(Pool_t pool, bool value);
+Form* nilMake(Pool_t pool);
+Form* listMake(Pool_t pool);
+Form* vecMake(Pool_t pool);
+Form* mapMake(Pool_t pool);
+
+void exprInitContents(Form *expr);
+void listInitContents(FormList *list);
+void listAppend(Pool_t pool, FormList *list, Form *expr);
+void vecInitContents(FormVec *list);
+void vecAppend(Pool_t pool, FormVec *list, Form *expr);
+void mapInitContents(FormMap *map);
+void mapPut(Pool_t pool, FormMap *map, Form *key, Form *value);
+
+void exprPrnBufConf(Form *expr, StringBuffer_t b, bool readable);
+void exprPrnBuf(Form *expr, StringBuffer_t b);
+wchar_t* exprPrnStr(Pool_t pool, Form *expr);
+void exprPrn(Pool_t pool, Form* expr);
 
 #endif //WARP_LANG_AST_H

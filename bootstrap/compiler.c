@@ -631,7 +631,7 @@ RetVal varRefConstantGetIndex(Text name, Output output, uint16_t *index, Error *
     return ret;
 }
 
-RetVal appendMeta(Output output, Expr *constant, ConstantMeta *meta, Error *error) {
+RetVal appendMeta(Output output, Form *constant, ConstantMeta *meta, Error *error) {
   RetVal ret;
 
   constantMetaInit(meta);
@@ -665,122 +665,46 @@ RetVal appendMeta(Output output, Expr *constant, ConstantMeta *meta, Error *erro
   return ret;
 }
 
-RetVal constInitContents(Expr *constant, Constant *c, Output output, Error *error) {
+RetVal constInitContents(Form *constant, Constant *c, Output output, Error *error) {
   RetVal ret;
 
   switch (constant->type) {
 
-    case N_NUMBER: {
+    case F_NUMBER: {
       c->type = CT_INT;
       c->integer = constant->number.value;
       break;
     }
-    case N_CHAR: {
+    case F_CHAR: {
       c->type = CT_CHAR;
       c->chr = constant->chr.value;
       break;
     }
-    case N_NIL: {
+    case F_NIL: {
       c->type = CT_NIL;
       break;
     }
-    case N_BOOLEAN: {
+    case F_BOOLEAN: {
       c->type = CT_BOOL;
       c->boolean = (uint8_t) constant->boolean.value;
       break;
     }
-    case N_STRING: {
+    case F_STRING: {
       c->type = CT_STR;
       c->string.length = constant->string.length;
       throws(tryCopyText(output.pool, constant->string.value, &c->string.value, c->string.length, error));
       break;
     }
-    case N_SYMBOL: {
+    case F_SYMBOL: {
       c->type = CT_SYMBOL;
       c->symbol.length = constant->symbol.length;
       throws(tryCopyText(output.pool, constant->symbol.value, &c->symbol.value, c->symbol.length, error));
       break;
     }
-    case N_KEYWORD: {
+    case F_KEYWORD: {
       c->type = CT_KEYWORD;
       c->keyword.length = constant->keyword.length;
       throws(tryCopyText(output.pool, constant->keyword.value, &c->keyword.value, c->keyword.length, error));
-      break;
-    }
-    case N_LIST: {
-      c->type = CT_LIST;
-      c->list.length = constant->list.length;
-      tryPalloc(output.pool, c->list.constants, sizeof(uint16_t) * c->list.length, "constant list array");
-
-      throws(appendMeta(output, constant, &c->list.meta, error));
-
-      ListElement *elem = constant->list.head;
-      uint16_t elemIndex = 0;
-      while (elem != NULL) {
-
-        Constant child;
-        throws(constInitContents(elem->expr, &child, output, error));
-        throws(tryAppendConstant(output, child, error));
-
-        uint16_t childIndex = output.constants->numUsed - 1;
-        c->list.constants[elemIndex] = childIndex;
-
-        elem = elem->next;
-        elemIndex = elemIndex + 1;
-      }
-
-      break;
-    }
-    case N_VEC: {
-      c->type = CT_VEC;
-      c->vec.length = constant->vec.length;
-      tryPalloc(output.pool, c->vec.constants, sizeof(uint16_t) * c->vec.length, "constant vec array");
-
-      ListElement *elem = constant->vec.head;
-      uint16_t elemIndex = 0;
-      while (elem != NULL) {
-
-        Constant child;
-        throws(constInitContents(elem->expr, &child, output, error));
-        throws(tryAppendConstant(output, child, error));
-
-        uint16_t childIndex = output.constants->numUsed - 1;
-        c->vec.constants[elemIndex] = childIndex;
-
-        elem = elem->next;
-        elemIndex = elemIndex + 1;
-      }
-
-      break;
-    }
-    case N_MAP: {
-
-      c->type = CT_MAP;
-      c->map.length = constant->map.length;
-      tryPalloc(output.pool, c->map.constants, sizeof(uint16_t) * c->map.length * 2, "constant map array");
-
-      throws(appendMeta(output, constant, &c->map.meta, error));
-
-      MapElement *elem = constant->map.head;
-      uint16_t elemIndex = 0;
-      while (elem != NULL) {
-
-        Constant key, value;
-
-        throws(constInitContents(elem->key, &key, output, error));
-        throws(tryAppendConstant(output, key, error));
-        uint16_t keyIndex = output.constants->numUsed - 1;
-        c->map.constants[elemIndex] = keyIndex;
-
-        throws(constInitContents(elem->value, &value, output, error));
-        throws(tryAppendConstant(output, value, error));
-        uint16_t valueIndex = output.constants->numUsed - 1;
-        c->map.constants[elemIndex + 1] = valueIndex;
-
-        elem = elem->next;
-        elemIndex = elemIndex + 2;
-      }
-
       break;
     }
     default:
@@ -798,7 +722,7 @@ RetVal tryCompileConst(Form *form, Output output, Error *error) {
 
   Constant c;
 
-  throws(constInitContents(form->constant, &c, output, error));
+  throws(constInitContents(form, &c, output, error));
   throws(tryAppendConstant(output, c, error));
 
   uint16_t index = output.constants->numUsed - 1;
@@ -983,9 +907,9 @@ RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
 RetVal tryCompileList(Form *form, Output output, Error *error) {
   RetVal ret;
 
-  Forms forms = form->list.forms;
+  uint64_t numForms = form->list.length;
 
-  if (forms.numForms == 0) {
+  if (numForms == 0) {
     {
       Constant c;
       c.type = CT_NIL;
@@ -996,11 +920,20 @@ RetVal tryCompileList(Form *form, Output output, Error *error) {
     }
   }
   else {
-    for (int i=0; i < forms.numForms; i++) {
 
-      uint16_t idx = forms.numForms - (i + 1);
-      Form *f = &forms.forms[idx];
+    Form *forms;
+    {
+      palloc(output.pool, forms, sizeof(Form) * numForms, "Constant array");
+      ListElement *listElem = form->list.head;
+      for (int i = 0; i < numForms; i++) {
+        uint16_t idx = numForms - (i + 1);
+        forms[idx] = *listElem->expr;
+        listElem = listElem->next;
+      }
+    }
 
+    for (int i=0; i < numForms; i++) {
+      Form *f = &forms[i];
       if (i == 0) {
         throws(tryCompile(f, output, error));
 
@@ -1019,11 +952,87 @@ RetVal tryCompileList(Form *form, Output output, Error *error) {
         uint8_t addCode[] = {I_SWAP, I_CONS};
         throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
       }
+
     }
   }
 
   return R_SUCCESS;
 
+  failure:
+  return ret;
+}
+
+RetVal tryCompileVec(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  Text varName;
+  varName.value = L"vector";
+  varName.length = wcslen(varName.value);
+
+  Form fnCallable;
+  formInitContents(&fnCallable);
+  fnCallable.type = F_VAR_REF;
+  fnCallable.varRef.name = varName;
+
+  Forms args;
+  formsInitContents(&args);
+  args.numForms = form->vec.length;
+  palloc(output.pool, args.forms, sizeof(Form) * args.numForms, "Form array");
+
+  ListElement *elem = form->vec.head;
+  for (uint64_t i=0; i<args.numForms; i++) {
+    args.forms[i] = *elem->expr;
+    elem = elem->next;
+  }
+
+  Form fnCall;
+  formInitContents(&fnCall);
+  fnCall.type = F_FN_CALL;
+  fnCallInitContents(&fnCall.fnCall);
+  fnCall.fnCall.fnCallable = &fnCallable;
+  fnCall.fnCall.args = args;
+
+  throws(tryCompileFnCall(&fnCall, output, error));
+
+  return R_SUCCESS;
+  failure:
+  return ret;
+}
+
+RetVal tryCompileMap(Form *form, Output output, Error *error) {
+  RetVal ret;
+
+  Text varName;
+  varName.value = L"hash-map";
+  varName.length = wcslen(varName.value);
+
+  Form fnCallable;
+  formInitContents(&fnCallable);
+  fnCallable.type = F_VAR_REF;
+  fnCallable.varRef.name = varName;
+
+  Forms args;
+  formsInitContents(&args);
+  args.numForms = form->map.length * 2;
+  palloc(output.pool, args.forms, sizeof(Form) * args.numForms, "Form array");
+
+  MapElement *elem = form->map.head;
+  for (uint64_t i=0; i<args.numForms; i+=2) {
+    args.forms[i] = *elem->key;
+    args.forms[i+1] = *elem->value;
+    elem = elem->next;
+  }
+
+  Form fnCall;
+  formInitContents(&fnCall);
+  fnCall.type = F_FN_CALL;
+  fnCallInitContents(&fnCall.fnCall);
+  fnCall.fnCall.fnCallable = &fnCallable;
+  fnCall.fnCall.args = args;
+
+  throws(tryCompileFnCall(&fnCall, output, error));
+
+  return R_SUCCESS;
   failure:
   return ret;
 }
@@ -1083,7 +1092,13 @@ RetVal tryCompile(Form *form, Output output, Error *error) {
 
   switch (form->type) {
 
-    case F_CONST:
+    case F_NUMBER:
+    case F_CHAR:
+    case F_NIL:
+    case F_BOOLEAN:
+    case F_STRING:
+    case F_SYMBOL:
+    case F_KEYWORD:
       throws(tryCompileConst(form, output, error));
       break;
 
@@ -1121,6 +1136,14 @@ RetVal tryCompile(Form *form, Output output, Error *error) {
 
     case F_LIST:
       throws(tryCompileList(form, output, error));
+      break;
+
+    case F_VEC:
+    throws(tryCompileVec(form, output, error));
+      break;
+
+    case F_MAP:
+      throws(tryCompileMap(form, output, error));
       break;
 
     case F_HANDLER:

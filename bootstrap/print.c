@@ -15,35 +15,35 @@ typedef struct Ctx {
   Pool_t pool;
 } Ctx;
 
-void _print(Ctx *ctx, Value result, Expr *expr);
+void _print(Ctx *ctx, Value result, Form *expr);
 
-typedef void (*PrintGeneric) (Ctx *ctx, Value result, Expr *expr);
+typedef void (*PrintGeneric) (Ctx *ctx, Value result, Form *expr);
 
 bool isEmpty(Value value) {
   return valueType(value) == VT_NIL;
 }
 
-void printNil(Ctx *ctx, Value result, Expr *expr) {
-  expr->type = N_NIL;
+void printNil(Ctx *ctx, Value result, Form *expr) {
+  expr->type = F_NIL;
 }
 
-void printUint(Ctx *ctx, Value result, Expr *expr) {
-  expr->type = N_NUMBER;
+void printUint(Ctx *ctx, Value result, Form *expr) {
+  expr->type = F_NUMBER;
   expr->number.value = unwrapUint(result);
 }
 
-void printChar(Ctx *ctx, Value result, Expr *expr) {
-  expr->type = N_CHAR;
+void printChar(Ctx *ctx, Value result, Form *expr) {
+  expr->type = F_CHAR;
   expr->chr.value = unwrapChar(result);
 }
 
-void printBool(Ctx *ctx, Value result, Expr *expr) {
-  expr->type = N_BOOLEAN;
+void printBool(Ctx *ctx, Value result, Form *expr) {
+  expr->type = F_BOOLEAN;
   expr->boolean.value = unwrapBool(result);
 }
 
-void printFn(Ctx *ctx, Value result, Expr *expr) {
-  expr->type = N_STRING;
+void printFn(Ctx *ctx, Value result, Form *expr) {
+  expr->type = F_STRING;
   wchar_t function[] = L"<function>";
   expr->string.length = wcslen(function);
 
@@ -54,8 +54,8 @@ void printFn(Ctx *ctx, Value result, Expr *expr) {
   }
 }
 
-void printCFn(Ctx *ctx, Value result, Expr *expr) {
-  expr->type = N_STRING;
+void printCFn(Ctx *ctx, Value result, Form *expr) {
+  expr->type = F_STRING;
   wchar_t function[] = L"<c-function>";
   expr->string.length = wcslen(function);
 
@@ -66,8 +66,8 @@ void printCFn(Ctx *ctx, Value result, Expr *expr) {
   }
 }
 
-void printClosure(Ctx *ctx, Value result, Expr *expr) {
-  expr->type = N_STRING;
+void printClosure(Ctx *ctx, Value result, Form *expr) {
+  expr->type = F_STRING;
   wchar_t function[] = L"<closure>";
   expr->string.length = wcslen(function);
 
@@ -78,9 +78,9 @@ void printClosure(Ctx *ctx, Value result, Expr *expr) {
   }
 }
 
-void printStr(Ctx *ctx, Value result, Expr *expr) {
+void printStr(Ctx *ctx, Value result, Form *expr) {
   String *str = deref(ctx->vm, result);
-  expr->type = N_STRING;
+  expr->type = F_STRING;
   expr->string.length = str->length;
 
   Error error;
@@ -90,10 +90,10 @@ void printStr(Ctx *ctx, Value result, Expr *expr) {
   }
 }
 
-void printSymbol(Ctx *ctx, Value result, Expr *expr) {
+void printSymbol(Ctx *ctx, Value result, Form *expr) {
   Symbol *sym = deref(ctx->vm, result);
   String *str = deref(ctx->vm, sym->name);
-  expr->type = N_SYMBOL;
+  expr->type = F_SYMBOL;
   expr->symbol.length = str->length;
 
   Error error;
@@ -103,10 +103,10 @@ void printSymbol(Ctx *ctx, Value result, Expr *expr) {
   }
 }
 
-void printKeyword(Ctx *ctx, Value result, Expr *expr) {
+void printKeyword(Ctx *ctx, Value result, Form *expr) {
   Keyword *kw = deref(ctx->vm, result);
   String *str = deref(ctx->vm, kw->name);
-  expr->type = N_KEYWORD;
+  expr->type = F_KEYWORD;
   expr->keyword.length = str->length;
 
   Error error;
@@ -148,7 +148,7 @@ void readProperty(VM_t vm, Value *ptr, Property *p) {
   *ptr = properties->next;
 }
 
-void printMetadata(VM_t vm, Value metadata, Expr *expr) {
+void printMetadata(VM_t vm, Value metadata, Form *expr) {
   while (!isEmpty(metadata)) {
 
     Property p;
@@ -172,17 +172,17 @@ void printMetadata(VM_t vm, Value metadata, Expr *expr) {
   }
 }
 
-void printList(Ctx *ctx, Value result, Expr *expr) {
+void printList(Ctx *ctx, Value result, Form *expr) {
   Cons *cons = deref(ctx->vm, result);
 
-  expr->type = N_LIST;
+  expr->type = F_LIST;
 
   printMetadata(ctx->vm, cons->metadata, expr);
 
   listInitContents(&expr->list);
-  Expr *elem;
+  Form *elem;
 
-  palloc(ctx->pool, elem, sizeof(Expr), "Expr");
+  palloc(ctx->pool, elem, sizeof(Form), "Expr");
   exprInitContents(elem);
 
   _print(ctx, cons->value, elem);
@@ -200,7 +200,7 @@ void printList(Ctx *ctx, Value result, Expr *expr) {
 
     cons = deref(ctx->vm, cons->next);
 
-    palloc(ctx->pool, elem, sizeof(Expr), "Expr");
+    palloc(ctx->pool, elem, sizeof(Form), "Expr");
     exprInitContents(elem);
 
     _print(ctx, cons->value, elem);
@@ -209,11 +209,11 @@ void printList(Ctx *ctx, Value result, Expr *expr) {
   }
 }
 
-void printMap(Ctx *ctx, Value result, Expr *expr) {
+void printMap(Ctx *ctx, Value result, Form *expr) {
   Map *map = deref(ctx->vm, result);
   Array *array = deref(ctx->vm, map->entries);
 
-  expr->type = N_MAP;
+  expr->type = F_MAP;
   mapInitContents(&expr->map);
 
   uint64_t size = objectHeaderSize(array->header);
@@ -225,13 +225,13 @@ void printMap(Ctx *ctx, Value result, Expr *expr) {
       MapEntry *entry = deref(ctx->vm, entryRef);
       if (entry->used) {
 
-        Expr *keyExpr = NULL;
-        palloc(ctx->pool, keyExpr, sizeof(Expr), "Expr");
+        Form *keyExpr = NULL;
+        palloc(ctx->pool, keyExpr, sizeof(Form), "Expr");
         exprInitContents(keyExpr);
         _print(ctx, entry->key, keyExpr);
 
-        Expr *valueExpr = NULL;
-        palloc(ctx->pool, valueExpr, sizeof(Expr), "Expr");
+        Form *valueExpr = NULL;
+        palloc(ctx->pool, valueExpr, sizeof(Form), "Expr");
         exprInitContents(valueExpr);
         _print(ctx, entry->value, valueExpr);
 
@@ -243,13 +243,13 @@ void printMap(Ctx *ctx, Value result, Expr *expr) {
   }
 }
 
-void printArray(Ctx *ctx, Value result, Expr *expr) {
+void printArray(Ctx *ctx, Value result, Form *expr) {
 
   Array *array = deref(ctx->vm, result);
   uint64_t size = objectHeaderSize(array->header);
   Value *elements = arrayElements(array);
 
-  expr->type = N_VEC;
+  expr->type = F_VEC;
   vecInitContents(&expr->vec);
 
   Error error;
@@ -257,8 +257,8 @@ void printArray(Ctx *ctx, Value result, Expr *expr) {
 
   for (uint64_t i=0; i<size; i++) {
 
-    Expr *elem = NULL;
-    palloc(ctx->pool, elem, sizeof(Expr), "Expr");
+    Form *elem = NULL;
+    palloc(ctx->pool, elem, sizeof(Form), "Expr");
     exprInitContents(elem);
 
     _print(ctx, elements[i], elem);
@@ -267,7 +267,7 @@ void printArray(Ctx *ctx, Value result, Expr *expr) {
   }
 }
 
-void printRecord(Ctx *ctx, Value result, Expr *expr) {
+void printRecord(Ctx *ctx, Value result, Form *expr) {
   Record *record = deref(ctx->vm, result);
 
   Error error;
@@ -297,13 +297,13 @@ void printRecord(Ctx *ctx, Value result, Expr *expr) {
     explode("append");
   }
 
-  expr->type = N_STRING;
+  expr->type = F_STRING;
   expr->string.length = stringBufferLength(b);
   expr->string.value = stringBufferText(b);
 }
 
-void printPort(Ctx *ctx, Value result, Expr *expr) {
-  expr->type = N_STRING;
+void printPort(Ctx *ctx, Value result, Form *expr) {
+  expr->type = F_STRING;
   wchar_t function[] = L"<port>";
   expr->string.length = wcslen(function);
 
@@ -314,8 +314,8 @@ void printPort(Ctx *ctx, Value result, Expr *expr) {
   }
 }
 
-void printByteArray(Ctx *ctx, Value result, Expr *expr) {
-  expr->type = N_STRING;
+void printByteArray(Ctx *ctx, Value result, Form *expr) {
+  expr->type = F_STRING;
   wchar_t function[] = L"<byte-array>";
   expr->string.length = wcslen(function);
 
@@ -348,19 +348,19 @@ PrintGeneric getPrintGeneric(Ctx *ctx, ValueType type) {
   }
 }
 
-void _print(Ctx *ctx, Value result, Expr *expr) {
+void _print(Ctx *ctx, Value result, Form *expr) {
   ValueType type = valueType(result);
   exprInitContents(expr);
   PrintGeneric p = getPrintGeneric(ctx, type);
   p(ctx, result, expr);
 }
 
-Expr* printToReader(VM_t vm, Pool_t pool, Value result) {
+Form* printToReader(VM_t vm, Pool_t pool, Value result) {
   Ctx ctx;
   ctx.vm = vm;
   ctx.pool= pool;
 
-  Expr *elem = exprMake(pool);
+  Form *elem = exprMake(pool);
   _print(&ctx, result, elem);
 
   return elem;
@@ -378,7 +378,7 @@ void print(VM_t vm, Value value) {
   ctx.vm = vm;
   ctx.pool = pool;
 
-  Expr elem;
+  Form elem;
   exprInitContents(&elem);
   _print(&ctx, value, &elem);
 
@@ -391,7 +391,7 @@ void printBuf(Ctx *ctx, StringBuffer_t b, Value value) {
   Error error;
   errorInitContents(&error);
 
-  Expr elem;
+  Form elem;
   exprInitContents(&elem);
   _print(ctx, value, &elem);
 

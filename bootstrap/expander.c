@@ -42,16 +42,11 @@ RetVal tryIsMacro(Expander *expander, Text sym, bool *isMacro, Error *error) {
   args.numForms = 1;
   tryPalloc(expander->pool, args.forms, sizeof(Form) * args.numForms, "Form array");
 
-  Expr varName;
-  exprInitContents(&varName);
-  varName.type = N_SYMBOL;
-  varName.symbol.length = sym.length;
-  varName.symbol.value = sym.value;
-
-  Form *arg = &args.forms[0];
-  formInitContents(arg);
-  arg->type = F_CONST;
-  arg->constant = &varName;
+  Form *varName = &args.forms[0];
+  exprInitContents(varName);
+  varName->type = F_SYMBOL;
+  varName->symbol.length = sym.length;
+  varName->symbol.value = sym.value;
 
   Form fnCall;
   formInitContents(&fnCall);
@@ -89,10 +84,10 @@ RetVal tryIsMacro(Expander *expander, Text sym, bool *isMacro, Error *error) {
     return ret;
 }
 
-RetVal tryExpand(Expander *expander, Text sym, Expr *input, Expr **output, Error *error) {
+RetVal tryExpand(Expander *expander, Text sym, Form *input, Form **output, Error *error) {
   RetVal ret;
 
-  if (input->type != N_LIST) {
+  if (input->type != F_LIST) {
     throwInternalError(error, "macro input expr must always be a list: %u", input->type);
   }
 
@@ -108,10 +103,7 @@ RetVal tryExpand(Expander *expander, Text sym, Expr *input, Expr **output, Error
 
   ListElement *elem = input->list.head;
   for (uint64_t i=0; i<args.numForms; i++) {
-    Form *arg = &args.forms[i];
-    formInitContents(arg);
-    arg->type = F_CONST;
-    arg->constant = elem->expr;
+    args.forms[i] = *elem->expr;
     elem = elem->next;
   }
 
@@ -134,7 +126,7 @@ RetVal tryExpand(Expander *expander, Text sym, Expr *input, Expr **output, Error
 
   if (result.type == RT_RESULT) {
 
-    Expr *expr = printToReader(expander->vm, expander->pool, result.value);
+    Form *expr = printToReader(expander->vm, expander->pool, result.value);
 
     printf("macroexpand occurred {\n    ");
     exprPrn(expander->pool, input);

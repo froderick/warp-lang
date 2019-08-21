@@ -1205,99 +1205,6 @@ Value keywordHydrate(VM *vm, KeywordConstant kwConst) {
   return value;
 }
 
-/*
- * `protectedFn` is a alloc-safe pointer to the Fn for which a constant is being hydrated.
- * This is included so we so that references to already-hydrated values can be resolved by
- * constant index.
- */
-Value listHydrate(VM *vm, Fn **protectedFn, ListConstant listConst) {
-
-  // build up meta property list with conses
-  Value protectedMeta = W_NIL_VALUE;
-  pushFrameRoot(vm, &protectedMeta);
-
-  for (uint64_t i=0; i<listConst.meta.numProperties; i++) {
-    ConstantMetaProperty *p = &listConst.meta.properties[i];
-
-    Cons *propValue = makeCons(vm);
-    propValue->value = fnConstants(*protectedFn)[p->valueIndex];
-    propValue->next = protectedMeta;
-    protectedMeta = (Value)propValue;
-
-    Cons *propKey = makeCons(vm);
-    propKey->value = fnConstants(*protectedFn)[p->keyIndex];
-    propKey->next = protectedMeta;
-    protectedMeta = (Value)propKey;
-  }
-
-  // build up list with conses, each cons gets the same meta
-  Value protectedSeq = W_NIL_VALUE;
-  pushFrameRoot(vm, &protectedSeq);
-
-  for (uint16_t i = 0; i < listConst.length; i++) {
-
-    uint16_t listConstEnd = listConst.length - 1;
-    uint16_t valueIndex = listConst.constants[listConstEnd - i];
-
-    Cons *cons = makeCons(vm);
-    cons->value = fnConstants(*protectedFn)[valueIndex];
-    cons->next = protectedSeq;
-    cons->metadata = protectedMeta;
-    protectedSeq = (Value)cons;
-  }
-
-  popFrameRoot(vm);
-  popFrameRoot(vm);
-
-  return protectedSeq;
-}
-
-/*
- * `protectedFn` is a alloc-safe pointer to the Fn for which a constant is being hydrated.
- * This is included so we so that references to already-hydrated values can be resolved by
- * constant index.
- */
-Value vecHydrate(VM *vm, Fn **protectedFn, VecConstant vecConst) {
-
-  Array *array = makeArray(vm, vecConst.length);
-  Value* elements = arrayElements(array);
-
-  for (uint16_t i = 0; i < vecConst.length; i++) {
-    uint16_t valueIndex = vecConst.constants[i];
-    elements[i] = fnConstants(*protectedFn)[valueIndex];
-  }
-
-  return (Value)array;
-}
-
-void putMapEntry(VM *vm, Map **protectedMap, Value key, Value insertMe);
-
-/*
- * `protectedFn` is a alloc-safe pointer to the Fn for which a constant is being hydrated.
- * This is included so we so that references to already-hydrated values can be resolved by
- * constant index.
- */
-Value mapHydrate(VM *vm, Fn **protectedFn, MapConstant mapConst) {
-
-  Map *protectedMap = makeMap(vm);
-  pushFrameRoot(vm, (Value*)&protectedMap);
-
-  for (uint16_t i = 0; i < mapConst.length * 2; i+=2) {
-
-    uint16_t keyIndex = mapConst.constants[i];
-    Value key = fnConstants(*protectedFn)[keyIndex];
-
-    uint16_t valueIndex = mapConst.constants[i+1];
-    Value value = fnConstants(*protectedFn)[valueIndex];
-
-    putMapEntry(vm, &protectedMap, key, value);
-  }
-
-  popFrameRoot(vm); // protectedMap
-
-  return (Value)protectedMap;
-}
-
 // TODO: I had another thought, can we get rid of the nested graph of constants and flatten it entirely?
 
 Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c) {
@@ -1326,15 +1233,6 @@ Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c) {
       break;
     case CT_KEYWORD:
       v = keywordHydrate(vm, c.keyword);
-      break;
-    case CT_LIST:
-      v = listHydrate(vm, protectedFn, c.list);
-      break;
-    case CT_VEC:
-      v = vecHydrate(vm, protectedFn, c.vec);
-      break;
-    case CT_MAP:
-      v = mapHydrate(vm, protectedFn, c.map);
       break;
     case CT_NONE:
     default:
@@ -1365,6 +1263,8 @@ typedef struct ExceptionParams {
   Value *protectedValue;   // includes a :value
   Raised *raised;          // includes native frame line info
 } ExceptionParams;
+
+void putMapEntry(VM *vm, Map **protectedMap, Value key, Value insertMe);
 
 Value _exceptionMake(VM *vm, ExceptionParams p) {
 

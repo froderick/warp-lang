@@ -13,7 +13,7 @@
 #include "ast.h"
 
 
-RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Expr **expr, Error *error);
+RetVal tryExprRead(Pool_t pool, TokenStream_t stream, Form **expr, Error *error);
 
 
 #endif //WARP_LANG_READER_H
