@@ -183,7 +183,7 @@ void printList(Ctx *ctx, Value result, Form *expr) {
   Form *elem;
 
   palloc(ctx->pool, elem, sizeof(Form), "Expr");
-  exprInitContents(elem);
+  formInitContents(elem);
 
   _print(ctx, cons->value, elem);
 
@@ -201,7 +201,7 @@ void printList(Ctx *ctx, Value result, Form *expr) {
     cons = deref(ctx->vm, cons->next);
 
     palloc(ctx->pool, elem, sizeof(Form), "Expr");
-    exprInitContents(elem);
+    formInitContents(elem);
 
     _print(ctx, cons->value, elem);
 
@@ -227,12 +227,12 @@ void printMap(Ctx *ctx, Value result, Form *expr) {
 
         Form *keyExpr = NULL;
         palloc(ctx->pool, keyExpr, sizeof(Form), "Expr");
-        exprInitContents(keyExpr);
+        formInitContents(keyExpr);
         _print(ctx, entry->key, keyExpr);
 
         Form *valueExpr = NULL;
         palloc(ctx->pool, valueExpr, sizeof(Form), "Expr");
-        exprInitContents(valueExpr);
+        formInitContents(valueExpr);
         _print(ctx, entry->value, valueExpr);
 
         Error e;
@@ -259,7 +259,7 @@ void printArray(Ctx *ctx, Value result, Form *expr) {
 
     Form *elem = NULL;
     palloc(ctx->pool, elem, sizeof(Form), "Expr");
-    exprInitContents(elem);
+    formInitContents(elem);
 
     _print(ctx, elements[i], elem);
 
@@ -350,7 +350,7 @@ PrintGeneric getPrintGeneric(Ctx *ctx, ValueType type) {
 
 void _print(Ctx *ctx, Value result, Form *expr) {
   ValueType type = valueType(result);
-  exprInitContents(expr);
+  formInitContents(expr);
   PrintGeneric p = getPrintGeneric(ctx, type);
   p(ctx, result, expr);
 }
@@ -360,7 +360,7 @@ Form* printToReader(VM_t vm, Pool_t pool, Value result) {
   ctx.vm = vm;
   ctx.pool= pool;
 
-  Form *elem = exprMake(pool);
+  Form *elem = formMake(pool);
   _print(&ctx, result, elem);
 
   return elem;
@@ -379,7 +379,7 @@ void print(VM_t vm, Value value) {
   ctx.pool = pool;
 
   Form elem;
-  exprInitContents(&elem);
+  formInitContents(&elem);
   _print(&ctx, value, &elem);
 
   exprPrn(pool, &elem);
@@ -392,7 +392,7 @@ void printBuf(Ctx *ctx, StringBuffer_t b, Value value) {
   errorInitContents(&error);
 
   Form elem;
-  exprInitContents(&elem);
+  formInitContents(&elem);
   _print(ctx, value, &elem);
 
   wchar_t *str = exprPrnStr(ctx->pool, &elem);

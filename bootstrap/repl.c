@@ -33,7 +33,8 @@ RetVal tryReplCompile(Pool_t outputPool, TokenStream_t stream, FileInfo fileInfo
 
   throws(tryExprRead(outputPool, stream, &expr, error));
   throws(tryFormAnalyzeOptions(options, expr, outputPool, &form, error));
-  throws(tryCompileTopLevel(outputPool, form, codeUnit, error));
+
+  compileTopLevel(outputPool, form, codeUnit);
 
   ret = R_SUCCESS;
   goto finally;

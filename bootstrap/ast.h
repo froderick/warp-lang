@@ -258,7 +258,7 @@ typedef struct FormRoot {
 void formInitContents(Form *form);
 void formsInitContents(Forms *forms);
 
-Form* exprMake(Pool_t pool);
+Form* formMake(Pool_t pool);
 
 Form* stringMake(Pool_t pool, wchar_t *input, uint64_t length);
 Form* numberMake(Pool_t pool, uint64_t value);
@@ -271,7 +271,7 @@ Form* listMake(Pool_t pool);
 Form* vecMake(Pool_t pool);
 Form* mapMake(Pool_t pool);
 
-void exprInitContents(Form *expr);
+void formInitContents(Form *expr);
 void listInitContents(FormList *list);
 void listAppend(Pool_t pool, FormList *list, Form *expr);
 void vecInitContents(FormVec *list);

@@ -43,7 +43,7 @@ RetVal tryIsMacro(Expander *expander, Text sym, bool *isMacro, Error *error) {
   tryPalloc(expander->pool, args.forms, sizeof(Form) * args.numForms, "Form array");
 
   Form *varName = &args.forms[0];
-  exprInitContents(varName);
+  formInitContents(varName);
   varName->type = F_SYMBOL;
   varName->symbol.length = sym.length;
   varName->symbol.value = sym.value;
@@ -62,7 +62,7 @@ RetVal tryIsMacro(Expander *expander, Text sym, bool *isMacro, Error *error) {
   CodeUnit codeUnit;
   VMEvalResult output;
 
-  throws(tryCompileTopLevel(expander->pool, &root, &codeUnit, error));
+  compileTopLevel(expander->pool, &root, &codeUnit);
   output = vmEval(expander->vm, &codeUnit);
 
   if (output.type == RT_RESULT) {
@@ -120,7 +120,7 @@ RetVal tryExpand(Expander *expander, Text sym, Form *input, Form **output, Error
 
   CodeUnit codeUnit;
 
-  throws(tryCompileTopLevel(expander->pool, &root, &codeUnit, error));
+  compileTopLevel(expander->pool, &root, &codeUnit);
 
   VMEvalResult result = vmEval(expander->vm, &codeUnit);
 

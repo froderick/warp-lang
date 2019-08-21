@@ -41,11 +41,6 @@ typedef struct AnalyzerContext {
   bool inSyntaxQuote;
 } AnalyzerContext;
 
-void formInitContents(Form *form) {
-  form->type = F_NONE;
-  sourceLocationInitContents(&form->source);
-}
-
 void bindingInitContents(Binding *binding) {
   textInitContents(&binding->name);
   binding->source = BS_NONE;
@@ -920,7 +915,7 @@ RetVal trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Form *quoted, Form *form,
         throwSyntaxError(error, quoted->source.position, "this argument should have been a list");
       }
 
-      Form *f = exprMake(ctx->pool);
+      Form *f = formMake(ctx->pool);
       throws(tryFormAnalyzeContents(ctx, elemExpr, f, error));
       listAppend(ctx->pool, &listContainer->list, f);
     }
@@ -1039,7 +1034,7 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Form *expr, Form *form, Error *err
   macroName.value = sym.value;
 
   Form input;
-  exprInitContents(&input);
+  formInitContents(&input);
   input.type = F_LIST;
   listInitContents(&input.list);
   input.list.length = expr->list.length - 1;
@@ -1067,7 +1062,7 @@ RetVal tryListAnalyze(AnalyzerContext *ctx, Form *expr, Form *form, Error *error
   ListElement *argExpr = expr->list.head;
   for (int i=0; argExpr != NULL; i++) {
 
-    Form *value = exprMake(ctx->pool);
+    Form *value = formMake(ctx->pool);
     throws(tryFormAnalyzeContents(ctx, argExpr->expr, value, error));
 
     listAppend(ctx->pool, &form->list, value);
@@ -1093,7 +1088,7 @@ RetVal tryVecAnalyze(AnalyzerContext *ctx, Form *expr, Form *form, Error *error)
   ListElement *argExpr = expr->vec.head;
   for (int i=0; argExpr != NULL; i++) {
 
-    Form *value = exprMake(ctx->pool);
+    Form *value = formMake(ctx->pool);
     throws(tryFormAnalyzeContents(ctx, argExpr->expr, value, error));
 
     vecAppend(ctx->pool, &form->vec, value);
@@ -1119,10 +1114,10 @@ RetVal tryMapAnalyze(AnalyzerContext *ctx, Form *expr, Form *form, Error *error)
   MapElement *argExpr = expr->map.head;
   for (int i=0; argExpr != NULL; i+=2) {
 
-    Form *key = exprMake(ctx->pool);
+    Form *key = formMake(ctx->pool);
     throws(tryFormAnalyzeContents(ctx, argExpr->key, key, error));
 
-    Form *value = exprMake(ctx->pool);
+    Form *value = formMake(ctx->pool);
     throws(tryFormAnalyzeContents(ctx, argExpr->value, value, error));
 
     mapPut(ctx->pool, &form->map, key, value);

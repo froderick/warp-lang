@@ -6,20 +6,20 @@
  * Here is the basic AST implementation.
  */
 
-void exprInitContents(Form *expr) {
+void formInitContents(Form *expr) {
   expr->type = F_NONE;
   sourceLocationInitContents(&expr->source);
 }
 
-Form* exprMake(Pool_t pool) {
+Form* formMake(Pool_t pool) {
   Form *expr;
   palloc(pool, expr, sizeof(Form), "Expr");
-  exprInitContents(expr);
+  formInitContents(expr);
   return expr;
 }
 
 Form* stringMake(Pool_t pool, wchar_t *input, uint64_t length) {
-  Form *expr = exprMake(pool);
+  Form *expr = formMake(pool);
   expr->type = F_STRING;
   expr->string.length = length;
   expr->string.value = copyText(pool, input, length);
@@ -28,7 +28,7 @@ Form* stringMake(Pool_t pool, wchar_t *input, uint64_t length) {
 }
 
 Form* numberMake(Pool_t pool, uint64_t value) {
-  Form *expr = exprMake(pool);
+  Form *expr = formMake(pool);
   expr->type = F_NUMBER;
   expr->number.value = value;
   expr->source.isSet = false;
@@ -36,7 +36,7 @@ Form* numberMake(Pool_t pool, uint64_t value) {
 }
 
 Form* charMake(Pool_t pool, wchar_t value) {
-  Form *expr = exprMake(pool);
+  Form *expr = formMake(pool);
   expr->type = F_CHAR;
   expr->chr.value = value;
   expr->source.isSet = false;
@@ -44,7 +44,7 @@ Form* charMake(Pool_t pool, wchar_t value) {
 }
 
 Form* symbolMake(Pool_t pool, wchar_t *name, uint64_t len) {
-  Form *expr = exprMake(pool);
+  Form *expr = formMake(pool);
   expr->type = F_SYMBOL;
   expr->symbol.value = copyText(pool, name, len);
   expr->symbol.length = len;
@@ -53,7 +53,7 @@ Form* symbolMake(Pool_t pool, wchar_t *name, uint64_t len) {
 }
 
 Form* keywordMake(Pool_t pool, wchar_t *name, uint64_t len) {
-  Form *expr = exprMake(pool);
+  Form *expr = formMake(pool);
   expr->type = F_KEYWORD;
   expr->keyword.length = len;
   expr->keyword.value = copyText(pool, name, len);
@@ -62,7 +62,7 @@ Form* keywordMake(Pool_t pool, wchar_t *name, uint64_t len) {
 }
 
 Form* booleanMake(Pool_t pool, bool value) {
-  Form *expr = exprMake(pool);
+  Form *expr = formMake(pool);
   expr->type = F_BOOLEAN;
   expr->boolean.value = value;
   expr->source.isSet = false;
@@ -70,7 +70,7 @@ Form* booleanMake(Pool_t pool, bool value) {
 }
 
 Form* nilMake(Pool_t pool) {
-  Form *expr = exprMake(pool);
+  Form *expr = formMake(pool);
   expr->type = F_NIL;
   expr->source.isSet = false;
   return expr;
@@ -84,17 +84,10 @@ void listInitContents(FormList *list) {
 }
 
 Form* listMake(Pool_t pool) {
-  Form *expr = exprMake(pool);
+  Form *expr = formMake(pool);
   expr->type = F_LIST;
-  expr->list.length = 0;
-
-  expr->list.head = NULL;
-  expr->list.tail = NULL;
-
-  expr->source.isSet = false;
-
   listInitContents(&expr->list);
-
+  expr->source.isSet = false;
   return expr;
 }
 
@@ -123,24 +116,18 @@ void listAppend(Pool_t pool, FormList *list, Form *expr) {
 
 // vectors
 
-Form* vecMake(Pool_t pool) {
-  Form *expr = exprMake(pool);
-  expr->type = F_VEC;
-  expr->list.length = 0;
-
-  // valid for zero length list
-  expr->list.head = NULL;
-  expr->list.tail = NULL;
-
-  expr->source.isSet = false;
-
-  return expr;
-}
-
 void vecInitContents(FormVec *vec) {
   vec->length = 0;
   vec->head = NULL;
   vec->tail = NULL;
+}
+
+Form* vecMake(Pool_t pool) {
+  Form *expr = formMake(pool);
+  expr->type = F_VEC;
+  vecInitContents(&expr->vec);
+  expr->source.isSet = false;
+  return expr;
 }
 
 void vecAppend(Pool_t pool, FormVec *vec, Form *expr) {
@@ -181,13 +168,10 @@ void mapElementInitContents(MapElement *e) {
 }
 
 Form* mapMake(Pool_t pool) {
-  Form *expr = exprMake(pool);
+  Form *expr = formMake(pool);
   expr->type = F_MAP;
-  expr->source.isSet = false;
-
-  // valid for zero length map
   mapInitContents(&expr->map);
-
+  expr->source.isSet = false;
   return expr;
 }
 

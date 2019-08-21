@@ -35,21 +35,19 @@ void constantsInitContents(Constants *constants) {
   constants->constants = NULL;
 }
 
-RetVal tryAppendConstant(Output output, Constant c, Error *error) {
-  RetVal ret;
-
+void constantAppend(Output output, Constant c) {
   Constants *constants = output.constants;
 
   if (constants->constants == NULL) {
     uint16_t len = 16;
-    tryPalloc(output.pool, constants->constants, len * sizeof(Constant), "Constant array");
+    palloc(output.pool, constants->constants, len * sizeof(Constant), "Constant array");
     constants->numAllocated = len;
   }
   else if (constants->numUsed == constants->numAllocated) {
     uint16_t newAllocatedLength = constants->numAllocated * 2;
 
     Constant *resized = NULL;
-    tryPalloc(output.pool, resized, newAllocatedLength * sizeof(Constant), "Constant array");
+    palloc(output.pool, resized, newAllocatedLength * sizeof(Constant), "Constant array");
     memcpy(resized, constants->constants, constants->numUsed * sizeof(Constant));
 
     constants->numAllocated = newAllocatedLength;
@@ -59,11 +57,6 @@ RetVal tryAppendConstant(Output output, Constant c, Error *error) {
   uint16_t index = constants->numUsed;
   constants->constants[index] = c;
   constants->numUsed = index + 1;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 void codesInitContents(Codes *codes) {
@@ -72,21 +65,19 @@ void codesInitContents(Codes *codes) {
   codes->codes = NULL;
 }
 
-RetVal tryCodeAppend(Output output, uint16_t numAdded, uint8_t *added, Error *error) {
-  RetVal ret;
-
+void codeAppend(Output output, uint16_t numAdded, uint8_t *added) {
   Codes *codes = output.codes;
 
   if (codes->codes == NULL) {
     uint16_t len = 16;
-    tryPalloc(output.pool, codes->codes, len * sizeof(uint8_t), "byte array");
+    palloc(output.pool, codes->codes, len * sizeof(uint8_t), "byte array");
     codes->numAllocated = len;
   }
   else if (codes->numUsed + numAdded > codes->numAllocated) {
     uint16_t newAllocatedLength = (codes->numAllocated + numAdded) * 2;
 
     uint8_t *replacement = NULL;
-    tryPalloc(output.pool, replacement, newAllocatedLength * sizeof(uint8_t), "byte array");
+    palloc(output.pool, replacement, newAllocatedLength * sizeof(uint8_t), "byte array");
     memcpy(replacement, codes->codes, codes->numUsed * sizeof(uint8_t));
 
     codes->numAllocated = newAllocatedLength;
@@ -98,11 +89,6 @@ RetVal tryCodeAppend(Output output, uint16_t numAdded, uint8_t *added, Error *er
     codes->codes[baseIndex + i] = added[i];
   }
   codes->numUsed += numAdded;
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
 void lineNumbersInitContents(LineNumbers *numbers) {
@@ -111,19 +97,17 @@ void lineNumbersInitContents(LineNumbers *numbers) {
   numbers->numbers = NULL;
 }
 
-RetVal tryLineNumbersAppend(Pool_t pool, LineNumbers *numbers, LineNumber number, Error *error) {
-  RetVal ret;
-
+void lineNumbersAppend(Pool_t pool, LineNumbers *numbers, LineNumber number) {
   if (numbers->numbers == NULL) {
     uint16_t len = 16;
-    tryPalloc(pool, numbers->numbers, len * sizeof(LineNumber), "LineNumber array");
+    palloc(pool, numbers->numbers, len * sizeof(LineNumber), "LineNumber array");
     numbers->numAllocated = len;
   }
   else if (numbers->numUsed == numbers->numAllocated) {
     uint16_t newAllocatedLength = numbers->numAllocated * 2;
 
     LineNumber *resized = NULL;
-    tryPalloc(pool, resized, newAllocatedLength * sizeof(LineNumber), "LineNumber array");
+    palloc(pool, resized, newAllocatedLength * sizeof(LineNumber), "LineNumber array");
     memcpy(resized, numbers->numbers, numbers->numUsed * sizeof(LineNumber));
 
     numbers->numAllocated = newAllocatedLength;
@@ -133,11 +117,6 @@ RetVal tryLineNumbersAppend(Pool_t pool, LineNumbers *numbers, LineNumber number
   uint16_t index = numbers->numUsed;
   numbers->numbers [index] = number;
   numbers->numUsed = index + 1;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 // compiler behavior that emits constants and code
@@ -146,13 +125,11 @@ RetVal tryLineNumbersAppend(Pool_t pool, LineNumbers *numbers, LineNumber number
  * If present, appends the source line number from the form to the
  * *next* code index to be appended.
  */
-RetVal tryAppendSource(Form *form, Output output, Error *error) {
-  RetVal ret;
-
+void sourceAppend(Form *form, Output output) {
   if (form->source.isSet) {
 
     if (form->source.lineNumber == 0) {
-      throwCompilerError(error, "line number is zero");
+      explode("line number is zero");
     }
 
     LineNumber lineNumber;
@@ -160,13 +137,8 @@ RetVal tryAppendSource(Form *form, Output output, Error *error) {
     lineNumber.lineNumber = form->source.lineNumber;
     lineNumber.startInstructionIndex = output.codes->numUsed;
 
-    throws(tryLineNumbersAppend(output.pool, output.lineNumbers, lineNumber, error));
+    lineNumbersAppend(output.pool, output.lineNumbers, lineNumber);
   }
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
 void setIndexAtOffset(Output output, uint16_t index, uint16_t value) {
@@ -174,13 +146,11 @@ void setIndexAtOffset(Output output, uint16_t index, uint16_t value) {
   output.codes->codes[index + 1] = value & 0xFF;
 }
 
-RetVal tryCompile(Form *form, Output output, Error *error);
+void compile(Form *form, Output output);
 
-RetVal nilConstantGetIndex(Output output, uint16_t *index, Error *error);
+uint16_t nilConstantGetIndex(Output output);
 
-RetVal tryCompileIf(Form *form, Output output, Error *error) {
-  RetVal ret;
-
+void compileIf(Form *form, Output output) {
   // emit test
   // emit I_JMP_IF_NOT $ELSE_ADDR
   // emit ifBranch {
@@ -194,24 +164,24 @@ RetVal tryCompileIf(Form *form, Output output, Error *error) {
   // $END_ADDR
 
   // emit the test code
-  throws(tryCompile(form->iff.test, output, error));
+  compile(form->iff.test, output);
 
   // emit the testFailedJump code, keep a pointer to the jump address
   uint16_t testFailedJumpAddrOffset;
   {
     uint8_t testFailedJumpCode[] = { I_JMP_IF_NOT, 0, 0 };
-    throws(tryCodeAppend(output, sizeof(testFailedJumpCode), testFailedJumpCode, error));
+    codeAppend(output, sizeof(testFailedJumpCode), testFailedJumpCode);
     testFailedJumpAddrOffset = output.codes->numUsed - 2;
   }
 
   // emit ifBranch form code
-  throws(tryCompile(form->iff.ifBranch, output, error));
+  compile(form->iff.ifBranch, output);
 
   // emit the jumpToEnd code to terminate the if branch, keep a pointer to the jump address
   uint16_t jumpToEndAddrOffset;
   {
     uint8_t jumpToEndCode[] = {I_JMP, 0, 0};
-    throws(tryCodeAppend(output, sizeof(jumpToEndCode), jumpToEndCode, error));
+    codeAppend(output, sizeof(jumpToEndCode), jumpToEndCode);
     jumpToEndAddrOffset = output.codes->numUsed - 2;
   }
 
@@ -223,13 +193,12 @@ RetVal tryCompileIf(Form *form, Output output, Error *error) {
 
   // emit elseBranch form code
   if (form->iff.elseBranch != NULL) {
-    throws(tryCompile(form->iff.elseBranch, output, error));
+    compile(form->iff.elseBranch, output);
   }
   else {
-    uint16_t index;
-    throws(nilConstantGetIndex(output, &index, error));
+    uint16_t index = nilConstantGetIndex(output);
     uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-    throws(tryCodeAppend(output, sizeof(code), code, error));
+    codeAppend(output, sizeof(code), code);
   }
 
   // the jumpToEndAddr should point to the first address after the elseBranch
@@ -237,10 +206,6 @@ RetVal tryCompileIf(Form *form, Output output, Error *error) {
     uint16_t nextCodeAddr = output.codes->numUsed;
     setIndexAtOffset(output, jumpToEndAddrOffset, nextCodeAddr);
   }
-
-  return R_SUCCESS;
-  failure:
-    return ret;
 }
 
 // TODO: perhaps we need an initial pass before compilation to identify constants, and references to constants
@@ -257,12 +222,11 @@ RetVal tryCompileIf(Form *form, Output output, Error *error) {
  * // since the virtual machine does not have the binding table at its disposal to inspect
  */
 
-RetVal trySlotsTableBuild(Pool_t pool, BindingTable *bindingTable, uint16_t **ptr, Error *error) {
-  RetVal ret;
+uint16_t* slotsTableBuild(Pool_t pool, BindingTable *bindingTable) {
 
   uint16_t *slotsTable = NULL;
 
-  tryPalloc(pool, slotsTable, sizeof(uint16_t) * bindingTable->usedSpace, "uint16_t array");
+  palloc(pool, slotsTable, sizeof(uint16_t) * bindingTable->usedSpace, "uint16_t array");
 
   uint16_t slotsCounter = 0;
 
@@ -279,7 +243,7 @@ RetVal trySlotsTableBuild(Pool_t pool, BindingTable *bindingTable, uint16_t **pt
           case BT_FN_REF:
             break;
           default:
-            throwCompilerError(error, "unsupported: %u", b->local.type);
+            explode("unsupported: %u", b->local.type);
         }
         break;
 
@@ -287,7 +251,7 @@ RetVal trySlotsTableBuild(Pool_t pool, BindingTable *bindingTable, uint16_t **pt
         break;
 
       default:
-        throwCompilerError(error, "unsupported: %u", b->source);
+        explode("unsupported: %u", b->source);
     }
   }
 
@@ -315,7 +279,7 @@ RetVal trySlotsTableBuild(Pool_t pool, BindingTable *bindingTable, uint16_t **pt
     Binding *b = &bindingTable->bindings[i];
     if (b->source == BS_LOCAL && b->local.type == BT_FN_REF) {
       if (foundFnRef) {
-        throwCompilerError(error, "unsupported: %u", b->source);
+        explode("unsupported: %u", b->source);
       }
       slotsTable[i] = slotsCounter;
       slotsCounter++;
@@ -332,11 +296,7 @@ RetVal trySlotsTableBuild(Pool_t pool, BindingTable *bindingTable, uint16_t **pt
     }
   }
 
-  *ptr = slotsTable;
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  return slotsTable;
 }
 
 uint64_t computeOpStackSize(uint8_t *code, uint16_t length) {
@@ -446,22 +406,16 @@ uint64_t computeOpStackSize(uint8_t *code, uint16_t length) {
   return maxOpStack;
 }
 
-RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
-  RetVal ret;
-
-  // clean up on failure
+void compileFnConstant(Form *form, Output output) {
   Constants fnConstants;
   Codes fnCodes;
   LineNumbers lineNumbers;
-
-  // clean up always
-  uint16_t *slotsTable = NULL;
 
   constantsInitContents(&fnConstants);
   codesInitContents(&fnCodes);
   lineNumbersInitContents(&lineNumbers);
 
-  throws(trySlotsTableBuild(output.pool, &form->fn.table, &slotsTable, error));
+  uint16_t *slotsTable = slotsTableBuild(output.pool, &form->fn.table);
 
   {
     Output fnOutput;
@@ -474,11 +428,11 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
     fnOutput.fileName = output.fileName;
 
     for (uint16_t i = 0; i < form->fn.forms.numForms; i++) {
-      throws(tryCompile(&form->fn.forms.forms[i], fnOutput, error));
+      compile(&form->fn.forms.forms[i], fnOutput);
     }
 
     uint8_t retCode[] = { I_RET };
-    throws(tryCodeAppend(fnOutput, sizeof(retCode), retCode, error));
+    codeAppend(fnOutput, sizeof(retCode), retCode);
   }
 
   FnConstant fnConst;
@@ -487,7 +441,7 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   fnConst.hasName = form->fn.hasName;
   fnConst.name = NULL;
   if (fnConst.hasName) {
-    throws(tryCopyText(output.pool, form->fn.name.value, &fnConst.name, form->fn.name.length, error));
+    fnConst.name = copyText(output.pool, form->fn.name.value, form->fn.name.length);
   }
   fnConst.numArgs = form->fn.numArgs;
   fnConst.usesVarArgs = form->fn.usesVarArgs;
@@ -503,7 +457,7 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
 
     SourceTable *table = &fnConst.code.sourceTable;
     sourceTableInitContents(table);
-    throws(tryCopyText(output.pool, output.fileName.value, &table->fileName, output.fileName.length, error));
+    table->fileName = copyText(output.pool, output.fileName.value, output.fileName.length);
     table->numLineNumbers = lineNumbers.numUsed;
     table->lineNumbers = lineNumbers.numbers;
   }
@@ -511,18 +465,12 @@ RetVal tryCompileFnConstant(Form *form, Output output, Error *error) {
   Constant c;
   c.type = CT_FN;
   c.function = fnConst;
-  throws(tryAppendConstant(output, c, error));
-
-  return R_SUCCESS;
-  failure:
-    return ret;
+  constantAppend(output, c);
 }
 
 
-RetVal tryCompileFn(Form *form, Output output, Error *error) {
-  RetVal ret;
-
-  throws(tryCompileFnConstant(form, output, error));
+void compileFn(Form *form, Output output) {
+  compileFnConstant(form, output);
   uint16_t fnConstIndex = output.constants->numUsed - 1;
 
   if (form->fn.isClosure) {
@@ -532,7 +480,7 @@ RetVal tryCompileFn(Form *form, Output output, Error *error) {
       if (b->source == BS_CAPTURED) {
         uint16_t slotIndex = output.slotsTable[b->captured.bindingIndex];
         uint8_t code[] = { I_LOAD_LOCAL, slotIndex >> 8, slotIndex & 0xFF };
-        throws(tryCodeAppend(output, sizeof(code), code, error));
+        codeAppend(output, sizeof(code), code);
       }
     }
 
@@ -542,52 +490,38 @@ RetVal tryCompileFn(Form *form, Output output, Error *error) {
         fnConstIndex >> 8, fnConstIndex & 0xFF,
         form->fn.numCaptures >> 8, form->fn.numCaptures & 0xFF
     };
-    throws(tryCodeAppend(output, sizeof(code), code, error));
+    codeAppend(output, sizeof(code), code);
   }
   else {
     uint8_t loadInst = I_LOAD_CONST;
     uint8_t code[] = { loadInst, fnConstIndex >> 8, fnConstIndex & 0xFF };
-    throws(tryCodeAppend(output, sizeof(code), code, error));
+    codeAppend(output, sizeof(code), code);
   }
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
-RetVal nilConstantGetIndex(Output output, uint16_t *index, Error *error) {
-  RetVal ret;
-
+uint16_t nilConstantGetIndex(Output output) {
   // look for already-defined nil ref constant
   for (uint16_t i=0; i<output.constants->numUsed; i++) {
     Constant *c = &output.constants->constants[i];
     if (c->type == CT_NIL) {
-      *index = i;
-      return R_SUCCESS;
+      return i;
     }
   }
 
   // create nil constant
   Constant c;
   c.type = CT_NIL;
-  throws(tryAppendConstant(output, c, error));
-  *index = output.constants->numUsed - 1;
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  constantAppend(output, c);
+  return output.constants->numUsed - 1;
 }
 
-RetVal uintConstantGetIndex(uint64_t value, Output output, uint16_t *index, Error *error) {
-  RetVal ret;
+uint16_t uintConstantGetIndex(uint64_t value, Output output) {
 
   // look for already-defined uint constant
   for (uint16_t i=0; i<output.constants->numUsed; i++) {
     Constant *c = &output.constants->constants[i];
     if (c->type == CT_INT && c->integer == value) {
-      *index = i;
+      return i;
       return R_SUCCESS;
     }
   }
@@ -596,24 +530,17 @@ RetVal uintConstantGetIndex(uint64_t value, Output output, uint16_t *index, Erro
   Constant c;
   c.type = CT_INT;
   c.integer = value;
-  throws(tryAppendConstant(output, c, error));
-  *index = output.constants->numUsed - 1;
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  constantAppend(output, c);
+  return output.constants->numUsed - 1;
 }
 
-RetVal varRefConstantGetIndex(Text name, Output output, uint16_t *index, Error *error) {
-  RetVal ret;
+uint16_t varRefConstantGetIndex(Text name, Output output) {
 
   // look for already-defined var ref constant
   for (uint16_t i=0; i<output.constants->numUsed; i++) {
     Constant *c = &output.constants->constants[i];
     if (c->type == CT_SYMBOL && wcscmp(c->symbol.value, name.value) == 0) {
-      *index = i;
-      return R_SUCCESS;
+      return i;
     }
   }
 
@@ -621,28 +548,21 @@ RetVal varRefConstantGetIndex(Text name, Output output, uint16_t *index, Error *
   Constant c;
   c.type = CT_SYMBOL;
   c.symbol.length = name.length;
-  throws(tryCopyText(output.pool, name.value, &c.symbol.value, c.symbol.length, error));
-  throws(tryAppendConstant(output, c, error));
-  *index = output.constants->numUsed - 1;
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  c.symbol.value = copyText(output.pool, name.value, c.symbol.length);
+  constantAppend(output, c);
+  return output.constants->numUsed - 1;
 }
 
-RetVal appendMeta(Output output, Form *constant, ConstantMeta *meta, Error *error) {
-  RetVal ret;
-
+void appendMeta(Output output, Form *constant, ConstantMeta *meta) {
   constantMetaInit(meta);
   if (constant->source.isSet) {
 
     if (constant->source.lineNumber == 0) {
-      throwRuntimeError(error, "line number is required if source has been set");
+      explode("line number is required if source has been set");
     }
 
     meta->numProperties = 1;
-    tryPalloc(output.pool, meta->properties, sizeof(ConstantMetaProperty) * meta->numProperties,
+    palloc(output.pool, meta->properties, sizeof(ConstantMetaProperty) * meta->numProperties,
         "ConstantMetaProperty array");
     ConstantMetaProperty *lineNo = &meta->properties[0];
 
@@ -651,23 +571,17 @@ RetVal appendMeta(Output output, Form *constant, ConstantMeta *meta, Error *erro
       Constant key;
       key.type = CT_KEYWORD;
       key.keyword.length = wcslen(keyName);
-      throws(tryCopyText(output.pool, keyName, &key.keyword.value, key.keyword.length, error));
-      throws(tryAppendConstant(output, key, error));
+      key.keyword.value = copyText(output.pool, keyName, key.keyword.length);
+      constantAppend(output, key);
       uint16_t index = output.constants->numUsed - 1;
       lineNo->keyIndex = index;
     }
 
-    throws(uintConstantGetIndex(constant->source.lineNumber, output, &lineNo->valueIndex, error));
+    lineNo->valueIndex = uintConstantGetIndex(constant->source.lineNumber, output);
   }
-
-  return R_SUCCESS;
-  failure:
-  return ret;
 }
 
-RetVal constInitContents(Form *constant, Constant *c, Output output, Error *error) {
-  RetVal ret;
-
+void constInitContents(Form *constant, Constant *c, Output output) {
   switch (constant->type) {
 
     case F_NUMBER: {
@@ -692,198 +606,144 @@ RetVal constInitContents(Form *constant, Constant *c, Output output, Error *erro
     case F_STRING: {
       c->type = CT_STR;
       c->string.length = constant->string.length;
-      throws(tryCopyText(output.pool, constant->string.value, &c->string.value, c->string.length, error));
+      c->string.value = copyText(output.pool, constant->string.value, c->string.length);
       break;
     }
     case F_SYMBOL: {
       c->type = CT_SYMBOL;
       c->symbol.length = constant->symbol.length;
-      throws(tryCopyText(output.pool, constant->symbol.value, &c->symbol.value, c->symbol.length, error));
+      c->symbol.value = copyText(output.pool, constant->symbol.value, c->symbol.length);
       break;
     }
     case F_KEYWORD: {
       c->type = CT_KEYWORD;
       c->keyword.length = constant->keyword.length;
-      throws(tryCopyText(output.pool, constant->keyword.value, &c->keyword.value, c->keyword.length, error));
+      c->keyword.value = copyText(output.pool, constant->keyword.value, c->keyword.length);
       break;
     }
     default:
-      throwCompilerError(error, "unsupported: %u", constant->type);
+      explode("unsupported: %u", constant->type);
   }
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
-RetVal tryCompileConst(Form *form, Output output, Error *error) {
-  RetVal ret;
-
+void compileConst(Form *form, Output output) {
   Constant c;
-
-  throws(constInitContents(form, &c, output, error));
-  throws(tryAppendConstant(output, c, error));
+  constInitContents(form, &c, output);
+  constantAppend(output, c);
 
   uint16_t index = output.constants->numUsed - 1;
   uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-  throws(tryCodeAppend(output, sizeof(code), code, error));
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  codeAppend(output, sizeof(code), code);
 }
 
-RetVal tryCompileDef(Form *form, Output output, Error *error) {
-  RetVal ret;
-
+void compileDef(Form *form, Output output) {
   if (form->def.value == NULL) {
-    uint16_t index;
-    throws(nilConstantGetIndex(output, &index, error));
+    uint16_t index = nilConstantGetIndex(output);
     uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-    throws(tryCodeAppend(output, sizeof(code), code, error));
+    codeAppend(output, sizeof(code), code);
   }
   else {
-    throws(tryCompile(form->def.value, output, error));
+    compile(form->def.value, output);
   }
 
-  uint16_t index;
-  throws(varRefConstantGetIndex(form->def.name, output, &index, error));
+  uint16_t index = varRefConstantGetIndex(form->def.name, output);
 
   uint8_t code[] = { I_DEF_VAR, index >> 8, index & 0xFF };
-  throws(tryCodeAppend(output, sizeof(code), code, error));
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  codeAppend(output, sizeof(code), code);
 }
 
-RetVal tryCompileVarRef(Form *form, Output output, Error *error) {
-  RetVal ret;
-
-  uint16_t index;
-  throws(varRefConstantGetIndex(form->varRef.name, output, &index, error));
-
+void compileVarRef(Form *form, Output output) {
+  uint16_t index = varRefConstantGetIndex(form->varRef.name, output);
   uint8_t code[] = { I_LOAD_VAR, index >> 8, index & 0xFF };
-  throws(tryCodeAppend(output, sizeof(code), code, error));
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  codeAppend(output, sizeof(code), code);
 }
 
-RetVal tryCompileLet(Form *form, Output output, Error *error) {
-  RetVal ret;
-
+void compileLet(Form *form, Output output) {
   // 'let's add locals to the current frame
 
   for (uint16_t i=0; i<form->let.numBindings; i++) {
     LetBinding *binding = &form->let.bindings[i];
 
-    throws(tryCompile(binding->value, output, error));
+    compile(binding->value, output);
 
     uint16_t index = output.slotsTable[binding->bindingIndex];
     uint8_t code[] = { I_STORE_LOCAL, index >> 8, index & 0xFF };
-    throws(tryCodeAppend(output, sizeof(code), code, error));
+    codeAppend(output, sizeof(code), code);
   }
 
   if (form->let.forms.numForms > 0) {
     for (uint16_t i = 0; i < form->let.forms.numForms; i++) {
       Form *f = &form->let.forms.forms[i];
-      throws(tryCompile(f, output, error));
+      compile(f, output);
     }
   }
   else {
     Constant c;
     c.type = CT_NIL;
-    throws(tryAppendConstant(output, c, error));
+    constantAppend(output, c);
 
     uint16_t index = output.constants->numUsed - 1;
     uint8_t code[] = { I_LOAD_CONST, index >> 8, index & 0xFF };
-    throws(tryCodeAppend(output, sizeof(code), code, error));
+    codeAppend(output, sizeof(code), code);
   }
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
-RetVal tryCompileEnvRef(Form *form, Output output, Error *error) {
-  RetVal ret;
-
+void compileEnvRef(Form *form, Output output) {
   uint16_t index = output.slotsTable[form->envRef.bindingIndex];
   uint8_t code[] = { I_LOAD_LOCAL, index >> 8, index & 0xFF };
-  throws(tryCodeAppend(output, sizeof(code), code, error));
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  codeAppend(output, sizeof(code), code);
 }
 
-RetVal tryCompileBuiltin(Form *form, Output output, Error *error) {
-  RetVal ret;
-
+void compileBuiltin(Form *form, Output output) {
   FormBuiltin *builtin = &form->builtin;
 
   if (wcscmp(builtin->name.value, L"add") == 0) {
 
     for (int i=0; i < form->builtin.args.numForms; i++) {
-      throws(tryCompile(&form->builtin.args.forms[i], output, error));
+      compile(&form->builtin.args.forms[i], output);
     }
 
     uint8_t addCode[] = { I_ADD};
-    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
+    codeAppend(output, sizeof(addCode), addCode);
   }
   else if (wcscmp(builtin->name.value, L"subtract") == 0) {
 
     for (int i=0; i < form->builtin.args.numForms; i++) {
-      throws(tryCompile(&form->builtin.args.forms[i], output, error));
+      compile(&form->builtin.args.forms[i], output);
     }
 
     uint8_t addCode[] = { I_SUB };
-    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
+    codeAppend(output, sizeof(addCode), addCode);
   }
   else if (wcscmp(builtin->name.value, L"compare") == 0) {
 
     for (int i=0; i < form->builtin.args.numForms; i++) {
-      throws(tryCompile(&form->builtin.args.forms[i], output, error));
+      compile(&form->builtin.args.forms[i], output);
     }
 
     uint8_t addCode[] = { I_CMP };
-    throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
+    codeAppend(output, sizeof(addCode), addCode);
   }
   else {
-    throwCompilerError(error, "unsupported builtin '%ls'", builtin->name.value);
+    explode("unsupported builtin '%ls'", builtin->name.value);
   }
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
-RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
-  RetVal ret;
-
+void compileFnCall(Form *form, Output output) {
   // push the arguments in evaluation (left-to-right) order
   for (uint16_t i = 0; i < form->fnCall.args.numForms; i++) {
-    throws(tryCompile(&form->fnCall.args.forms[i], output, error));
+    compile(&form->fnCall.args.forms[i], output);
   }
 
   if (form->fnCall.tailPosition && form->fnCall.recurses) {
     uint16_t numForms = form->fnCall.args.numForms;
     uint8_t code[] = {I_INVOKE_DYN_TAIL_RECURSE, numForms >> 8, numForms & 0xFF};
-    throws(tryCodeAppend(output, sizeof(code), code, error));
+    codeAppend(output, sizeof(code), code);
   }
   else {
 
     // push the callable
-    throws(tryCompile(form->fnCall.fnCallable, output, error));
+    compile(form->fnCall.fnCallable, output);
 
     // invoke
 
@@ -895,28 +755,21 @@ RetVal tryCompileFnCall(Form *form, Output output, Error *error) {
     }
     uint16_t numForms = form->fnCall.args.numForms;
     uint8_t code[] = {inst, numForms >> 8, numForms & 0xFF};
-    throws(tryCodeAppend(output, sizeof(code), code, error));
+    codeAppend(output, sizeof(code), code);
   }
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
-RetVal tryCompileList(Form *form, Output output, Error *error) {
-  RetVal ret;
-
+void compileList(Form *form, Output output) {
   uint64_t numForms = form->list.length;
 
   if (numForms == 0) {
     {
       Constant c;
       c.type = CT_NIL;
-      throws(tryAppendConstant(output, c, error));
+      constantAppend(output, c);
       uint16_t index = output.constants->numUsed - 1;
       uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
-      throws(tryCodeAppend(output, sizeof(code), code, error));
+      codeAppend(output, sizeof(code), code);
     }
   }
   else {
@@ -935,36 +788,29 @@ RetVal tryCompileList(Form *form, Output output, Error *error) {
     for (int i=0; i < numForms; i++) {
       Form *f = &forms[i];
       if (i == 0) {
-        throws(tryCompile(f, output, error));
+        compile(f, output);
 
         Constant c;
         c.type = CT_NIL;
-        throws(tryAppendConstant(output, c, error));
+        constantAppend(output, c);
         uint16_t index = output.constants->numUsed - 1;
         uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
-        throws(tryCodeAppend(output, sizeof(code), code, error));
+        codeAppend(output, sizeof(code), code);
 
         uint8_t addCode[] = {I_CONS};
-        throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
+        codeAppend(output, sizeof(addCode), addCode);
       }
       else {
-        throws(tryCompile(f, output, error));
+        compile(f, output);
         uint8_t addCode[] = {I_SWAP, I_CONS};
-        throws(tryCodeAppend(output, sizeof(addCode), addCode, error));
+        codeAppend(output, sizeof(addCode), addCode);
       }
 
     }
   }
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
 }
 
-RetVal tryCompileVec(Form *form, Output output, Error *error) {
-  RetVal ret;
-
+void compileVec(Form *form, Output output) {
   Text varName;
   varName.value = L"vector";
   varName.length = wcslen(varName.value);
@@ -992,16 +838,10 @@ RetVal tryCompileVec(Form *form, Output output, Error *error) {
   fnCall.fnCall.fnCallable = &fnCallable;
   fnCall.fnCall.args = args;
 
-  throws(tryCompileFnCall(&fnCall, output, error));
-
-  return R_SUCCESS;
-  failure:
-  return ret;
+  compileFnCall(&fnCall, output);
 }
 
-RetVal tryCompileMap(Form *form, Output output, Error *error) {
-  RetVal ret;
-
+void compileMap(Form *form, Output output) {
   Text varName;
   varName.value = L"hash-map";
   varName.length = wcslen(varName.value);
@@ -1030,23 +870,17 @@ RetVal tryCompileMap(Form *form, Output output, Error *error) {
   fnCall.fnCall.fnCallable = &fnCallable;
   fnCall.fnCall.args = args;
 
-  throws(tryCompileFnCall(&fnCall, output, error));
-
-  return R_SUCCESS;
-  failure:
-  return ret;
+  compileFnCall(&fnCall, output);
 }
 
-RetVal tryCompileHandler(Form *form, Output output, Error *error) {
-  RetVal ret;
-
-  throws(tryCompile(form->handler.handler, output, error));
+void compileHandler(Form *form, Output output) {
+  compile(form->handler.handler, output);
 
   // emit the pushHandler code, keep a pointer to the jump address
   uint16_t jumpAddrOffset;
   {
     uint8_t code[] = { I_PUSH_HANDLER, 0, 0 };
-    throws(tryCodeAppend(output, sizeof(code), code, error));
+    codeAppend(output, sizeof(code), code);
     jumpAddrOffset = output.codes->numUsed - 2;
   }
 
@@ -1056,16 +890,16 @@ RetVal tryCompileHandler(Form *form, Output output, Error *error) {
     {
       Constant c;
       c.type = CT_NIL;
-      throws(tryAppendConstant(output, c, error));
+      constantAppend(output, c);
       uint16_t index = output.constants->numUsed - 1;
       uint8_t code[] = {I_LOAD_CONST, index >> 8, index & 0xFF};
-      throws(tryCodeAppend(output, sizeof(code), code, error));
+      codeAppend(output, sizeof(code), code);
     }
   }
   else {
     for (int i=0; i < forms.numForms; i++) {
       Form *f = &form->handler.forms.forms[i];
-      throws(tryCompile(f, output, error));
+      compile(f, output);
     }
   }
 
@@ -1077,18 +911,11 @@ RetVal tryCompileHandler(Form *form, Output output, Error *error) {
 
   // remove the handler
   uint8_t code[] = { I_POP_HANDLER };
-  throws(tryCodeAppend(output, sizeof(code), code, error));
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  codeAppend(output, sizeof(code), code);
 }
 
-RetVal tryCompile(Form *form, Output output, Error *error) {
-  RetVal ret;
-
-  throws(tryAppendSource(form, output, error));
+void compile(Form *form, Output output) {
+  sourceAppend(form, output);
 
   switch (form->type) {
 
@@ -1099,72 +926,63 @@ RetVal tryCompile(Form *form, Output output, Error *error) {
     case F_STRING:
     case F_SYMBOL:
     case F_KEYWORD:
-      throws(tryCompileConst(form, output, error));
+      compileConst(form, output);
       break;
 
     case F_IF:
-      throws(tryCompileIf(form, output, error));
+      compileIf(form, output);
       break;
 
     case F_DEF:
-      throws(tryCompileDef(form, output, error));
+      compileDef(form, output);
       break;
 
     case F_VAR_REF:
-      throws(tryCompileVarRef(form, output, error));
+      compileVarRef(form, output);
       break;
 
     case F_LET:
-      throws(tryCompileLet(form, output, error));
+      compileLet(form, output);
       break;
 
     case F_ENV_REF:
-      throws(tryCompileEnvRef(form, output, error));
+      compileEnvRef(form, output);
       break;
 
     case F_BUILTIN:
-      throws(tryCompileBuiltin(form, output, error));
+      compileBuiltin(form, output);
       break;
 
     case F_FN:
-      throws(tryCompileFn(form, output, error));
+      compileFn(form, output);
       break;
 
     case F_FN_CALL:
-      throws(tryCompileFnCall(form, output, error));
+      compileFnCall(form, output);
       break;
 
     case F_LIST:
-      throws(tryCompileList(form, output, error));
+      compileList(form, output);
       break;
 
     case F_VEC:
-    throws(tryCompileVec(form, output, error));
+      compileVec(form, output);
       break;
 
     case F_MAP:
-      throws(tryCompileMap(form, output, error));
+      compileMap(form, output);
       break;
 
     case F_HANDLER:
-      throws(tryCompileHandler(form, output, error));
+      compileHandler(form, output);
       break;
 
     default:
-      throwCompilerError(error, "unsupported");
-      break;
+      explode("unsupported");
   }
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
-RetVal tryCompileTopLevel(Pool_t pool, FormRoot *root, CodeUnit *codeUnit, Error *error) {
-  RetVal ret;
-
-  // these get cleaned up on failure
+void compileTopLevel(Pool_t pool, FormRoot *root, CodeUnit *codeUnit) {
   Constants constants;
   Codes codes;
   uint16_t *slotsTable;
@@ -1173,10 +991,9 @@ RetVal tryCompileTopLevel(Pool_t pool, FormRoot *root, CodeUnit *codeUnit, Error
   constantsInitContents(&constants);
   codesInitContents(&codes);
   codeUnitInitContents(codeUnit);
-  slotsTable = NULL;
   lineNumbersInitContents(&lineNumbers);
 
-  throws(trySlotsTableBuild(pool, &root->table, &slotsTable, error));
+  slotsTable = slotsTableBuild(pool, &root->table);
 
   {
     Output output;
@@ -1188,10 +1005,10 @@ RetVal tryCompileTopLevel(Pool_t pool, FormRoot *root, CodeUnit *codeUnit, Error
     output.hasFileName = root->hasFileName;
     output.fileName = root->fileName;
 
-    throws(tryCompile(root->form, output, error));
+    compile(root->form, output);
 
     uint8_t code[] = { I_RET };
-    throws(tryCodeAppend(output, sizeof(code), code, error));
+    codeAppend(output, sizeof(code), code);
   }
 
   codeUnit->code.numLocals = root->table.usedSpace;
@@ -1200,29 +1017,18 @@ RetVal tryCompileTopLevel(Pool_t pool, FormRoot *root, CodeUnit *codeUnit, Error
   codeUnit->code.codeLength = codes.numUsed;
   codeUnit->code.code = codes.codes;
 
-  /*
-   * TODO: finish populating the source table
-   *
-   * When emitting code for a form that has source location info, append LineNumbers to the table
-   * Remove the duplicate LineNumbers
-   * This has to be done for all the compile functions
-   */
   if (root->hasFileName) {
     codeUnit->code.hasSourceTable = true;
 
     SourceTable *table = &codeUnit->code.sourceTable;
     sourceTableInitContents(table);
 
-    throws(tryCopyText(pool, root->fileName.value, &table->fileName, root->fileName.length, error));
+    table->fileName = copyText(pool, root->fileName.value, root->fileName.length);
     table->numLineNumbers = lineNumbers.numUsed;
     table->lineNumbers = lineNumbers.numbers;
   }
 
   codeUnit->code.maxOperandStackSize = computeOpStackSize(codeUnit->code.code, codeUnit->code.codeLength);
-
-  return R_SUCCESS;
-  failure:
-    return ret;
 }
 
 

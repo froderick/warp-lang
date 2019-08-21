@@ -346,7 +346,7 @@ RetVal tryTestCompile(wchar_t *input, CodeUnit *codeUnit, Error *error) {
   throws(tryPoolCreate(&pool, ONE_MB, error));
   throws(tryParse(pool, input, &expr, error));
   throws(tryFormAnalyze(expr, pool, &root, error));
-  throws(tryCompileTopLevel(pool, root, codeUnit, error));
+  compileTopLevel(pool, root, codeUnit);
 
   poolFree(pool);
 
