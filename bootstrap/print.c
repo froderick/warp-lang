@@ -46,48 +46,28 @@ void printFn(Ctx *ctx, Value result, Form *expr) {
   expr->type = F_STRING;
   wchar_t function[] = L"<function>";
   expr->string.length = wcslen(function);
-
-  Error error;
-  errorInitContents(&error);
-  if (tryCopyText(ctx->pool, function, &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
+  expr->string.value = copyText(ctx->pool, function, expr->string.length);
 }
 
 void printCFn(Ctx *ctx, Value result, Form *expr) {
   expr->type = F_STRING;
   wchar_t function[] = L"<c-function>";
   expr->string.length = wcslen(function);
-
-  Error error;
-  errorInitContents(&error);
-  if (tryCopyText(ctx->pool, function, &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
+  expr->string.value = copyText(ctx->pool, function, expr->string.length);
 }
 
 void printClosure(Ctx *ctx, Value result, Form *expr) {
   expr->type = F_STRING;
   wchar_t function[] = L"<closure>";
   expr->string.length = wcslen(function);
-
-  Error error;
-  errorInitContents(&error);
-  if (tryCopyText(ctx->pool, function, &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
+  expr->string.value = copyText(ctx->pool, function, expr->string.length);
 }
 
 void printStr(Ctx *ctx, Value result, Form *expr) {
   String *str = deref(ctx->vm, result);
   expr->type = F_STRING;
   expr->string.length = str->length;
-
-  Error error;
-  errorInitContents(&error);
-  if(tryCopyText(ctx->pool, stringValue(str), &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
+  expr->string.value = copyText(ctx->pool, stringValue(str), expr->string.length);
 }
 
 void printSymbol(Ctx *ctx, Value result, Form *expr) {
@@ -95,12 +75,7 @@ void printSymbol(Ctx *ctx, Value result, Form *expr) {
   String *str = deref(ctx->vm, sym->name);
   expr->type = F_SYMBOL;
   expr->symbol.length = str->length;
-
-  Error error;
-  errorInitContents(&error);
-  if(tryCopyText(ctx->pool, stringValue(str), &expr->symbol.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
+  expr->symbol.value = copyText(ctx->pool, stringValue(str), expr->string.length);
 }
 
 void printKeyword(Ctx *ctx, Value result, Form *expr) {
@@ -108,12 +83,7 @@ void printKeyword(Ctx *ctx, Value result, Form *expr) {
   String *str = deref(ctx->vm, kw->name);
   expr->type = F_KEYWORD;
   expr->keyword.length = str->length;
-
-  Error error;
-  errorInitContents(&error);
-  if (tryCopyText(ctx->pool, stringValue(str), &expr->keyword.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
+  expr->keyword.value = copyText(ctx->pool, stringValue(str), expr->string.length);
 }
 
 typedef struct Property {
@@ -273,29 +243,16 @@ void printRecord(Ctx *ctx, Value result, Form *expr) {
   Error error;
   errorInitContents(&error);
 
-  StringBuffer_t b = NULL;
-  if (tryStringBufferMake(ctx->pool, &b, &error) != R_SUCCESS) {
-    explode("sbmake");
-  }
+  StringBuffer_t b = stringBufferMake(ctx->pool);
 
-  if (tryStringBufferAppendStr(b, L"#", &error) != R_SUCCESS) {
-    explode("append");
-  }
+  stringBufferAppendStr(b, L"#");
 
   Symbol *symbol = deref(ctx->vm, record->symbol);
   String *name = deref(ctx->vm, symbol->name);
 
-  if (tryStringBufferAppendStr(b, stringValue(name), &error) != R_SUCCESS) {
-    explode("append");
-  }
-
-  if (tryStringBufferAppendStr(b, L"[", &error) != R_SUCCESS) {
-    explode("append");
-  }
-
-  if (tryStringBufferAppendStr(b, L"]", &error) != R_SUCCESS) {
-    explode("append");
-  }
+  stringBufferAppendStr(b, stringValue(name));
+  stringBufferAppendStr(b, L"[");
+  stringBufferAppendStr(b, L"]");
 
   expr->type = F_STRING;
   expr->string.length = stringBufferLength(b);
@@ -306,24 +263,14 @@ void printPort(Ctx *ctx, Value result, Form *expr) {
   expr->type = F_STRING;
   wchar_t function[] = L"<port>";
   expr->string.length = wcslen(function);
-
-  Error error;
-  errorInitContents(&error);
-  if (tryCopyText(ctx->pool, function, &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
+  expr->string.value = copyText(ctx->pool, function, expr->string.length);
 }
 
 void printByteArray(Ctx *ctx, Value result, Form *expr) {
   expr->type = F_STRING;
   wchar_t function[] = L"<byte-array>";
   expr->string.length = wcslen(function);
-
-  Error error;
-  errorInitContents(&error);
-  if (tryCopyText(ctx->pool, function, &expr->string.value, expr->string.length, &error) != R_SUCCESS) {
-    explode("copy text");
-  }
+  expr->string.value = copyText(ctx->pool, function, expr->string.length);
 }
 
 PrintGeneric getPrintGeneric(Ctx *ctx, ValueType type) {
