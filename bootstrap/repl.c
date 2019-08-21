@@ -1,9 +1,10 @@
 #include <string.h>
 #include <libgen.h>
-#include "repl.h"
-#include "compiler.h"
 #include "reader.h"
+#include "analyzer.h"
+#include "compiler.h"
 #include "print.h"
+#include "repl.h"
 
 void fileInfoInitContents(FileInfo *f) {
   f->hasFileName = false;

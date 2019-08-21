@@ -3,6 +3,7 @@
 
 #include "lexer.h"
 #include "compiler.h"
+#include "../vm/vm.h"
 
 typedef struct {
   bool hasFileName;

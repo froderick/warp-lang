@@ -24,8 +24,5 @@ typedef struct AnalyzeOptions {
 void analyzeOptionsInitContents(AnalyzeOptions *options);
 RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Form* expr, Pool_t pool, FormRoot **ptr, Error *error);
 
-void rootInitContents(FormRoot *root);
-void fnCallInitContents(FormFnCall *fnCall);
-
 #endif //WARP_LANG_ANALYZER_H
 

@@ -1,6 +1,7 @@
 #ifndef WARP_LANG_POOL_H
 #define WARP_LANG_POOL_H
 
+#include <stdlib.h>
 #include "../errors.h"
 
 typedef struct Pool *Pool_t;

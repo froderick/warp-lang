@@ -278,6 +278,10 @@ void vecInitContents(FormVec *list);
 void vecAppend(Pool_t pool, FormVec *list, Form *expr);
 void mapInitContents(FormMap *map);
 void mapPut(Pool_t pool, FormMap *map, Form *key, Form *value);
+void fnCallInitContents(FormFnCall *fnCall);
+void bindingInitContents(Binding *binding);
+void bindingTableInitContents(BindingTable *table);
+void rootInitContents(FormRoot *root);
 
 void exprPrnBufConf(Form *expr, StringBuffer_t b, bool readable);
 void exprPrnBuf(Form *expr, StringBuffer_t b);

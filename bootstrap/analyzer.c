@@ -41,17 +41,6 @@ typedef struct AnalyzerContext {
   bool inSyntaxQuote;
 } AnalyzerContext;
 
-void bindingInitContents(Binding *binding) {
-  textInitContents(&binding->name);
-  binding->source = BS_NONE;
-}
-
-void bindingTableInitContents(BindingTable *table) {
-  table->bindings = NULL;
-  table->usedSpace = 0;
-  table->allocatedSpace = 0;
-}
-
 void bindingTablesInitContents(BindingTables *tables) {
   tables->usedSpace = 0;
   tables->allocatedSpace = 0;
@@ -753,13 +742,6 @@ RetVal assertFnCallable(Form *form, Error *error) {
     return ret;
 }
 
-void fnCallInitContents(FormFnCall *fnCall) {
-  fnCall->fnCallable = NULL;
-  formsInitContents(&fnCall->args);
-  fnCall->tailPosition = false;
-  fnCall->recurses = false;
-}
-
 RetVal tryFnCallAnalyze(AnalyzerContext *ctx, Form *expr, FormFnCall *fnCall, Error *error) {
 
   RetVal ret;
@@ -1331,13 +1313,6 @@ RetVal _tryFormAnalyze(AnalyzerContext *ctx, Form* expr, Form **ptr, Error *erro
 
   failure:
   return ret;
-}
-
-void rootInitContents(FormRoot *root) {
-  bindingTableInitContents(&root->table);
-  root->form = NULL;
-  textInitContents(&root->fileName);
-  root->hasFileName = false;
 }
 
 void analyzerContextInitContents(AnalyzerContext *ctx) {

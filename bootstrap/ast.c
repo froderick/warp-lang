@@ -321,155 +321,27 @@ void exprPrn(Pool_t pool, Form *expr) {
   printf("%ls", str);
 }
 
-/*
-Form* formMake(Pool_t pool) {
-  Form *form;
-  palloc(pool, form, sizeof(Form), "Form");
-  return form;
+void fnCallInitContents(FormFnCall *fnCall) {
+  fnCall->fnCallable = NULL;
+  formsInitContents(&fnCall->args);
+  fnCall->tailPosition = false;
+  fnCall->recurses = false;
 }
 
-Form* stringMake(Pool_t pool, wchar_t *input, uint64_t length) {
-  Form *form = formMake(pool);
-  form->type = F_STRING;
-  form->string.length = length;
-  form->string.value = copyText(pool, input, length);
-  form->source.isSet = false;
-  return form;
+void bindingInitContents(Binding *binding) {
+  textInitContents(&binding->name);
+  binding->source = BS_NONE;
 }
 
-Form* numberMake(Pool_t pool, uint64_t value) {
-  Form *form = formMake(pool);
-  form->type = F_NUMBER;
-  form->number.value = value;
-  form->source.isSet = false;
-  return form;
+void bindingTableInitContents(BindingTable *table) {
+  table->bindings = NULL;
+  table->usedSpace = 0;
+  table->allocatedSpace = 0;
 }
 
-Form* charMake(Pool_t pool, wchar_t value) {
-  Form *form = formMake(pool);
-  form->type = F_CHAR;
-  form->chr.value = value;
-  form->source.isSet = false;
-  return form;
+void rootInitContents(FormRoot *root) {
+  bindingTableInitContents(&root->table);
+  root->form = NULL;
+  textInitContents(&root->fileName);
+  root->hasFileName = false;
 }
-
-Form* symbolMake(Pool_t pool, wchar_t *name, uint64_t len) {
-  Form *form = formMake(pool);
-  form->type = F_SYMBOL;
-  form->symbol.value = copyText(pool, name, len);
-  form->symbol.length = len;
-  form->source.isSet = false;
-  return form;
-}
-
-Form* keywordMake(Pool_t pool, wchar_t *name, uint64_t len) {
-  Form *form = formMake(pool);
-  form->type = F_KEYWORD;
-  form->keyword.value = copyText(pool, name, len);
-  form->keyword.length = len;
-  form->source.isSet = false;
-  return form;
-}
-
-Form* booleanMake(Pool_t pool, bool value) {
-  Form *form = formMake(pool);
-  form->type = F_BOOLEAN;
-  form->boolean.value = value;
-  form->source.isSet = false;
-  return form;
-}
-
-Form* nilMake(Pool_t pool) {
-  Form *form = formMake(pool);
-  form->type = F_NIL;
-  form->source.isSet = false;
-  return form;
-}
-
-Form* listMake(Pool_t pool) {
-  Form *form = formMake(pool);
-  form->type = F_LIST;
-  form->list.length = 0;
-
-  // valid for zero length list
-  form->list.head = NULL;
-  form->list.tail = NULL;
-
-  form->source.isSet = false;
-
-  return form;
-}
-
-void listAppend(Pool_t pool, FormList *list, Form *form) {
-
-  ListElement *elem;
-  palloc(pool, elem, sizeof(ListElement), "ExprList");
-
-  elem->expr = form;
-  elem->next = NULL;
-
-  if (list->head == NULL) { // no elements
-    list->head = elem;
-    list->tail = elem;
-  }
-  else if (list->head == list->tail) { // one element
-    list->head->next = elem;
-    list->tail = elem;
-  }
-  else { // more than one element
-    list->tail->next = elem;
-    list->tail = elem;
-  }
-
-  list->length = list->length + 1;
-}
-
-Form* vecMake(Pool_t pool) {
-  Form *form = formMake(pool);
-  form->type = F_VEC;
-  form->list.length = 0;
-
-  // valid for zero length list
-  form->list.head = NULL;
-  form->list.tail = NULL;
-
-  form->source.isSet = false;
-
-  return form;
-}
-
-void vecAppend(Pool_t pool, FormVec *vec, Form *form) {
-
-  ListElement *elem;
-  palloc(pool, elem, sizeof(ListElement), "ListElement");
-
-  elem->expr = form;
-  elem->next = NULL;
-
-  if (vec->head == NULL) { // no elements
-    vec->head = elem;
-    vec->tail = elem;
-  }
-  else if (vec->head == vec->tail) { // one element
-    vec->head->next = elem;
-    vec->tail = elem;
-  }
-  else { // more than one element
-    vec->tail->next = elem;
-    vec->tail = elem;
-  }
-
-  vec->length = vec->length + 1;
-}
-
-Form* mapMake(Pool_t pool, Error *error) {
-  Form *form = formMake(pool);
-  form->type = F_MAP;
-  form->source.isSet = false;
-
-  // valid for zero length map
-  mapInitContents(&form->map);
-  return form;
-}
-
-*/
