@@ -10,6 +10,7 @@
  */
 
 RetVal tryCopyText(Pool_t pool, wchar_t* from, wchar_t **ptr, uint64_t len, Error *error);
+wchar_t* copyText(Pool_t pool, wchar_t* from, uint64_t len);
 
 /*
  * Input/Output Stream Abstraction
@@ -47,7 +48,12 @@ RetVal tryStringInputStreamMake(Pool_t pool, wchar_t *text, uint64_t length, Inp
 
 typedef struct StringBuffer *StringBuffer_t;
 
+StringBuffer_t stringBufferMake(Pool_t pool);
+
 RetVal tryStringBufferMake(Pool_t pool, StringBuffer_t *ptr, Error *error);
+
+void stringBufferAppendChar(StringBuffer_t b, wchar_t ch);
+void stringBufferAppendStr(StringBuffer_t b, wchar_t *str);
 
 RetVal tryStringBufferAppendChar(StringBuffer_t b, wchar_t ch, Error *error);
 RetVal tryStringBufferAppendStr(StringBuffer_t b, wchar_t *str, Error *error);

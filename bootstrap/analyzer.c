@@ -1238,27 +1238,27 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
     // always-constants
     case N_STRING:
       form->type = F_CONST;
-      throws(tryStringMake(ctx->pool, expr->string.value, expr->string.length, &form->constant, error));
+      form->constant = stringMake(ctx->pool, expr->string.value, expr->string.length);
       break;
     case N_NUMBER:
       form->type = F_CONST;
-      throws(tryNumberMake(ctx->pool, expr->number.value, &form->constant, error));
+      form->constant = numberMake(ctx->pool, expr->number.value);
       break;
     case N_CHAR:
       form->type = F_CONST;
-      throws(tryCharMake(ctx->pool, expr->chr.value, &form->constant, error));
+      form->constant = charMake(ctx->pool, expr->chr.value);
       break;
     case N_KEYWORD:
       form->type = F_CONST;
-      throws(tryKeywordMake(ctx->pool, expr->keyword.value, expr->keyword.length, &form->constant, error));
+      form->constant = keywordMake(ctx->pool, expr->keyword.value, expr->keyword.length);
       break;
     case N_BOOLEAN:
       form->type = F_CONST;
-      throws(tryBooleanMake(ctx->pool, expr->boolean.value, &form->constant, error));
+      form->constant = booleanMake(ctx->pool, expr->boolean.value);
       break;
     case N_NIL:
       form->type = F_CONST;
-      throws(tryNilMake(ctx->pool, &form->constant, error));
+      form->constant = nilMake(ctx->pool);
       break;
 
     case N_VEC: {
@@ -1275,12 +1275,12 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Expr* expr, Form *form, Erro
       if (ctx->inQuote) {
         form->type = F_CONST;
         // TODO: this should namespace the symbol, but for that we'd have to know what the current namespace is
-        throws(trySymbolMake(ctx->pool, expr->symbol.value, expr->symbol.length, &form->constant, error));
+        form->constant = symbolMake(ctx->pool, expr->symbol.value, expr->symbol.length);
       }
       else if (ctx->inSyntaxQuote) {
         form->type = F_CONST;
         // TODO: this should namespace the symbol, but for that we'd have to know what the current namespace is
-        throws(trySymbolMake(ctx->pool, expr->symbol.value, expr->symbol.length, &form->constant, error));
+        form->constant = symbolMake(ctx->pool, expr->symbol.value, expr->symbol.length);
       }
       else {
         throws(trySymbolAnalyze(ctx, expr, form, error));

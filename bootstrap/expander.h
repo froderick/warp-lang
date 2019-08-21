@@ -1,7 +1,7 @@
 #ifndef WARP_LANG_EXPANDER_H
 #define WARP_LANG_EXPANDER_H
 
-#include "reader.h"
+#include "ast.h"
 #include "../vm/vm.h"
 #include "pool.h"
 

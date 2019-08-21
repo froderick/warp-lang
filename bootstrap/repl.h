@@ -1,6 +1,7 @@
 #ifndef WARP_LANG_REPL_H
 #define WARP_LANG_REPL_H
 
+#include "lexer.h"
 #include "compiler.h"
 
 typedef struct {

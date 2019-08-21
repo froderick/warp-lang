@@ -189,9 +189,7 @@ void printList(Ctx *ctx, Value result, Expr *expr) {
 
   Error error;
   errorInitContents(&error);
-  if (tryListAppend(ctx->pool, &expr->list, elem, &error) != R_SUCCESS) {
-    explode("list append");
-  }
+  listAppend(ctx->pool, &expr->list, elem);
 
   while (valueType(cons->next) != VT_NIL) {
 
@@ -207,9 +205,7 @@ void printList(Ctx *ctx, Value result, Expr *expr) {
 
     _print(ctx, cons->value, elem);
 
-    if (tryListAppend(ctx->pool, &expr->list, elem, &error) != R_SUCCESS) {
-      explode("list append");
-    }
+    listAppend(ctx->pool, &expr->list, elem);
   }
 }
 
@@ -241,9 +237,7 @@ void printMap(Ctx *ctx, Value result, Expr *expr) {
 
         Error e;
         errorInitContents(&e);
-        if (tryMapPut(ctx->pool, &expr->map, keyExpr, valueExpr, &e) != R_SUCCESS) {
-          explode("put");
-        }
+        mapPut(ctx->pool, &expr->map, keyExpr, valueExpr);
       }
     }
   }
@@ -269,9 +263,7 @@ void printArray(Ctx *ctx, Value result, Expr *expr) {
 
     _print(ctx, elements[i], elem);
 
-    if (tryVecAppend(ctx->pool, &expr->vec, elem, &error) != R_SUCCESS) {
-      explode("list append");
-    }
+    vecAppend(ctx->pool, &expr->vec, elem);
   }
 }
 
@@ -368,11 +360,9 @@ Expr* printToReader(VM_t vm, Pool_t pool, Value result) {
   ctx.vm = vm;
   ctx.pool= pool;
 
-  Expr *elem;
-  palloc(pool, elem, sizeof(Expr), "Expr");
-  exprInitContents(elem);
-
+  Expr *elem = exprMake(pool);
   _print(&ctx, result, elem);
+
   return elem;
 }
 
@@ -382,10 +372,7 @@ void print(VM_t vm, Value value) {
   Error error;
   errorInitContents(&error);
 
-  Pool_t pool = NULL;
-  if (tryPoolCreate(&pool, ONE_MB, &error) != R_SUCCESS) {
-    explode("oops");
-  }
+  Pool_t pool = poolCreate(ONE_MB);
 
   Ctx ctx;
   ctx.vm = vm;
@@ -395,9 +382,7 @@ void print(VM_t vm, Value value) {
   exprInitContents(&elem);
   _print(&ctx, value, &elem);
 
-  if (tryExprPrn(pool, &elem, &error) != R_SUCCESS) {
-    explode("oops");
-  }
+  exprPrn(pool, &elem);
 
   poolFree(pool);
 }
@@ -410,14 +395,8 @@ void printBuf(Ctx *ctx, StringBuffer_t b, Value value) {
   exprInitContents(&elem);
   _print(ctx, value, &elem);
 
-  wchar_t *str = NULL;
-  if (tryExprPrnStr(ctx->pool, &elem, &str, &error) != R_SUCCESS) {
-    explode("oops");
-  }
-
-  if (tryStringBufferAppendStr(b, str, &error) != R_SUCCESS) {
-    explode("oops");
-  }
+  wchar_t *str = exprPrnStr(ctx->pool, &elem);
+  stringBufferAppendStr(b, str);
 }
 
 wchar_t* printExceptionValue(Ctx *ctx, Value e) {
@@ -433,31 +412,21 @@ wchar_t* printExceptionValue(Ctx *ctx, Value e) {
 
   StringBuffer_t b = NULL;
 
-  if (tryStringBufferMake(ctx->pool, &b, &error) != R_SUCCESS) {
-    explode("oops");
-  }
+  b = stringBufferMake(ctx->pool);
 
   if (message != W_NIL_VALUE && value != W_NIL_VALUE) {
-    if (tryStringBufferAppendStr(b, stringValue(deref(ctx->vm, message)), &error) != R_SUCCESS) {
-      explode("oops");
-    }
-    if (tryStringBufferAppendStr(b, L" / ", &error) != R_SUCCESS) {
-      explode("oops");
-    }
+    stringBufferAppendStr(b, stringValue(deref(ctx->vm, message)));
+    stringBufferAppendStr(b, L" / ");
     printBuf(ctx, b, value);
   }
   else if (message != W_NIL_VALUE) {
-    if (tryStringBufferAppendStr(b, stringValue(deref(ctx->vm, message)), &error) != R_SUCCESS) {
-      explode("oops");
-    }
+    stringBufferAppendStr(b, stringValue(deref(ctx->vm, message)));
   }
   else if (value != W_NIL_VALUE) {
     printBuf(ctx, b, value);
   }
 
-  if (tryStringBufferAppendStr(b, L"\n", &error) != R_SUCCESS) {
-    explode("oops");
-  }
+  stringBufferAppendStr(b, L"\n");
 
   uint64_t numFrames = objectHeaderSize(frames->header);
   Value* elements = arrayElements(frames);
@@ -479,27 +448,17 @@ wchar_t* printExceptionValue(Ctx *ctx, Value e) {
           stringValue(functionName), stringValue(fileName), lineNumber);
     }
 
-    if (tryStringBufferAppendStr(b, msg, &error) != R_SUCCESS) {
-      explode("oops");
-    }
+    stringBufferAppendStr(b, msg);
   }
 
-  wchar_t *output;
-  if (tryCopyText(ctx->pool, stringBufferText(b), &output, stringBufferLength(b), &error) != R_SUCCESS) {
-    explode("oops");
-  }
-
-  return output;
+  return copyText(ctx->pool, stringBufferText(b), stringBufferLength(b));
 }
 
 void printException(VM_t vm, Value exception) {
   Error error;
   errorInitContents(&error);
 
-  Pool_t pool = NULL;
-  if (tryPoolCreate(&pool, ONE_MB, &error) != R_SUCCESS) {
-    explode("oops");
-  }
+  Pool_t pool = poolCreate(ONE_MB);
 
   Ctx ctx;
   ctx.vm = vm;

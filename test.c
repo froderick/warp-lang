@@ -252,7 +252,7 @@ RetVal tryParse(Pool_t pool, wchar_t *input, Expr **ptr, Error *error) {
     return ret;
 }
 
-START_TEST(exprPrn)
+START_TEST(exprPrnTest)
   {
 
     Error e;
@@ -264,7 +264,7 @@ START_TEST(exprPrn)
 
     // constant
     ck_assert_int_eq(tryParse(pool, L"(himom () '(one :two 102 nil true false) \"str\")", &expr, &e), R_SUCCESS);
-    ck_assert_int_eq(tryExprPrn(pool, expr, &e), R_SUCCESS);
+    exprPrn(pool, expr);
     printf("\n");
 
     poolFree(pool);
@@ -929,7 +929,7 @@ Suite * suite(void) {
   tcase_add_test(tc_core, eof_mid_number_token);
   tcase_add_test(tc_core, errors);
   tcase_add_test(tc_core, parser);
-  tcase_add_test(tc_core, exprPrn);
+  tcase_add_test(tc_core, exprPrnTest);
   tcase_add_test(tc_core, analyzer);
   tcase_add_test(tc_core, compilerBasic);
   tcase_add_test(tc_core, vmBasic);

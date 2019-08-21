@@ -5,7 +5,7 @@
 #include <stdlib.h>
 
 #include "../errors.h"
-#include "reader.h"
+#include "ast.h"
 #include "expander.h"
 #include "pool.h"
 

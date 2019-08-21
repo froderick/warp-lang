@@ -3,7 +3,7 @@
 #include "compiler.h"
 #include "../vm/vm.h"
 #include "expander.h"
-#include "reader.h"
+#include "ast.h"
 #include "pool.h"
 #include "print.h"
 
@@ -137,9 +137,9 @@ RetVal tryExpand(Expander *expander, Text sym, Expr *input, Expr **output, Error
     Expr *expr = printToReader(expander->vm, expander->pool, result.value);
 
     printf("macroexpand occurred {\n    ");
-    throws(tryExprPrn(expander->pool, input, error));
+    exprPrn(expander->pool, input);
     printf("\n    =>\n    ");
-    throws(tryExprPrn(expander->pool, expr, error));
+    exprPrn(expander->pool, expr);
     printf("\n}\n");
 
     *output = expr;

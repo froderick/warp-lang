@@ -2,6 +2,7 @@
 #include <libgen.h>
 #include "repl.h"
 #include "compiler.h"
+#include "reader.h"
 #include "print.h"
 
 void fileInfoInitContents(FileInfo *f) {
@@ -80,7 +81,7 @@ RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputTe
 
   if (result.type == RT_RESULT) {
     Expr *expr = printToReader(vm, pool, result.value);
-    throws(tryExprPrnStr(outputPool, expr, outputText, error));
+    *outputText = exprPrnStr(outputPool, expr);
   }
   else {
     printException(vm, result.value);

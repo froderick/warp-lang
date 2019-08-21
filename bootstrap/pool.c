@@ -57,6 +57,19 @@ RetVal tryPoolCreate(Pool **ptr, uint64_t segmentSize, Error *error) {
     return ret;
 }
 
+Pool_t poolCreate(uint64_t segmentSize) {
+
+  Pool *pool = malloc(sizeof(Pool));
+  if (pool == NULL) {
+    explode("failed to malloc Pool");
+  }
+
+  poolInitContents(pool);
+  pool->segmentSize = segmentSize;
+
+  return pool;
+}
+
 RetVal tryMakeSegment(uint64_t segmentSize, Segment **ptr, Error *error) {
   RetVal ret;
 
