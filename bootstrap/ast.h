@@ -8,34 +8,34 @@
 #include "source.h"
 #include "utils.h"
 
-struct Expr;
+typedef struct Expr Expr;
 
-typedef struct ExprString {
+typedef struct FormString {
   wchar_t *value;
   uint64_t length;
-} ExprString;
+} FormString;
 
-typedef struct ExprNumber {
+typedef struct FormNumber {
   uint64_t value;
-} ExprNumber;
+} FormNumber;
 
-typedef struct ExprChar {
+typedef struct FormChar {
   wchar_t value;
-} ExprChar;
+} FormChar;
 
-typedef struct ExprSymbol {
+typedef struct FormSymbol {
   wchar_t *value;
   uint64_t length;
-} ExprSymbol;
+} FormSymbol;
 
-typedef struct ExprKeyword {
+typedef struct FormKeyword {
   wchar_t *value;
   uint64_t length;
-} ExprKeyword;
+} FormKeyword;
 
-typedef struct ExprBoolean {
+typedef struct FormBoolean {
   bool value;
-} ExprBoolean;
+} FormBoolean;
 
 typedef struct ListElement {
   struct Expr *expr;
@@ -55,8 +55,8 @@ typedef struct ExprVec {
 } ExprVec;
 
 typedef struct MapElement {
-  struct Expr *key;
-  struct Expr *value;
+  Expr *key;
+  Expr *value;
   struct MapElement *next;
 } MapElement;
 
@@ -83,12 +83,12 @@ typedef enum ExprType {
 typedef struct Expr {
   ExprType type;
   union {
-    ExprString string;
-    ExprNumber number;
-    ExprChar chr;
-    ExprSymbol symbol;
-    ExprKeyword keyword;
-    ExprBoolean boolean;
+    FormString string;
+    FormNumber number;
+    FormChar chr;
+    FormSymbol symbol;
+    FormKeyword keyword;
+    FormBoolean boolean;
     ExprList list;
     ExprVec vec;
     ExprMap map;

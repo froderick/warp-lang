@@ -1042,7 +1042,7 @@ RetVal tryExpandAnalyze(AnalyzerContext *ctx, Expr *expr, Form *form, Error *err
     throwInternalError(error, "the contents of a macro argumet must be a list: %u", expr->type);
   }
 
-  ExprSymbol sym = expr->list.head->expr->symbol;
+  FormSymbol sym = expr->list.head->expr->symbol;
 
   Text macroName;
   macroName.length = sym.length;
