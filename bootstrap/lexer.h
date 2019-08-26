@@ -42,7 +42,7 @@ typedef struct Token {
 
 typedef struct TokenStream *TokenStream_t;
 
-RetVal tryStreamMake(Pool_t pool, InputStream_t source, TokenStream_t *s, Error *error);
+TokenStream_t streamMake(Pool_t pool, InputStream_t source);
 
 // stream operations
 RetVal tryStreamNext(Pool_t pool, TokenStream_t s, Token **token, Error *error);

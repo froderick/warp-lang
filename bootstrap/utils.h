@@ -50,13 +50,9 @@ typedef struct StringBuffer *StringBuffer_t;
 
 StringBuffer_t stringBufferMake(Pool_t pool);
 
-RetVal tryStringBufferMake(Pool_t pool, StringBuffer_t *ptr, Error *error);
-
 void stringBufferAppendChar(StringBuffer_t b, wchar_t ch);
 void stringBufferAppendStr(StringBuffer_t b, wchar_t *str);
 
-RetVal tryStringBufferAppendChar(StringBuffer_t b, wchar_t ch, Error *error);
-RetVal tryStringBufferAppendStr(StringBuffer_t b, wchar_t *str, Error *error);
 uint64_t stringBufferLength(StringBuffer_t b);
 wchar_t* stringBufferText(StringBuffer_t b);
 void stringBufferClear(StringBuffer_t b);

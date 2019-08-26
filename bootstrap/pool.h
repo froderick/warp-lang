@@ -8,7 +8,6 @@ typedef struct Pool *Pool_t;
 
 Pool_t poolCreate(uint64_t segmentSize);
 
-RetVal tryPoolCreate(Pool_t *pool, uint64_t segmentSize, Error *error);
 RetVal tryPoolAllocate(Pool_t pool, void **ptr, size_t size, char *description, Error *error);
 uint64_t poolSize(Pool_t pool);
 void poolClear(Pool_t pool);

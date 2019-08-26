@@ -265,29 +265,6 @@ uint64_t stringBufferUnusedBytes(StringBuffer *buf) {
   return sizeof(wchar_t) * buf->usedChars;
 }
 
-RetVal tryStringBufferMake(Pool_t pool, StringBuffer **ptr, Error *error) {
-  RetVal ret;
-
-  StringBuffer *b = NULL;
-  wchar_t *data = NULL;
-
-  tryPalloc(pool, b, sizeof(StringBuffer), "StringBuffer");
-
-  b->pool = pool;
-  b->usedChars = 0;
-  b->allocatedChars = 256;
-
-  tryPalloc(pool, data, stringBufferAllocatedBytes(b), "StringBuffer array");
-  bzero(data, stringBufferAllocatedBytes(b));
-
-  b->data = data;
-  *ptr = b;
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
 StringBuffer_t stringBufferMake(Pool_t pool) {
   StringBuffer *b = NULL;
   wchar_t *data = NULL;
@@ -304,32 +281,6 @@ StringBuffer_t stringBufferMake(Pool_t pool) {
   b->data = data;
 
   return b;
-}
-
-RetVal tryStringBufferAppendChar(StringBuffer *b, wchar_t ch, Error *error) {
-  RetVal ret;
-
-  if (b->usedChars + 2 >= (b->allocatedChars - 1)) {
-
-    unsigned long oldSizeInBytes = stringBufferAllocatedBytes(b);
-    unsigned long newSizeInBytes = oldSizeInBytes * 2;
-
-    wchar_t *resized = NULL;
-    tryPalloc(b->pool, resized, newSizeInBytes, "Constant array");
-    memcpy(resized, b->data, oldSizeInBytes);
-    b->data = resized;
-
-    b->allocatedChars = b->allocatedChars * 2;
-  }
-
-  b->data[b->usedChars] = ch;
-  b->usedChars = b->usedChars + 1;
-  b->data[b->usedChars] = L'\0';
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
 }
 
 void stringBufferAppendChar(StringBuffer *b, wchar_t ch) {
@@ -351,37 +302,7 @@ void stringBufferAppendChar(StringBuffer *b, wchar_t ch) {
   b->data[b->usedChars] = L'\0';
 }
 
-RetVal tryStringBufferAppendStr(StringBuffer *b, wchar_t *str, Error *error) {
-  RetVal ret;
-
-  uint64_t len = wcslen(str);
-
-  if (b->usedChars + len > (b->allocatedChars - 1)) {
-
-    unsigned long oldSizeInBytes = stringBufferAllocatedBytes(b);
-    unsigned long newSizeInBytes = (oldSizeInBytes + (sizeof(wchar_t) * len)) * 2;
-
-    wchar_t *resized = NULL;
-    tryPalloc(b->pool, resized, newSizeInBytes, "StringBuffer array");
-    memcpy(resized, b->data, oldSizeInBytes);
-    b->data = resized;
-
-    b->allocatedChars = b->allocatedChars * 2;
-  }
-
-  memcpy(b->data + b->usedChars, str, len * sizeof(wchar_t));
-  b->usedChars = b->usedChars + len;
-  b->data[b->usedChars] = L'\0';
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
 void stringBufferAppendStr(StringBuffer *b, wchar_t *str) {
-  RetVal ret;
-
   uint64_t len = wcslen(str);
 
   if (b->usedChars + len > (b->allocatedChars - 1)) {

@@ -8,8 +8,7 @@ int main(void) {
 
   Error e;
 
-  Pool_t pool = NULL;
-  tryPoolCreate(&pool, ONE_MB, &e);
+  Pool_t pool = poolCreate(ONE_MB);
 
   InputStream_t source;
   int error = tryFileInputStreamMake(pool, stdin, &source, &e);
@@ -17,11 +16,7 @@ int main(void) {
     printf("whoops 1");
   }
 
-  TokenStream_t stream;
-  error = tryStreamMake(pool, source, &stream, &e);
-  if (error) {
-    printf("whoops 2");
-  }
+  TokenStream_t stream = streamMake(pool, source);
 
   Token *t;
   while (1) {

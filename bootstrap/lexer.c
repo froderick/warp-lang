@@ -63,13 +63,10 @@ const char* tokenName(TokenType type) {
   }
 }
 
-RetVal tryTokenInit(Pool_t pool, TokenType type, wchar_t *text, uint64_t position, uint64_t length,
-                    uint64_t lineNumber, uint64_t colNumber, Token **ptr, Error *error) {
-  RetVal ret;
-
+Token* tokenInit(Pool_t pool, TokenType type, wchar_t *text, uint64_t position, uint64_t length,
+                    uint64_t lineNumber, uint64_t colNumber) {
   Token *t;
-
-  tryPalloc(pool, t, sizeof(Token) + (sizeof(wchar_t) * (length + 1)), "Token");
+  palloc(pool, t, sizeof(Token) + (sizeof(wchar_t) * (length + 1)), "Token");
 
   t->type = type;
   t->typeName = tokenName(type);
@@ -81,39 +78,26 @@ RetVal tryTokenInit(Pool_t pool, TokenType type, wchar_t *text, uint64_t positio
   wcpncpy(t->text, text, length);
   t->text[length] = L'\0';
 
-  *ptr = t;
-
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  return t;
 }
 
-RetVal tryTokenInitFromLexer(Pool_t pool, LexerState *s, TokenType type, Token **ptr, Error *error) {
+Token* tokenInitFromLexer(Pool_t pool, LexerState *s, TokenType type) {
   uint64_t length = stringBufferLength(s->b);
   wchar_t *text = stringBufferText(s->b);
-  return tryTokenInit(pool, type, text, s->position, length, s->lineNumber, s->colNumber, ptr, error);
+  return tokenInit(pool, type, text, s->position, length, s->lineNumber, s->colNumber);
 }
 
-RetVal tryLexerStateMake(Pool_t pool, LexerState **ptr, Error *error) {
-  RetVal ret;
+LexerState* lexerStateMake(Pool_t pool) {
+  StringBuffer_t b = stringBufferMake(pool);
 
-  StringBuffer_t b = NULL;
   LexerState *s = NULL;
-
-  throws(tryStringBufferMake(pool, &b, error));
-  tryPalloc(pool, s, sizeof(LexerState), "LexerState");
-
+  palloc(pool, s, sizeof(LexerState), "LexerState");
   s->position = 0;
   s->lineNumber = 1;
   s->colNumber = 1;
   s->b = b;
 
-  *ptr = s;
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  return s;
 }
 
 bool isWhitespace(wchar_t ch) {
@@ -129,7 +113,7 @@ bool isNewline(wchar_t ch) {
 RetVal tryReadString(Pool_t pool, InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
   RetVal ret;
 
-  throws(tryStringBufferAppendChar(s->b, first, error));
+  stringBufferAppendChar(s->b, first);
 
   // keep reading until char is a non-escaped quote
 
@@ -147,7 +131,7 @@ RetVal tryReadString(Pool_t pool, InputStream_t source, LexerState *s, wchar_t f
       throwTokenizationError(error, s->position, "unexpected EOF, string must end in a '\"''");
     }
 
-    throws(tryStringBufferAppendChar(s->b, ch, error));
+    stringBufferAppendChar(s->b, ch);
 
     if (!escape && ch == L'"') {
       foundEnd = true;
@@ -158,7 +142,7 @@ RetVal tryReadString(Pool_t pool, InputStream_t source, LexerState *s, wchar_t f
   }
   while (!foundEnd);
 
-  throws(tryTokenInitFromLexer(pool, s, T_STRING, token, error));
+  *token = tokenInitFromLexer(pool, s, T_STRING);
 
   return R_SUCCESS;
 
@@ -169,7 +153,7 @@ RetVal tryReadString(Pool_t pool, InputStream_t source, LexerState *s, wchar_t f
 RetVal tryReadUnquote(Pool_t pool, InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
   RetVal ret;
 
-  throws(tryStringBufferAppendChar(s->b, first, error));
+  stringBufferAppendChar(s->b, first);
 
   // read a second char, pick one of the two unquotes, push back if it is not the two-character one
 
@@ -178,11 +162,11 @@ RetVal tryReadUnquote(Pool_t pool, InputStream_t source, LexerState *s, wchar_t 
 
   if (ch != L'@') {
     throws(tryInputStreamUnreadChar(source, ch, error));
-    throws(tryTokenInitFromLexer(pool, s, T_UNQUOTE, token, error));
+    *token = tokenInitFromLexer(pool, s, T_UNQUOTE);
   }
   else {
-    throws(tryStringBufferAppendChar(s->b, ch, error));
-    throws(tryTokenInitFromLexer(pool, s, T_SPLICING_UNQUOTE, token, error));
+    stringBufferAppendChar(s->b, ch);
+    *token = tokenInitFromLexer(pool, s, T_SPLICING_UNQUOTE);
   }
 
   return R_SUCCESS;
@@ -194,7 +178,7 @@ RetVal tryReadUnquote(Pool_t pool, InputStream_t source, LexerState *s, wchar_t 
 RetVal tryReadNumber(Pool_t pool, InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
   RetVal ret;
 
-  throws(tryStringBufferAppendChar(s->b, first, error));
+  stringBufferAppendChar(s->b, first);
 
   // keep reading until char is not numeric, then push back
 
@@ -215,13 +199,13 @@ RetVal tryReadNumber(Pool_t pool, InputStream_t source, LexerState *s, wchar_t f
       matched = false;
     }
     else {
-      throws(tryStringBufferAppendChar(s->b, ch, error));
+      stringBufferAppendChar(s->b, ch);
       matched = true;
     }
 
   } while (matched);
 
-  throws(tryTokenInitFromLexer(pool, s, T_NUMBER, token, error));
+  *token = tokenInitFromLexer(pool, s, T_NUMBER);
 
   return R_SUCCESS;
 
@@ -238,8 +222,8 @@ RetVal tryReadCharOrQuote(Pool_t pool, InputStream_t source, LexerState *s, wcha
     return R_ERROR;
   }
   else if (read == R_EOF) { // quote
-    throws(tryStringBufferAppendChar(s->b, first, error));
-    throws(tryTokenInitFromLexer(pool, s, T_QUOTE, token, error));
+    stringBufferAppendChar(s->b, first);
+    *token = tokenInitFromLexer(pool, s, T_QUOTE);
   }
   else {
     wchar_t third;
@@ -249,19 +233,19 @@ RetVal tryReadCharOrQuote(Pool_t pool, InputStream_t source, LexerState *s, wcha
     }
     else if (read == R_EOF) { // quote
       throws(tryInputStreamUnreadChar(source, second, error));
-      throws(tryStringBufferAppendChar(s->b, first, error));
-      throws(tryTokenInitFromLexer(pool, s, T_QUOTE, token, error));
+      stringBufferAppendChar(s->b, first);
+      *token = tokenInitFromLexer(pool, s, T_QUOTE);
     }
     else {
       if (third == first) {
-        throws(tryStringBufferAppendChar(s->b, second, error));
-        throws(tryTokenInitFromLexer(pool, s, T_CHAR, token, error));
+        stringBufferAppendChar(s->b, second);
+        *token = tokenInitFromLexer(pool, s, T_CHAR);
       }
       else { // quote
         throws(tryInputStreamUnreadChar(source, third, error));
         throws(tryInputStreamUnreadChar(source, second, error));
-        throws(tryStringBufferAppendChar(s->b, first, error));
-        throws(tryTokenInitFromLexer(pool, s, T_QUOTE, token, error));
+        stringBufferAppendChar(s->b, first);
+        *token = tokenInitFromLexer(pool, s, T_QUOTE);
       }
     }
   }
@@ -314,7 +298,7 @@ bool isSymbolContinue(wchar_t ch) {
 RetVal tryReadSymbol(Pool_t pool, InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
   RetVal ret;
 
-  throws(tryStringBufferAppendChar(s->b, first, error));
+  stringBufferAppendChar(s->b, first);
 
   // keep reading until char is not alphanumeric, then push back
   // on EOF, stop reading and return R_SUCCESS
@@ -336,7 +320,7 @@ RetVal tryReadSymbol(Pool_t pool, InputStream_t source, LexerState *s, wchar_t f
       matched = false;
     }
     else {
-      throws(tryStringBufferAppendChar(s->b, ch, error));
+      stringBufferAppendChar(s->b, ch);
       matched = true;
     }
 
@@ -358,7 +342,7 @@ RetVal tryReadSymbol(Pool_t pool, InputStream_t source, LexerState *s, wchar_t f
     type = T_SYMBOL;
   }
 
-  throws(tryTokenInitFromLexer(pool, s, type, token, error));
+  *token = tokenInitFromLexer(pool, s, type);
 
   return R_SUCCESS;
 
@@ -369,7 +353,7 @@ RetVal tryReadSymbol(Pool_t pool, InputStream_t source, LexerState *s, wchar_t f
 RetVal tryReadKeyword(Pool_t pool, InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
   RetVal ret;
 
-  throws(tryStringBufferAppendChar(s->b, first, error));
+  stringBufferAppendChar(s->b, first);
 
   // keep reading until char is not alphanumeric, then push back
 
@@ -390,7 +374,7 @@ RetVal tryReadKeyword(Pool_t pool, InputStream_t source, LexerState *s, wchar_t 
       matched = false;
     }
     else {
-      throws(tryStringBufferAppendChar(s->b, ch, error));
+      stringBufferAppendChar(s->b, ch);
       matched = true;
     }
 
@@ -400,7 +384,7 @@ RetVal tryReadKeyword(Pool_t pool, InputStream_t source, LexerState *s, wchar_t 
     throwTokenizationError(error, s->position, "keyword token type cannot be empty");
   }
 
-  throws(tryTokenInitFromLexer(pool, s, T_KEYWORD, token, error));
+  *token = tokenInitFromLexer(pool, s, T_KEYWORD);
 
   return R_SUCCESS;
 
@@ -411,7 +395,7 @@ RetVal tryReadKeyword(Pool_t pool, InputStream_t source, LexerState *s, wchar_t 
 RetVal tryReadComment(Pool_t pool, InputStream_t source, LexerState *s, wchar_t first, Token **token, Error *error) {
   RetVal ret;
 
-  throws(tryStringBufferAppendChar(s->b, first, error));
+  stringBufferAppendChar(s->b, first);
 
   // keep reading until char is not alphanumeric, then push back
 
@@ -432,13 +416,13 @@ RetVal tryReadComment(Pool_t pool, InputStream_t source, LexerState *s, wchar_t 
       matched = false;
     }
     else {
-      throws(tryStringBufferAppendChar(s->b, ch, error));
+      stringBufferAppendChar(s->b, ch);
       matched = true;
     }
 
   } while (matched);
 
-  throws(tryTokenInitFromLexer(pool, s, T_COMMENT, token, error));
+  *token = tokenInitFromLexer(pool, s, T_COMMENT);
 
   return R_SUCCESS;
 
@@ -472,29 +456,29 @@ RetVal tryTokenRead(Pool_t pool, InputStream_t source, LexerState *s, Token **to
 
   // single-character tokens, do not require buffering
   if (ch == L'(') {
-    throws(tryTokenInit(pool, T_OPAREN, L"(", s->position, 1, s->lineNumber, s->colNumber, token, error));
+    *token = tokenInit(pool, T_OPAREN, L"(", s->position, 1, s->lineNumber, s->colNumber);
   }
   else if (ch == L')') {
-    throws(tryTokenInit(pool, T_CPAREN, L")", s->position, 1, s->lineNumber, s->colNumber, token, error));
+    *token = tokenInit(pool, T_CPAREN, L")", s->position, 1, s->lineNumber, s->colNumber);
   }
   else if (ch == L'[') {
-    ret = tryTokenInit(pool, T_OVEC, L"[", s->position, 1, s->lineNumber, s->colNumber, token, error);
+    *token = tokenInit(pool, T_OVEC, L"[", s->position, 1, s->lineNumber, s->colNumber);
   }
   else if (ch == L']') {
-    ret = tryTokenInit(pool, T_CVEC, L"]", s->position, 1, s->lineNumber, s->colNumber, token, error);
+    *token = tokenInit(pool, T_CVEC, L"]", s->position, 1, s->lineNumber, s->colNumber);
   }
   else if (ch == L'{') {
-    throws(tryTokenInit(pool, T_OBRACKET, L"{", s->position, 1, s->lineNumber, s->colNumber, token, error));
+    *token = tokenInit(pool, T_OBRACKET, L"{", s->position, 1, s->lineNumber, s->colNumber);
   }
   else if (ch == L'}') {
-    throws(tryTokenInit(pool, T_CBRACKET, L"}", s->position, 1, s->lineNumber, s->colNumber, token, error));
+    *token = tokenInit(pool, T_CBRACKET, L"}", s->position, 1, s->lineNumber, s->colNumber);
   }
   else if (ch == L'`') {
-    throws(tryTokenInit(pool, T_SYNTAX_QUOTE, L"`", s->position, 1, s->lineNumber, s->colNumber, token, error));
+    *token = tokenInit(pool, T_SYNTAX_QUOTE, L"`", s->position, 1, s->lineNumber, s->colNumber);
   }
 
   else if (ch == L'&') {
-    throws(tryTokenInit(pool, T_SYMBOL, L"&", s->position, 1, s->lineNumber, s->colNumber, token, error));
+    *token = tokenInit(pool, T_SYMBOL, L"&", s->position, 1, s->lineNumber, s->colNumber);
   }
 
   // multi-character tokens
@@ -551,49 +535,22 @@ typedef struct TokenStream {
   Token* next;
 } TokenStream;
 
-RetVal tryStreamMake(Pool_t pool, InputStream_t source, TokenStream **ptr, Error *error) {
-  RetVal ret;
-
-  LexerState *l = NULL;
+TokenStream* streamMake(Pool_t pool, InputStream_t source) {
+  LexerState *l = lexerStateMake(pool);
   TokenStream *s = NULL;
-
-  throws(tryLexerStateMake(pool, &l, error));
-  tryPalloc(pool, s, sizeof(TokenStream), "TokenStream");
-
+  palloc(pool, s, sizeof(TokenStream), "TokenStream");
   s->source = source;
   s->lexer = l;
   s->next = NULL;
-
-  *ptr = s;
-  return R_SUCCESS;
-
-  failure:
-    return ret;
+  return s;
 }
 
-RetVal tryStreamMakeFile(Pool_t pool, char *filename, TokenStream **ptr, Error *error) {
-  RetVal ret;
-
-  FILE *file = NULL;
-  TokenStream *s = NULL;
-
-  file = fopen(filename, "r");
+TokenStream* tryStreamMakeFile(Pool_t pool, char *filename, TokenStream **ptr, Error *error) {
+  FILE *file = fopen(filename, "r");
   if (file == NULL) {
-    throwIOError(error, "making stream from file");
+    explode("making stream from file");
   }
-
-  throws(tryStreamMake(pool, (void*)file, &s, error));
-
-  *ptr = s;
-  return R_SUCCESS;
-
-  failure:
-    if (file != NULL) {
-      if (!fclose(file)) {
-        // not handling this
-      }
-    }
-    return ret;
+  return streamMake(pool, (void*)file);
 }
 
 RetVal tryStreamNext(Pool_t pool, TokenStream *s, Token **token, Error *error) {

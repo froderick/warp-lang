@@ -31,14 +31,12 @@ START_TEST(basic) {
   Error e;
   errorInitContents(&e);
 
-  Pool_t pool = NULL;
-  ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
+  Pool_t pool = poolCreate(ONE_MB);
 
   InputStream_t source;
   ck_assert_int_eq(tryStringInputStreamMake(pool, text, wcslen(text), &source, &e), R_SUCCESS);
 
-  TokenStream_t stream;
-  ck_assert_int_eq(tryStreamMake(pool, source, &stream, &e), R_SUCCESS);
+  TokenStream_t stream = streamMake(pool, source);
 
   Token *t;
 
@@ -86,14 +84,12 @@ START_TEST(eof_mid_number_token) {
     Error e;
     errorInitContents(&e);
 
-    Pool_t pool = NULL;
-    ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
+    Pool_t pool = poolCreate(ONE_MB);
 
     InputStream_t source;
     ck_assert_int_eq(tryStringInputStreamMake(pool, text, wcslen(text), &source, &e), R_SUCCESS);
 
-    TokenStream_t stream;
-    ck_assert_int_eq(tryStreamMake(pool, source, &stream, &e), R_SUCCESS);
+    TokenStream_t stream = streamMake(pool, source);
 
     Token *t;
     ck_assert_int_eq(tryStreamNext(pool, stream, &t, &e), R_SUCCESS);
@@ -115,14 +111,12 @@ START_TEST(errors) {
     Error e;
     errorInitContents(&e);
 
-    Pool_t pool = NULL;
-    ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
+    Pool_t pool = poolCreate(ONE_MB);
 
     InputStream_t source;
     ck_assert_int_eq(tryStringInputStreamMake(pool, text, wcslen(text), &source, &e), R_SUCCESS);
 
-    TokenStream_t stream;
-    ck_assert_int_eq(tryStreamMake(pool, source, &stream, &e), R_SUCCESS);
+    TokenStream_t stream = streamMake(pool, source);
 
     Token *t;
 
@@ -147,14 +141,12 @@ START_TEST(parser) {
     Error e;
     errorInitContents(&e);
     InputStream_t source;
-    TokenStream_t stream;
     Form *expr;
-    Pool_t pool = NULL;
 
-    ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
+    Pool_t pool = poolCreate(ONE_MB);
 
     ck_assert_int_eq(tryStringInputStreamMake(pool, input, wcslen(input), &source, &e), R_SUCCESS);
-    ck_assert_int_eq(tryStreamMake(pool, source, &stream, &e), R_SUCCESS);
+    TokenStream_t stream = streamMake(pool, source);
 
     // string
     ck_assert_int_eq(tryExprRead(pool, stream, &expr, &e), R_SUCCESS);
@@ -235,11 +227,10 @@ RetVal tryParse(Pool_t pool, wchar_t *input, Form **ptr, Error *error) {
   RetVal ret;
 
   InputStream_t source;
-  TokenStream_t stream;
   Form *expr;
 
   throws(tryStringInputStreamMake(pool, input, wcslen(input), &source, error));
-  throws(tryStreamMake(pool, source, &stream, error));
+  TokenStream_t stream = streamMake(pool, source);
 
   throws(tryExprRead(pool, stream, &expr, error));
 
@@ -259,8 +250,7 @@ START_TEST(exprPrnTest)
     Form *expr;
     errorInitContents(&e);
 
-    Pool_t pool = NULL;
-    ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
+    Pool_t pool = poolCreate(ONE_MB);
 
     // constant
     ck_assert_int_eq(tryParse(pool, L"(himom () '(one :two 102 nil true false) \"str\")", &expr, &e), R_SUCCESS);
@@ -274,12 +264,11 @@ END_TEST
 START_TEST(analyzer) {
 
     Error e;
-    Pool_t pool = NULL;
     Form *expr;
     FormRoot *root;
 
     errorInitContents(&e);
-    ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &e), R_SUCCESS);
+    Pool_t pool = poolCreate(ONE_MB);
 
     // constant
     ck_assert_int_eq(tryParse(pool, L"\"str\"", &expr, &e), R_SUCCESS);
@@ -339,11 +328,11 @@ RetVal tryTestCompile(wchar_t *input, CodeUnit *codeUnit, Error *error) {
 
   RetVal ret;
 
-  Pool_t pool;
+  Pool_t pool = poolCreate(ONE_MB);
+
   Form *expr;
   FormRoot *root;
 
-  throws(tryPoolCreate(&pool, ONE_MB, error));
   throws(tryParse(pool, input, &expr, error));
   throws(tryFormAnalyze(expr, pool, &root, error));
   compileTopLevel(pool, root, codeUnit);
@@ -576,13 +565,12 @@ END_TEST
 
 START_TEST(vmBasic) {
 
+    Pool_t pool = poolCreate(ONE_MB);
     Error error;
-    Pool_t pool = NULL;
     VM_t vm = NULL;
     VMEvalResult result;
 
     errorInitContents(&error);
-    ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &error), R_SUCCESS);
     vm = vmMake(config);
 
     uint8_t fnCode[] = {
@@ -638,12 +626,27 @@ START_TEST(vmBasic) {
 END_TEST
 
 #define assertEval(inputText, expectedOutputText) { \
+  Pool_t pool = poolCreate(ONE_MB); \
+  wchar_t *result = NULL; \
   Error error; \
-  Pool_t pool = NULL; \
-  ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &error), R_SUCCESS); \
-  wchar_t *result; \
   errorInitContents(&error); \
-  result = NULL; \
+  ck_assert_int_eq(tryReplEval(pool, inputText, &result, config, &error), R_SUCCESS); \
+  if (result != NULL) { \
+    if (wcscmp(expectedOutputText, result) != 0) { \
+      ck_abort_msg("got '%ls', expected '%ls'", result, expectedOutputText); \
+    } \
+  } \
+  else { \
+    ck_abort_msg("exception thrown"); \
+  } \
+  poolFree(pool); \
+}
+
+#define assertEval1(inputText, expectedOutputText) { \
+  Pool_t pool = poolCreate(ONE_MB); \
+  wchar_t *result = NULL; \
+  Error error; \
+  errorInitContents(&error); \
   ck_assert_int_eq(tryReplEval(pool, inputText, &result, config, &error), R_SUCCESS); \
   if (result != NULL) { \
     if (wcscmp(expectedOutputText, result) != 0) { \
@@ -894,8 +897,7 @@ END_TEST
 
 #define assertEvalNoStd(inputText, expectedOutputText) { \
   Error error; \
-  Pool_t pool = NULL; \
-  ck_assert_int_eq(tryPoolCreate(&pool, ONE_MB, &error), R_SUCCESS); \
+  Pool_t pool = poolCreate(ONE_MB); \
   wchar_t *result; \
   errorInitContents(&error); \
   result = NULL; \

@@ -63,9 +63,9 @@ RetVal tryReplEvalConf(Pool_t outputPool, wchar_t *inputText, wchar_t **outputTe
 
   codeUnitInitContents(&unit);
 
-  throws(tryPoolCreate(&pool, ONE_MB, error));
+  pool = poolCreate(ONE_MB);
   throws(tryStringInputStreamMake(pool, inputText, wcslen(inputText), &source, error));
-  throws(tryStreamMake(pool, source, &stream, error));
+  stream = streamMake(pool, source);
 
   vm = vmMake(config);
 
@@ -125,15 +125,14 @@ RetVal tryTextMakeFromChar(char *filename, Text *to, Error *error) {
 RetVal tryLoad(VM_t vm, char *filename, Error *error) {
   RetVal ret;
 
-  Pool_t pool = NULL;
-  throws(tryPoolCreate(&pool, ONE_MB, error));
+  Pool_t pool = poolCreate(ONE_MB);
 
   InputStream_t source;
   TokenStream_t stream;
   FileInfo fileInfo;
 
   throws(tryFileInputStreamMakeFilename(pool, filename, &source, error));
-  throws(tryStreamMake(pool, source, &stream, error));
+  stream = streamMake(pool, source);
 
   fileInfoInitContents(&fileInfo);
   char* baseFileName = basename(filename);

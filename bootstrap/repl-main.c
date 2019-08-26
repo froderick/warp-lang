@@ -19,20 +19,19 @@ int main(void) {
 
   errorInitContents(&error);
 
-  throws(tryPoolCreate(&sessionPool, ONE_MB, &error));
+  sessionPool = poolCreate(ONE_MB);
 
   vmConfigInitContents(&config);
   vm = vmMake(config);
   throws(tryLoad(vm, STD_LIB, &error));
 
   throws(tryFileInputStreamMake(sessionPool, stdin, &source, &error));
-  throws(tryStreamMake(sessionPool, source, &stream, &error));
+  stream = streamMake(sessionPool, source);
 
   FileInfo fileInfo;
   fileInfoInitContents(&fileInfo);
 
-  Pool_t evalPool = NULL;
-  throws(tryPoolCreate(&evalPool, ONE_MB, &error));
+  Pool_t evalPool = poolCreate(ONE_MB);
 
   while (1) {
 

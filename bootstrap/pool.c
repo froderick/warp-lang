@@ -41,22 +41,6 @@ void poolInitContents(Pool *pool) {
   pool->current = NULL;
 }
 
-RetVal tryPoolCreate(Pool **ptr, uint64_t segmentSize, Error *error) {
-  RetVal ret;
-
-  Pool *pool = NULL;
-  tryMalloc(pool, sizeof(Pool), "Pool");
-
-  poolInitContents(pool);
-  pool->segmentSize = segmentSize;
-
-  *ptr = pool;
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
 Pool_t poolCreate(uint64_t segmentSize) {
 
   Pool *pool = malloc(sizeof(Pool));
