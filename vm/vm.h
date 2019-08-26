@@ -227,6 +227,7 @@ void vmFreeContents(VM_t vm);
 void vmFree(VM_t vm);
 
 Value mapLookup(VM_t vm, Map *map, Value key);
+Value getSymbol(VM_t vm, wchar_t *text);
 Value getKeyword(VM_t vm, wchar_t *text);
 
 typedef enum VMEvalResultType {

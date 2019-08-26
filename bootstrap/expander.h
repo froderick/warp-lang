@@ -26,7 +26,7 @@ typedef struct Expander *Expander_t;
 RetVal tryMakeExpander(Pool_t pool, Expander_t *expander, VM_t vm, Error *error);
 void freeExpander(Expander_t expander);
 
-RetVal tryIsMacro(Expander_t expander, Text sym, bool *isMacro, Error *error);
+bool isMacro(Expander_t expander, wchar_t *sym);
 
 RetVal tryExpand(Expander_t expander, Text sym, Form *input, Form **output, Error *error);
 

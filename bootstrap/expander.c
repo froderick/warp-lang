@@ -26,62 +26,9 @@ RetVal tryMakeExpander(Pool_t pool, Expander **expander, VM_t vm, Error *error) 
     return ret;
 }
 
-RetVal tryIsMacro(Expander *expander, Text sym, bool *isMacro, Error *error) {
-  RetVal ret;
-
-  wchar_t getMacro[] = L"get-macro";
-
-  Form fnCallable;
-  formInitContents(&fnCallable);
-  fnCallable.type = F_VAR_REF;
-  fnCallable.varRef.name.length = wcslen(getMacro);
-  fnCallable.varRef.name.value = getMacro;
-
-  Forms args;
-  formsInitContents(&args);
-  args.numForms = 1;
-  tryPalloc(expander->pool, args.forms, sizeof(Form) * args.numForms, "Form array");
-
-  Form *varName = &args.forms[0];
-  formInitContents(varName);
-  varName->type = F_SYMBOL;
-  varName->symbol.length = sym.length;
-  varName->symbol.value = sym.value;
-
-  Form fnCall;
-  formInitContents(&fnCall);
-  fnCall.type = F_FN_CALL;
-  fnCallInitContents(&fnCall.fnCall);
-  fnCall.fnCall.fnCallable = &fnCallable;
-  fnCall.fnCall.args = args;
-
-  FormRoot root;
-  rootInitContents(&root);
-  root.form = &fnCall;
-
-  CodeUnit codeUnit;
-  VMEvalResult output;
-
-  compileTopLevel(expander->pool, &root, &codeUnit);
-  output = vmEval(expander->vm, &codeUnit);
-
-  if (output.type == RT_RESULT) {
-    if (valueType(output.value) != VT_BOOL) {
-      throwInternalError(error, "this should return a boolean");
-    }
-    *isMacro = unwrapBool(output.value);
-    return R_SUCCESS;
-  }
-  else if (output.type == RT_EXCEPTION) {
-    printException(expander->vm, output.value);
-    throwInternalError(error, "encountered exception while processing macro: getmacro");
-  }
-  else {
-    throwInternalError(error, "unhandled eval result type");
-  }
-
-  failure:
-    return ret;
+bool isMacro(Expander_t expander, wchar_t *sym) {
+  Symbol *symbol = deref(expander->vm, getSymbol(expander->vm, sym));
+  return symbol->valueDefined && symbol->isMacro;
 }
 
 RetVal tryExpand(Expander *expander, Text sym, Form *input, Form **output, Error *error) {

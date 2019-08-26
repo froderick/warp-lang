@@ -1258,6 +1258,14 @@ Value getKeyword(VM *vm, wchar_t *text) {
   return kw;
 }
 
+Value getSymbol(VM *vm, wchar_t *text) {
+  Value protectedName = makeStringValue(vm, text, wcslen(text));
+  pushFrameRoot(vm, &protectedName);
+  Value kw = symbolIntern(vm, &protectedName);
+  popFrameRoot(vm); // protectedMessageName
+  return kw;
+}
+
 typedef struct ExceptionParams {
   Value *protectedMessage; // includes a string :message
   Value *protectedValue;   // includes a :value

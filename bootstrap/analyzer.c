@@ -1272,9 +1272,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Form* expr, Form *form, Erro
           Text text;
           text.length = wcslen(sym);
           text.value = sym;
-          bool isMacro;
-          throws(tryIsMacro(ctx->options.expander, text, &isMacro, error));
-          if (isMacro) {
+          if (isMacro(ctx->options.expander, text.value)) {
             throws(tryExpandAnalyze(ctx, expr, form, error));
             break;
           }
