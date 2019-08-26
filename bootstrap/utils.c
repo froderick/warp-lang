@@ -9,22 +9,6 @@
  * Allocate a new string of the same length, and copy the original string into
  * it.
  */
-RetVal tryCopyText(Pool_t pool, wchar_t* from, wchar_t **ptr, uint64_t len, Error *error) {
-  RetVal ret;
-
-  wchar_t *to;
-  tryPalloc(pool, to, sizeof(wchar_t) * (len + 1), "wchar_t string");
-
-  wcsncpy(to, from, len);
-  to[len] = L'\0';
-
-  *ptr = to;
-  return R_SUCCESS;
-
-  failure:
-    return ret;
-}
-
 wchar_t* copyText(Pool_t pool, wchar_t* from, uint64_t len) {
 
   wchar_t *to;
@@ -341,27 +325,13 @@ void textInitContents(Text *text) {
   text->value = NULL;
 }
 
-RetVal tryTextMake(Pool_t pool, wchar_t* from, Text *text, uint64_t len, Error *error) {
-  RetVal ret;
-
+void textMake(Pool_t pool, wchar_t* from, Text *text, uint64_t len) {
   text->length = len;
-  throws(tryCopyText(pool, from, &text->value, text->length, error));
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  text->value = copyText(pool, from, text->length);
 }
 
-RetVal tryTextCopy(Pool_t pool, Text *from, Text *to, Error *error) {
-  RetVal ret;
-
+void textCopy(Pool_t pool, Text *from, Text *to) {
   to->length = from->length;
-  throws(tryCopyText(pool, from->value, &to->value, to->length, error));
-
-  return R_SUCCESS;
-
-  failure:
-  return ret;
+  to->value = copyText(pool, from->value, to->length);
 }
 

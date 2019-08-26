@@ -323,14 +323,13 @@ RetVal tryLetAnalyze(AnalyzerContext *ctx, Form* letExpr, FormLet *let, Error *e
 
       LetBinding *b = let->bindings + i;
       letBindingInitContents(b);
-      throws(
-          tryTextMake(ctx->pool, bindingElem->expr->symbol.value, &b->name, bindingElem->expr->symbol.length, error));
+      textMake(ctx->pool, bindingElem->expr->symbol.value, &b->name, bindingElem->expr->symbol.length);
       b->source = bindingElem->expr->source;
       throws(_tryFormAnalyze(ctx, bindingElem->next->expr, &b->value, error));
 
       Binding binding;
       bindingInitContents(&binding);
-      throws(tryTextCopy(ctx->pool, &b->name, &binding.name, error));
+      textCopy(ctx->pool, &b->name, &binding.name);
       binding.source = BS_LOCAL;
       binding.local.type = BT_LET;
       binding.local.typeIndex = i;
@@ -388,7 +387,7 @@ RetVal tryDefAnalyze(AnalyzerContext *ctx, Form* defExpr, FormDef *def, Error *e
     throwSyntaxError(error, pos, "the 'let' special form requires the first parameter to be a symbol");
   }
 
-  throws(tryTextMake(ctx->pool, symbol->symbol.value, &def->name, symbol->symbol.length, error));
+  textMake(ctx->pool, symbol->symbol.value, &def->name, symbol->symbol.length);
 
   if (defExpr->list.length == 3) {
     throws(_tryFormAnalyze(ctx, defExpr->list.head->next->next->expr, &def->value, error));
@@ -481,7 +480,7 @@ RetVal tryFnParseArgs(Pool_t pool, Form *argsExpr, FormFn *fn, Error *error) {
 
       FormFnArg *arg = fn->args + i;
       fnArgInitContents(arg);
-      throws(tryTextMake(pool, argElem->expr->symbol.value, &arg->name, argElem->expr->symbol.length, error));
+      textMake(pool, argElem->expr->symbol.value, &arg->name, argElem->expr->symbol.length);
       arg->source = argElem->expr->source;
 
       argElem = argElem->next;
@@ -513,7 +512,7 @@ RetVal tryFnParse(Pool_t pool, Form* fnExpr, FormFn *fn, Form **formElements, Er
 
   // the optional function name
   if (itr->expr->type == F_SYMBOL) {
-    throws(tryTextMake(pool, itr->expr->symbol.value, &fn->name, itr->expr->symbol.length, error));
+    textMake(pool, itr->expr->symbol.value, &fn->name, itr->expr->symbol.length);
     fn->hasName = true;
     itr = itr->next;
   }
@@ -605,7 +604,8 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Form* fnExpr, FormFn *fn, Error *error
 
     Binding binding;
     bindingInitContents(&binding);
-    throws(tryTextCopy(ctx->pool, &fn->name, &binding.name, error));
+    textCopy(ctx->pool, &fn->name, &binding.name);
+
     binding.source = BS_LOCAL;
     binding.local.type = BT_FN_REF;
     binding.local.typeIndex = 0;
@@ -618,7 +618,7 @@ RetVal tryFnAnalyze(AnalyzerContext *ctx, Form* fnExpr, FormFn *fn, Error *error
 
     Binding binding;
     bindingInitContents(&binding);
-    throws(tryTextCopy(ctx->pool, &fn->args[i].name, &binding.name, error));
+    textCopy(ctx->pool, &fn->args[i].name, &binding.name);
     binding.source = BS_LOCAL;
     binding.local.type = BT_FN_ARG;
     binding.local.typeIndex = i;
@@ -664,7 +664,7 @@ RetVal tryBuiltinAnalyze(AnalyzerContext *ctx, Form *expr, FormBuiltin *builtin,
     throwSyntaxError(error, name->source.position, "the 'builtin' special form requires the first parameter to be a keyword");
   }
 
-  throws(tryTextMake(ctx->pool, name->keyword.value, &builtin->name, name->keyword.length, error));
+  textMake(ctx->pool, name->keyword.value, &builtin->name, name->keyword.length);
 
   formsAllocate(ctx->pool, &builtin->args, expr->list.length - 2);
 
@@ -699,7 +699,7 @@ RetVal tryVarRefAnalyze(AnalyzerContext *ctx, Form *expr, FormVarRef *varRef, Er
     throwSyntaxError(error, getExprPosition(expr), "var refs must be symbols: '%i'", expr->type);
   }
 
-  throws(tryTextMake(ctx->pool, expr->symbol.value, &varRef->name, expr->symbol.length, error));
+  textMake(ctx->pool, expr->symbol.value, &varRef->name, expr->symbol.length);
 
   return R_SUCCESS;
 
@@ -851,7 +851,7 @@ RetVal trySyntaxQuoteListAnalyze(AnalyzerContext *ctx, Form *quoted, Form *form,
     FormVarRef ref;
     varRefInitContents(&ref);
     wchar_t *concat = L"concat";
-    throws(tryTextMake(ctx->pool, concat, &ref.name, wcslen(concat), error));
+    textMake(ctx->pool, concat, &ref.name, wcslen(concat));
 
     Form *fnCallable;
     tryPalloc(ctx->pool, fnCallable, sizeof(Form), "Form");
@@ -979,7 +979,7 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Form* expr, Form *form, Error *err
 
         Binding binding;
         bindingInitContents(&binding);
-        throws(tryTextCopy(ctx->pool, &captured.name, &binding.name, error));
+        textCopy(ctx->pool, &captured.name, &binding.name);
         binding.source = BS_CAPTURED;
         binding.captured.bindingIndex = resolved->bindingIndex;
 
@@ -1347,7 +1347,7 @@ RetVal tryFormAnalyzeOptions(AnalyzeOptions options, Form* expr, Pool_t pool, Fo
 
   if (options.hasFileName) {
     root->hasFileName = true;
-    throws(tryTextCopy(pool, &options.fileName, &root->fileName, error));
+    textCopy(pool, &options.fileName, &root->fileName);
   }
 
   *ptr = root;

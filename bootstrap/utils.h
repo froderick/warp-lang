@@ -9,7 +9,6 @@
  * Basic string utilities
  */
 
-RetVal tryCopyText(Pool_t pool, wchar_t* from, wchar_t **ptr, uint64_t len, Error *error);
 wchar_t* copyText(Pool_t pool, wchar_t* from, uint64_t len);
 
 /*
@@ -66,8 +65,8 @@ typedef struct Text {
 } Text;
 
 void textInitContents(Text *text);
-RetVal tryTextMake(Pool_t pool, wchar_t* from, Text *text, uint64_t len, Error *error);
-RetVal tryTextCopy(Pool_t pool, Text *from, Text *to, Error *error);
+void textMake(Pool_t pool, wchar_t* from, Text *text, uint64_t len);
+void textCopy(Pool_t pool, Text *from, Text *to);
 
 #endif //WARP_LANG_UTILS_H
 
