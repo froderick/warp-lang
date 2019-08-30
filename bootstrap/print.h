@@ -8,6 +8,9 @@ Form* printToReader(VM_t vm, Pool_t pool, Value result);
 
 void print(VM_t vm, Value result);
 
+/*
+ * Warning: this allocates, and ruins the exception pointer
+ */
 void printException(VM_t vm, Value exception);
 
 #endif //WARP_LANG_PRINT_H

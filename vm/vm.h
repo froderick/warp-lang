@@ -227,6 +227,10 @@ void vmFreeContents(VM_t vm);
 void vmFree(VM_t vm);
 
 Value mapLookup(VM_t vm, Map *map, Value key);
+
+/*
+ * Warning: these allocate
+ */
 Value getSymbol(VM_t vm, wchar_t *text);
 Value getKeyword(VM_t vm, wchar_t *text);
 
@@ -245,6 +249,9 @@ VMEvalResult vmEval(VM_t vm, CodeUnit *codeUnit);
 void* deref(VM_t vm, Value value);
 
 const char* getValueTypeName(VM_t vm, uint8_t type);
+
+void pushFrameRoot(VM_t vm, Value *rootPtr);
+void popFrameRoot(VM_t vm);
 
 #endif //WARP_LANG_VM_H
 

@@ -349,10 +349,32 @@ void printBuf(Ctx *ctx, StringBuffer_t b, Value value) {
 wchar_t* printExceptionValue(Ctx *ctx, Value e) {
 
   Map *exn = deref(ctx->vm, e);
+  pushFrameRoot(ctx->vm, (Value*)&exn);
 
-  Value message = mapLookup(ctx->vm, exn, getKeyword(ctx->vm, L"message"));
-  Value value = mapLookup(ctx->vm, exn, getKeyword(ctx->vm, L"value"));
-  Array *frames = deref(ctx->vm, mapLookup(ctx->vm, exn, getKeyword(ctx->vm, L"frames")));
+  Value messageKw = getKeyword(ctx->vm, L"message");
+  pushFrameRoot(ctx->vm, &messageKw);
+
+  Value valueKw = getKeyword(ctx->vm, L"value");
+  pushFrameRoot(ctx->vm, &valueKw);
+
+  Value framesKw = getKeyword(ctx->vm, L"frames");
+  pushFrameRoot(ctx->vm, &framesKw);
+
+  Value functionNameKw = getKeyword(ctx->vm, L"function-name");
+  pushFrameRoot(ctx->vm, &functionNameKw);
+
+  Value unknownSourceKw = getKeyword(ctx->vm, L"unknown-source");
+  pushFrameRoot(ctx->vm, &unknownSourceKw);
+
+  Value fileNameKw = getKeyword(ctx->vm, L"file-name");
+  pushFrameRoot(ctx->vm, &fileNameKw);
+
+  Value lineNumberKw = getKeyword(ctx->vm, L"line-number");
+  pushFrameRoot(ctx->vm, &lineNumberKw);
+
+  Value message = mapLookup(ctx->vm, exn, messageKw);
+  Value value = mapLookup(ctx->vm, exn, valueKw);
+  Array *frames = deref(ctx->vm, mapLookup(ctx->vm, exn, framesKw));
 
   Error error;
   errorInitContents(&error);
@@ -381,22 +403,32 @@ wchar_t* printExceptionValue(Ctx *ctx, Value e) {
   for (uint64_t i=0; i<numFrames; i++) {
     Map *frame = deref(ctx->vm, elements[i]);
 
-    String *functionName = (String*)mapLookup(ctx->vm, frame, getKeyword(ctx->vm, L"function-name"));
-    bool unknownSource = unwrapBool(mapLookup(ctx->vm, frame, getKeyword(ctx->vm, L"unknown-source")));
+    String *functionName = (String*)mapLookup(ctx->vm, frame, functionNameKw);
+    bool unknownSource = unwrapBool(mapLookup(ctx->vm, frame, unknownSourceKw));
 
     wchar_t msg[ERROR_MSG_LENGTH];
     if (unknownSource) {
       swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(Unknown Source)\n", stringValue(functionName));
     }
     else {
-      String *fileName = (String*)mapLookup(ctx->vm, frame, getKeyword(ctx->vm, L"file-name"));
-      uint64_t lineNumber = unwrapUint(mapLookup(ctx->vm, frame, getKeyword(ctx->vm, L"line-number")));
+      String *fileName = (String*)mapLookup(ctx->vm, frame, fileNameKw);
+      uint64_t lineNumber = unwrapUint(mapLookup(ctx->vm, frame, lineNumberKw));
       swprintf(msg, ERROR_MSG_LENGTH, L"\tat %ls(%ls:%" PRIu64 ")\n",
           stringValue(functionName), stringValue(fileName), lineNumber);
     }
 
     stringBufferAppendStr(b, msg);
   }
+
+  popFrameRoot(ctx->vm); // message
+  popFrameRoot(ctx->vm); // value
+  popFrameRoot(ctx->vm); // frames
+  popFrameRoot(ctx->vm); // function-name
+  popFrameRoot(ctx->vm); // unknown-source
+  popFrameRoot(ctx->vm); // file-name
+  popFrameRoot(ctx->vm); // line-number
+
+  popFrameRoot(ctx->vm); // exn
 
   return copyText(ctx->pool, stringBufferText(b), stringBufferLength(b));
 }

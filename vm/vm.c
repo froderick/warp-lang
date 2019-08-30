@@ -240,8 +240,6 @@ typedef struct VM {
 
 uint64_t padAllocSize(uint64_t length);
 void* alloc(VM *vm, uint64_t length);
-void pushFrameRoot(VM *vm, Value *rootPtr);
-void popFrameRoot(VM *vm);
 Value tableLookup(VM *vm, Table *table, Value name);
 void putEntry(VM *vm, Table *table, Value name, Value insertMe);
 
@@ -1480,7 +1478,6 @@ bool handleRaise(VM *vm) {
 
     Frame_t f = vm->current;
     FrameHandler_t h = NULL;
-    Frame_t frameToPop = NULL;
 
     while (true) {
 
@@ -1488,7 +1485,6 @@ bool handleRaise(VM *vm) {
       if (current != NULL) { // a handler is already running, start with its immediate parent if it has one
 
         // discard handler frame
-        frameToPop = f;
         f = getParent(f);
 
         // pop current handler from handling frame, since we already used it
@@ -1506,8 +1502,9 @@ bool handleRaise(VM *vm) {
       }
       else {
         if (hasParent(f)) {
-          frameToPop = f;
+          Frame_t frameToPop = f;
           f = getParent(f);
+          popSpecificFrame(vm, frameToPop);
         } else {
           break;
         }
@@ -1515,11 +1512,6 @@ bool handleRaise(VM *vm) {
     }
 
     if (h != NULL) { // found a handler
-
-      // pop all the frames off the stack until we are on the frame we're jumping to
-      if (frameToPop != NULL) {
-        popSpecificFrame(vm, frameToPop);
-      }
 
       {
         pushOperand(f, exception);

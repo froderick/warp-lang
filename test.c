@@ -642,6 +642,20 @@ END_TEST
   poolFree(pool); \
 }
 
+#define assertEvalException(inputText) { \
+  Pool_t pool = poolCreate(ONE_MB); \
+  wchar_t *result = NULL; \
+  Error error; \
+  errorInitContents(&error); \
+  ck_assert_int_eq(tryReplEval(pool, inputText, &result, config, &error), R_SUCCESS); \
+  if (result == NULL) { \
+  } \
+  else { \
+    ck_abort_msg("exception not thrown"); \
+  } \
+  poolFree(pool); \
+}
+
 #define assertEval1(inputText, expectedOutputText) { \
   Pool_t pool = poolCreate(ONE_MB); \
   wchar_t *result = NULL; \
@@ -892,6 +906,9 @@ START_TEST(repl)
                "     :done"
                "     (loop (inc y))))",
                L":done");
+
+    // this should throw an exception, but not kill the process entirely
+    assertEvalException(L"(let loop () (throw \"oops\"))");
   }
 END_TEST
 
