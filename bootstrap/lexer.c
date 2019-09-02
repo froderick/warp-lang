@@ -369,7 +369,7 @@ RetVal tryReadKeyword(Pool_t pool, InputStream_t source, LexerState *s, wchar_t 
     if (read == R_EOF) {
       matched = false;
     }
-    else if (!iswalnum(ch)) {
+    else if (!isSymbolContinue(ch)) {
       throws(tryInputStreamUnreadChar(source, ch, error));
       matched = false;
     }
