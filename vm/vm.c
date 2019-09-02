@@ -3259,6 +3259,10 @@ VMEvalResult vmEval(VM *vm, CodeUnit *codeUnit) {
   // clean up
   popFrame(vm);
 
+  if (vm->current != NULL) {
+    explode("dangling frames found!\n");
+  }
+
   return result;
 }
 
