@@ -40,20 +40,12 @@
                                    (concat-n (concat-two (reverse concated) next) todo)))))
                 (concat-n '() seqs))))
 
-(def str (fn str (& args)
-           (let* (_str (fn _str (strings remaining)
-                        (if (empty? remaining)
-                          (join (reverse strings))
-                          (_str (cons (to-string (first remaining)) strings)
-                                (rest remaining)))))
-             (_str nil args))))
-
 (def gensym-state 0)
 
 (def gensym (fn gensym ()
               (let* (n gensym-state
                     _ (def gensym-state (inc n)))
-                (symbol (str "gensym-" n)))))
+                (symbol (join (list "gensym-" (uint-to-string n)))))))
 
 ; TODO: add auto-gensym support with macro-syntax for generating bindings with it to avoid lexical capture
 ; https://www.braveclojure.com/writing-macros/
@@ -114,7 +106,7 @@
 
 (defn list? (x)
   (let* (t (get-type x))
-    (or (eq t 0) (eq t 7))))
+    (or (eq t 'nil) (eq t 'list))))
 
 ;; todo: throw exceptions on invalid input
 (defmacro cond (& seq)

@@ -817,7 +817,7 @@ START_TEST(repl)
 //    assertEval(L"(print-str \"hi\")", L"\"hi\"");
 
 //    assertEval(L"(str '(1 2 3) '(4 5 6))", L"\"(1 2 3)(4 5 6)\"");
-    assertEval(L"(str \"test-\" 100)", L"\"test-100\"");
+//    assertEval(L"(str \"test-\" 100)", L"\"test-100\"");
 
     assertEval(L"(= (get-type 'x) (get-type (symbol \"x\")))", L"true");
 

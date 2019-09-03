@@ -2269,8 +2269,74 @@ int gcEval(VM *vm, Frame_t frame) {
 // (8),             | (value -> value)
 int getTypeEval(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
-  Value typeId = wrapUint(valueType(value));
-  pushOperand(frame, typeId);
+  ValueType type = valueType(value);
+
+  // TODO: this is very slow, we should hold references to these symbols directly
+
+  wchar_t *name = NULL;
+
+  switch (type) {
+    case VT_NIL:
+      name = L"nil";
+      break;
+    case VT_UINT:
+      name = L"uint";
+      break;
+    case VT_BOOL:
+      name = L"bool";
+      break;
+    case VT_FN:
+      name = L"fn";
+      break;
+    case VT_STR:
+      name = L"string";
+      break;
+    case VT_SYMBOL:
+      name = L"symbol";
+      break;
+    case VT_KEYWORD:
+      name = L"keyword";
+      break;
+    case VT_LIST:
+      name = L"list";
+      break;
+    case VT_CLOSURE:
+      name = L"closure";
+      break;
+    case VT_CFN:
+      name = L"cfn";
+      break;
+    case VT_ARRAY:
+      name = L"array";
+      break;
+    case VT_MAP:
+      name = L"map";
+      break;
+    case VT_MAP_ENTRY:
+      name = L"map-entry";
+      break;
+    case VT_RECORD:
+      name = L"record";
+      break;
+    case VT_PORT:
+      name = L"port";
+      break;
+    case VT_BYTE_ARRAY:
+      name = L"byte-array";
+      break;
+    case VT_CHAR:
+      name = L"char";
+      break;
+    default:
+      explode("unhandled type: %s", getValueTypeName(vm, type));
+  }
+
+  Value protectedName = makeStringValue(vm, name, wcslen(name));
+  pushFrameRoot(vm, &protectedName);
+  Value result = symbolIntern(vm, &protectedName);
+  popFrameRoot(vm);
+
+  pushOperand(frame, result);
   return R_SUCCESS;
 }
 
@@ -3309,7 +3375,7 @@ int strJoinBuiltin(VM *vm, Frame_t frame) {
     Cons *seq = deref(vm, cursor);
 
     if (!isString(seq->value)) {
-      raise(vm, "expected a list type: %s", getValueTypeName(vm, valueType(seq->value)));
+      raise(vm, "expected a string type: %s", getValueTypeName(vm, valueType(seq->value)));
       goto cleanup;
     }
 
@@ -3937,27 +4003,47 @@ int recordBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int toStringBuiltin(VM *vm, Frame_t frame) {
+int uintToStringBuiltin(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
+  ValueType type = valueType(value);
 
-  if (valueType(value) == VT_STR) {
-    pushOperand(frame, value);
-  }
-  else {
-
-    if (valueType(value) != VT_UINT) {
-      explode("numFields must be a uint: %s", getValueTypeName(vm, valueType(value)));
+  Value result;
+  switch (type) {
+    case VT_UINT: {
+      wchar_t s[30];
+      uint64_t number = unwrapUint(value);
+      swprintf(s, 20, L"%" PRIu64, number);
+      result = makeStringValue(vm, s, wcslen(s));
+      break;
     }
-
-    wchar_t s[30];
-    uint64_t number = unwrapUint(value);
-    swprintf(s, 20, L"%" PRIu64, number);
-    Value str = makeStringValue(vm, s, wcslen(s));
-
-    pushOperand(frame, str);
+    default:
+      explode("unhandled type: %s", getValueTypeName(vm, type));
   }
 
+  pushOperand(frame, result);
+  return R_SUCCESS;
+}
+
+int charToStringBuiltin(VM *vm, Frame_t frame) {
+
+  Value value = popOperand(frame);
+  ValueType type = valueType(value);
+
+  Value result;
+  switch (type) {
+    case VT_CHAR: {
+      wchar_t s[1];
+      wchar_t ch = unwrapChar(value);
+      swprintf(s, 20, L"%lc", ch);
+      result = makeStringValue(vm, s, wcslen(s));
+      break;
+    }
+    default:
+    explode("unhandled type: %s", getValueTypeName(vm, type));
+  }
+
+  pushOperand(frame, result);
   return R_SUCCESS;
 }
 
@@ -4211,6 +4297,64 @@ int symbolEval(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
+// (8),             | (value -> value)
+int charToUintBuiltin(VM *vm, Frame_t frame) {
+  Value value = popOperand(frame);
+  ValueType type = valueType(value);
+
+  if (type != VT_CHAR) {
+    raise(vm, "cannot convert this type to a uint: %s", getValueTypeName(vm, type));
+    return R_ERROR;
+  }
+
+  wchar_t ch = unwrapChar(value);
+  pushOperand(frame, wrapUint(ch));
+  return R_SUCCESS;
+}
+
+int multBuiltin(VM *vm, Frame_t frame) {
+  Value b = popOperand(frame);
+  Value a = popOperand(frame);
+
+  if (valueType(a) != VT_UINT) {
+    raise(vm, "can only multiply integers: %s", getValueTypeName(vm, valueType(a)));
+    return R_ERROR;
+  }
+  if (valueType(b) != VT_UINT) {
+    raise(vm, "can only multiply integers: %s", getValueTypeName(vm, valueType(b)));
+    return R_ERROR;
+  }
+
+  Value c = wrapUint(unwrapUint(a) * unwrapUint(b));
+  pushOperand(frame, c);
+  return R_SUCCESS;
+}
+
+// (8),             | (value -> value)
+int nameBuiltin(VM *vm, Frame_t frame) {
+  Value value = popOperand(frame);
+  ValueType type = valueType(value);
+
+  Value result;
+  switch (type) {
+    case VT_SYMBOL: {
+      Symbol *symbol = deref(vm, value);
+      result = symbol->name;
+      break;
+    }
+    case VT_KEYWORD: {
+      Keyword *keyword = deref(vm, value);
+      result = keyword->name;
+      break;
+    }
+    default:
+      raise(vm, "only symbols and keywords have names: %s", getValueTypeName(vm, type));
+      return R_ERROR;
+  }
+
+  pushOperand(frame, result);
+  return R_SUCCESS;
+}
 
 int withMetaBuiltin(VM *vm, Frame_t frame) {
   Value meta = popOperand(frame);
@@ -4268,6 +4412,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"get-type", 1, false, getTypeEval);
   defineCFn(vm, L"+", 2, false, addEval);
   defineCFn(vm, L"-", 2, false, subEval);
+  defineCFn(vm, L"*", 2, false, multBuiltin);
   defineCFn(vm, L"eq", 2, false, cmpEval);
   defineCFn(vm, L"join", 1, false, strJoinBuiltin);
   defineCFn(vm, L"symbol", 1, false, symbolBuiltin);
@@ -4280,7 +4425,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"list", 1, true, listBuiltin);
   defineCFn(vm, L"vector", 1, true, vectorBuiltin);
   defineCFn(vm, L"record", 2, false, recordBuiltin);
-  defineCFn(vm, L"to-string", 1, false, toStringBuiltin);
+  defineCFn(vm, L"uint-to-string", 1, false, uintToStringBuiltin);
   defineCFn(vm, L"throw", 1, false, throwBuiltin);
   defineCFn(vm, L"throw-value", 2, false, throwValueBuiltin);
   defineCFn(vm, L"open-file", 1, false, openFileBuiltin);
@@ -4294,6 +4439,9 @@ void initCFns(VM *vm) {
   defineCFn(vm, L">", 2, false, gtEval);
   defineCFn(vm, L">=", 2, false, gteEval);
   defineCFn(vm, L"symbol?", 1, false, symbolEval);
+  defineCFn(vm, L"char-to-uint", 1, false, charToUintBuiltin);
+  defineCFn(vm, L"char-to-string", 1, false, charToStringBuiltin);
+  defineCFn(vm, L"name", 1, false, nameBuiltin);
   defineCFn(vm, L"meta", 1, false, metaBuiltin);
   defineCFn(vm, L"with-meta", 2, false, withMetaBuiltin);
 }
