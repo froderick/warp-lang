@@ -759,6 +759,16 @@ void compileFnCall(Form *form, Output output) {
   }
 }
 
+Form* makeLineNumberMeta(Form *form, Output output) {
+  wchar_t *keyName = L"line-number";
+  Form *kw = keywordMake(output.pool, keyName, wcslen(keyName));
+  Form *lineNo = numberMake(output.pool, form->source.lineNumber);
+  Form *meta = listMake(output.pool);
+  listAppend(output.pool, &meta->list, kw);
+  listAppend(output.pool, &meta->list, lineNo);
+  return meta;
+}
+
 void compileList(Form *form, Output output) {
   uint64_t numForms = form->list.length;
 
@@ -773,7 +783,6 @@ void compileList(Form *form, Output output) {
     }
   }
   else {
-
     Form *forms;
     {
       palloc(output.pool, forms, sizeof(Form) * numForms, "Constant array");
@@ -787,9 +796,10 @@ void compileList(Form *form, Output output) {
 
     for (int i=0; i < numForms; i++) {
       Form *f = &forms[i];
-      if (i == 0) {
-        compile(f, output);
 
+      compile(f, output);
+
+      if (i == 0) {
         Constant c;
         c.type = CT_NIL;
         constantAppend(output, c);
@@ -801,11 +811,36 @@ void compileList(Form *form, Output output) {
         codeAppend(output, sizeof(addCode), addCode);
       }
       else {
-        compile(f, output);
         uint8_t addCode[] = {I_SWAP, I_CONS};
         codeAppend(output, sizeof(addCode), addCode);
       }
 
+      if (f->source.isSet) {
+        Form *meta = makeLineNumberMeta(f, output);
+
+        compile(meta, output);
+
+        Text varName;
+        varName.value = L"with-meta";
+        varName.length = wcslen(varName.value);
+
+        Form fnCallable;
+        formInitContents(&fnCallable);
+        fnCallable.type = F_VAR_REF;
+        fnCallable.varRef.name = varName;
+
+        compile(&fnCallable, output);
+
+        uint8_t inst;
+        if (form->fnCall.tailPosition) {
+          inst = I_INVOKE_DYN_TAIL;
+        } else {
+          inst = I_INVOKE_DYN;
+        }
+        uint16_t numArgs = 2;
+        uint8_t code[] = {inst, numArgs >> 8, numArgs & 0xFF};
+        codeAppend(output, sizeof(code), code);
+      }
     }
   }
 }

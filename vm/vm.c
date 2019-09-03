@@ -1099,7 +1099,7 @@ void collect(VM *vm) {
  * Loading Constants as Values
  */
 
-Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c);
+Value hydrateConstant(VM *vm, Constant c);
 
 Value fnHydrate(VM *vm, FnConstant *fnConst) {
 
@@ -1174,7 +1174,7 @@ Value fnHydrate(VM *vm, FnConstant *fnConst) {
 
   pushFrameRoot(vm, (Value*)&fn);
   for (uint16_t i=0; i<fn->numConstants; i++) {
-    Value hydrated = hydrateConstant(vm, &fn, fnConst->constants[i]);
+    Value hydrated = hydrateConstant(vm, fnConst->constants[i]);
     fnConstants(fn)[i] = hydrated;
   }
   popFrameRoot(vm);
@@ -1205,7 +1205,7 @@ Value keywordHydrate(VM *vm, KeywordConstant kwConst) {
 
 // TODO: I had another thought, can we get rid of the nested graph of constants and flatten it entirely?
 
-Value hydrateConstant(VM *vm, Fn **protectedFn, Constant c) {
+Value hydrateConstant(VM *vm, Constant c) {
   Value v;
   switch (c.type) {
     case CT_BOOL:
@@ -4211,6 +4211,52 @@ int symbolEval(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
+
+int withMetaBuiltin(VM *vm, Frame_t frame) {
+  Value meta = popOperand(frame);
+  Value obj = popOperand(frame);
+
+  ValueType type = valueType(obj);
+  Value result;
+  switch (type) {
+    case VT_NIL: {
+      result = W_NIL_VALUE;
+      break;
+    }
+    case VT_LIST: {
+      Cons *cons = deref(vm, obj);
+      cons->metadata = meta;
+      result = obj;
+      break;
+    }
+    default:
+      raise(vm, "only lists can have metadata: %s", getValueTypeName(vm, type));
+      return R_ERROR;
+  }
+
+  pushOperand(frame, result);
+  return R_SUCCESS;
+}
+
+int metaBuiltin(VM *vm, Frame_t frame) {
+  Value obj = popOperand(frame);
+
+  ValueType type = valueType(obj);
+  Value result;
+  switch (type) {
+    case VT_LIST: {
+      Cons *cons = deref(vm, obj);
+      result = cons->metadata;
+      break;
+    }
+    default: raise(vm, "only lists can have metadata: %s", getValueTypeName(vm, type));
+      return R_ERROR;
+  }
+
+  pushOperand(frame, result);
+  return R_SUCCESS;
+}
+
 void initCFns(VM *vm) {
 
   defineCFn(vm, L"cons", 2, false, consEval);
@@ -4248,6 +4294,8 @@ void initCFns(VM *vm) {
   defineCFn(vm, L">", 2, false, gtEval);
   defineCFn(vm, L">=", 2, false, gteEval);
   defineCFn(vm, L"symbol?", 1, false, symbolEval);
+  defineCFn(vm, L"meta", 1, false, metaBuiltin);
+  defineCFn(vm, L"with-meta", 2, false, withMetaBuiltin);
 }
 
 void vmConfigInitContents(VMConfig *config) {

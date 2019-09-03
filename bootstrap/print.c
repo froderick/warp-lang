@@ -159,6 +159,7 @@ void printList(Ctx *ctx, Value result, Form *expr) {
 
   Error error;
   errorInitContents(&error);
+  printMetadata(ctx->vm, cons->metadata, elem);
   listAppend(ctx->pool, &expr->list, elem);
 
   while (valueType(cons->next) != VT_NIL) {
@@ -174,6 +175,7 @@ void printList(Ctx *ctx, Value result, Form *expr) {
     formInitContents(elem);
 
     _print(ctx, cons->value, elem);
+    printMetadata(ctx->vm, cons->metadata, elem);
 
     listAppend(ctx->pool, &expr->list, elem);
   }
