@@ -10,6 +10,7 @@
 #include "bootstrap/compiler.h"
 #include "vm/vm.h"
 #include "bootstrap/repl.h"
+#include "bootstrap/print.h"
 
 #define ONE_MB (1024 * 1000)
 
@@ -625,12 +626,45 @@ START_TEST(vmBasic) {
   }
 END_TEST
 
+wchar_t* testEval(VM_t vm, Pool_t pool, wchar_t *inputText) {
+
+  printf("%ls\n", inputText);
+
+  CodeUnit unit;
+  InputStream_t source = NULL;
+  TokenStream_t stream = NULL;
+
+  Error error;
+  errorInitContents(&error);
+
+  codeUnitInitContents(&unit);
+  if (tryStringInputStreamMake(pool, inputText, wcslen(inputText), &source, &error) != R_SUCCESS) {
+    explode("failed to make input stream");
+  }
+  stream = streamMake(pool, source);
+
+  FileInfo fileInfo;
+  fileInfoInitContents(&fileInfo);
+
+  if (tryReplCompile(pool, stream, fileInfo, vm, &unit, &error) != R_SUCCESS) {
+    explode("failed to compile input");
+  }
+  printCodeUnit(&unit);
+
+  VMEvalResult result = vmEval(vm, &unit);
+
+  if (result.type == RT_RESULT) {
+    Form *expr = printToReader(vm, pool, result.value);
+    return exprPrnStr(pool, expr);
+  }
+  else {
+    printException(vm, result.value);
+    return NULL;
+  }
+}
+
 #define assertEval(inputText, expectedOutputText) { \
-  Pool_t pool = poolCreate(ONE_MB); \
-  wchar_t *result = NULL; \
-  Error error; \
-  errorInitContents(&error); \
-  ck_assert_int_eq(tryReplEval(pool, inputText, &result, config, &error), R_SUCCESS); \
+  wchar_t *result = testEval(vm, pool, inputText); \
   if (result != NULL) { \
     if (wcscmp(expectedOutputText, result) != 0) { \
       ck_abort_msg("got '%ls', expected '%ls'", result, expectedOutputText); \
@@ -639,42 +673,27 @@ END_TEST
   else { \
     ck_abort_msg("exception thrown"); \
   } \
-  poolFree(pool); \
 }
 
 #define assertEvalException(inputText) { \
-  Pool_t pool = poolCreate(ONE_MB); \
-  wchar_t *result = NULL; \
-  Error error; \
-  errorInitContents(&error); \
-  ck_assert_int_eq(tryReplEval(pool, inputText, &result, config, &error), R_SUCCESS); \
+  wchar_t *result = testEval(vm, pool, inputText); \
   if (result == NULL) { \
   } \
   else { \
     ck_abort_msg("exception not thrown"); \
   } \
-  poolFree(pool); \
-}
-
-#define assertEval1(inputText, expectedOutputText) { \
-  Pool_t pool = poolCreate(ONE_MB); \
-  wchar_t *result = NULL; \
-  Error error; \
-  errorInitContents(&error); \
-  ck_assert_int_eq(tryReplEval(pool, inputText, &result, config, &error), R_SUCCESS); \
-  if (result != NULL) { \
-    if (wcscmp(expectedOutputText, result) != 0) { \
-      ck_abort_msg("got '%ls', expected '%ls'", result, expectedOutputText); \
-    } \
-  } \
-  else { \
-    ck_abort_msg("exception thrown"); \
-  } \
-  poolFree(pool); \
 }
 
 START_TEST(repl)
   {
+
+    Error error;
+    errorInitContents(&error);
+
+    Pool_t pool = poolCreate(ONE_MB * 10);
+    VM_t vm = vmMake(config);
+    ck_assert_int_eq(tryLoad(vm, STD_LIB, &error), R_SUCCESS);
+
     assertEval(L"(let ()"
                "  (def + (fn (a b) (builtin :add a b)))"
                "  (+ 1 2))",
