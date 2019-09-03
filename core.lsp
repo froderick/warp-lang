@@ -258,3 +258,91 @@
 ;;                    i
 ;;                    (_count (inc i) (rest remaining)))))
 ;;     (_count 0 seq)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; (defn interpose (sep coll)
+;;   (if (empty? coll)
+;;     coll
+;;     (let loop (remaining coll
+;;                done ())
+;;       (let (next (first remaining)
+;;             remaining (rest remaining)
+;;             done (if (empty? remaining)
+;;                    (cons next done)
+;;                    (cons sep (cons next done))))
+;;             (if (empty? remaining)
+;;               (reverse done)
+;;               (loop remaining done))))))
+;;
+;; (defn pr-list (v)
+;;   (if (empty? v)
+;;     "()"
+;;     (let loop (printed (list ")")
+;;                remaining v)
+;;       (let (printed (cons (pr (first remaining)) printed)
+;;             remaining (rest remaining))
+;;         (if (empty? remaining)
+;;           (join (interpose " " (reverse (cons "(" printed)))))
+;;           (loop printed remaining)))))
+;;
+;; ;; (let (x (pr-list (list 1 2 3))) x)
+;;
+;; (defn pr (v)
+;;   (let (type (get-type v))
+;;     (cond
+;;
+;;       (nil? type) (throw "type is nil")
+;;
+;;       ;; atoms
+;;       (eq type 'nil) "nil"
+;;       (eq type 'uint) (uint-to-string v)
+;;       (eq type 'bool) (if v "true" "false")
+;;       (eq type 'char) (char-to-string v)
+;;       (eq type 'string) v
+;;       (eq type 'symbol) (-> v name)
+;;       (eq type 'keyword) (join (list ":" (-> v name)))
+;;
+;;       ;; collections
+;;       (eq type 'list) (pr-list v)
+;; ;;       (eq type 'array)
+;; ;;       (eq type 'map)
+;; ;;       (eq type 'record)
+;;
+;;       ;; un-printables
+;;       (eq type 'closure) "<closure>"
+;;       (eq type 'cfn) "<cfn>"
+;;       (eq type 'fn) "<fn>"
+;;
+;;       :else (throw-value "unhandled type" type))))
+;;
+;; (defn str (& args)
+;;   (let loop (strings nil
+;;              remaining args)
+;;     (if (empty? remaining)
+;;       (join (reverse strings))
+;;       (loop (cons (pr (first remaining)) strings)
+;;             (rest remaining)))))
+;;
+;; (defn string-hash (s)
+;;   (let (len (count s))
+;;     (if (zero? len)
+;;       0
+;;       (let loop (i 0
+;;                  h 0)
+;;         (if (< i len)
+;;           (loop (inc i) (+ (* 31 h) (char-to-uint (get s i))))
+;;           h)))))
+;;
+;; (defn hash-code (v)
+;;   (let (type (get-type v))
+;;     (cond
+;;       (eq type 'nil) 0
+;;       (eq type 'uint) v
+;;       (eq type 'bool) (if v 1 0)
+;;       (eq type 'char) (char-to-uint v)
+;;       (eq type 'string) (string-hash v)
+;;       (eq type 'symbol) (-> v name string-hash)
+;;       (eq type 'keyword) (-> v name string-hash)
+;;       :else (throw-value (str "can't hash this type of value: " v)))))
+
