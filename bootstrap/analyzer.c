@@ -532,7 +532,7 @@ RetVal tryFnParse(Pool_t pool, Form* fnExpr, FormFn *fn, Form **formElements, Er
   }
 
   fn->forms.numForms = fnExpr->list.length - nonFormElems;
-  tryPalloc(pool, *formElements, sizeof(Form) * fn->forms.numForms, "Expr array");
+  palloc(pool, *formElements, sizeof(Form) * fn->forms.numForms, "Expr array");
 
   for (int i=0; i<fn->forms.numForms; i++) {
     *formElements[i] = *itr->expr;
@@ -1286,7 +1286,7 @@ RetVal tryFormAnalyzeContents(AnalyzerContext *ctx, Form* expr, Form *form, Erro
     }
 
     default: {
-      throwInternalError(error, "unhandled expression type: '%i'", expr->type);
+      explode("unhandled expression type: '%i'", expr->type);
     }
   }
 
