@@ -156,7 +156,7 @@ RetVal tryLoad(VM_t vm, char *filename, Error *error) {
         goto failure;
       }
     }
-    //printCodeUnit(&unit);
+    printCodeUnit(&unit);
 
     result = vmEval(vm, &unit);
     if (result.type == RT_EXCEPTION) {

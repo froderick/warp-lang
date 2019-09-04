@@ -278,24 +278,33 @@
 (defn pr-list (v)
   (if (empty? v)
     "()"
-    (let loop (printed (list ")")
+    (let loop (printed '()
                remaining v)
-      (let (printed (cons (pr (first remaining)) printed)
-            remaining (rest remaining))
-        (if (empty? remaining)
-          (join (interpose " " (reverse (cons "(" printed)))))
-          (loop printed remaining)))))
+      (if (empty? remaining)
+        (join (cons "(" (reverse (cons ")" (interpose " " printed))))) ;; TODO: finish thread-last
+        (loop
+          (cons (pr (first remaining)) printed)
+          (rest remaining))))))
 
-;; (let (x (pr-list (list 1 2 3))) x)
+; (pr-list (list 1 2 3))
+
+(defn pr-array (v)
+  (if (zero? (count v))
+    "[]"
+    (let loop (printed '()
+               i 0)
+      (if (= i (count v))
+        (join (cons "[" (reverse (cons "]" (interpose " " printed))))) ;; TODO: finish thread-last
+        (loop
+          (cons (pr (get v i)) printed)
+          (inc i))))))
 
 (defn pr (v)
   (let (type (get-type v))
     (cond
 
-      (nil? type) (throw "type is nil")
-
       ;; atoms
-      (eq type 'nil) "nil"
+      (nil? v) "nil"
       (eq type 'uint) (uint-to-string v)
       (eq type 'bool) (if v "true" "false")
       (eq type 'char) (char-to-string v)
@@ -305,9 +314,9 @@
 
       ;; collections
       (eq type 'list) (pr-list v)
-;;       (eq type 'array)
-;;       (eq type 'map)
-;;       (eq type 'record)
+      (eq type 'array) (pr-array v)
+      (eq type 'map) "<map>"
+      (eq type 'record) "<record>"
 
       ;; un-printables
       (eq type 'closure) "<closure>"
@@ -337,12 +346,78 @@
 (defn hash-code (v)
   (let (type (get-type v))
     (cond
-      (eq type 'nil) 0
+      (nil? v) 0
       (eq type 'uint) v
       (eq type 'bool) (if v 1 0)
       (eq type 'char) (char-to-uint v)
       (eq type 'string) (string-hash v)
       (eq type 'symbol) (-> v name string-hash)
       (eq type 'keyword) (-> v name string-hash)
-      :else (throw-value (str "can't hash this type of value: " v)))))
+      :else (throw-value (str "can't hash this type of value: " type) v))))
+
+; (defrecord hi (one two three))
+; (make-hi :x :y :z)
+; (-> (make-hi :x :y :z) hi-one)
+
+(defn make-record-constructor (rname rfields)
+
+  (let (init (let loop (i 0
+                        cmds '()
+                        remaining rfields)
+               (if (empty? remaining)
+                 (reverse cmds)
+                 (let (cmd `(set r ~i ~(first remaining)))
+                   (loop (inc i)
+                         (cons cmd cmds)
+                         (rest remaining))))))
+
+    `(defn ~(symbol (str "make-" (name rname))) ~rfields
+       (let (r (record (quote ~rname) ~(count rfields)))
+         ~@init
+         r))))
+
+(defn make-record-pred (rname)
+  `(defn ~(symbol (str (name rname) "?")) (obj)
+     (eq ~rname (record-type obj))))
+
+(defn make-record-accessor (rname rfield idx)
+  `(defn ~(symbol (str (name rname) "-" (name rfield))) (p)
+     (get p ~idx)))
+
+(defn make-record-accessors (rname rfields)
+  (let loop (i 0
+             cmds '()
+             remaining rfields)
+    (if (empty? remaining)
+      (reverse cmds)
+        (loop (inc i)
+              (cons (make-record-accessor rname (first remaining) i) cmds)
+              (rest remaining)))))
+
+(defn make-record-mutator (rname rfield idx)
+  `(defn ~(symbol (str "set-" (name rname) "-" (name rfield) "!")) (p obj)
+     (set p ~idx obj)))
+
+(defn make-record-mutators (rname rfields)
+  (let loop (i 0
+             cmds '()
+             remaining rfields)
+    (if (empty? remaining)
+      (reverse cmds)
+        (loop (inc i)
+              (cons (make-record-mutator rname (first remaining) i) cmds)
+              (rest remaining)))))
+
+(defmacro defrecord (& forms)
+  (let (rname (first forms)
+        rfields (second forms))
+
+    `(do
+       ~(make-record-constructor rname rfields)
+       ~(make-record-pred rname)
+       ~@(make-record-accessors rname rfields)
+       ~@(make-record-mutators rname rfields)
+       )))
+
+
 

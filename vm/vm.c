@@ -4003,6 +4003,21 @@ int recordBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
+int recordTypeBuiltin(VM *vm, Frame_t frame) {
+
+  Value value = popOperand(frame);
+  ValueType type = valueType(value);
+
+  if (type != VT_RECORD) {
+    raise(vm, "requires a record, got: %s", getValueTypeName(vm, type));
+    return R_ERROR;
+  }
+
+  Record *record = deref(vm, value);
+  pushOperand(frame, record->symbol);
+  return R_SUCCESS;
+}
+
 int uintToStringBuiltin(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
@@ -4425,6 +4440,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"list", 1, true, listBuiltin);
   defineCFn(vm, L"vector", 1, true, vectorBuiltin);
   defineCFn(vm, L"record", 2, false, recordBuiltin);
+  defineCFn(vm, L"record-type", 1, false, recordTypeBuiltin);
   defineCFn(vm, L"uint-to-string", 1, false, uintToStringBuiltin);
   defineCFn(vm, L"throw", 1, false, throwBuiltin);
   defineCFn(vm, L"throw-value", 2, false, throwValueBuiltin);
