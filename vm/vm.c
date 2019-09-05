@@ -1639,11 +1639,11 @@ void unprotectInvocable(VM *vm, Invocable *invocable) {
   }
 }
 
-int validateArguments(VM *vm, uint16_t numArgs, bool usesVarArgs, uint64_t numArgsSupplied) {
+int validateArguments(VM *vm, wchar_t *name, uint16_t numArgs, bool usesVarArgs, uint64_t numArgsSupplied) {
 
   if (!usesVarArgs) {
     if (numArgsSupplied != numArgs) {
-      raise(vm, "required arguments not supplied, expected %u but got %" PRIu64, numArgs,
+      raise(vm, "%ls: required arguments not supplied, expected %u but got %" PRIu64, name, numArgs,
             numArgsSupplied);
       return R_ERROR;
     }
@@ -1660,8 +1660,8 @@ int validateArguments(VM *vm, uint16_t numArgs, bool usesVarArgs, uint64_t numAr
       numVarArgs = 0;
     }
     else {
-      raise(vm, "required arguments not supplied, expected %u or more arguments but got %" PRIu64,
-            numArgs - 1, numArgsSupplied);
+      raise(vm, "%ls: required arguments not supplied, expected %u or more arguments but got %" PRIu64,
+            name, numArgs - 1, numArgsSupplied);
       return R_ERROR;
     }
   }
@@ -1744,7 +1744,7 @@ int invokeCFn(VM *vm, Frame_t frame, Value cFn, uint16_t numArgsSupplied) {
   CFn *protectedFn = deref(vm, cFn);
   pushFrameRoot(vm, (Value*)&protectedFn);
 
-  int error = validateArguments(vm, protectedFn->numArgs, protectedFn->usesVarArgs, numArgsSupplied);
+  int error = validateArguments(vm, cFnName(protectedFn), protectedFn->numArgs, protectedFn->usesVarArgs, numArgsSupplied);
   if (error) {
     goto cleanup;
   }
@@ -1781,7 +1781,7 @@ int invokeDynEval(VM *vm, Frame_t frame) {
     case VT_KEYWORD: {
       Value key = pop;
 
-      int error = validateArguments(vm, 1, false, numArgsSupplied);
+      int error = validateArguments(vm, L"keyword-get", 1, false, numArgsSupplied);
       if (error) {
         return error;
       }
@@ -1803,7 +1803,7 @@ int invokeDynEval(VM *vm, Frame_t frame) {
         return error;
       }
 
-      error = validateArguments(vm, invocable.fn->numArgs, invocable.fn->usesVarArgs, numArgsSupplied);
+      error = validateArguments(vm, fnName(invocable.fn), invocable.fn->numArgs, invocable.fn->usesVarArgs, numArgsSupplied);
       if (error) {
         return error;
       }
@@ -1842,7 +1842,7 @@ int invokeDynTailEval(VM *vm, Frame_t frame) {
     case VT_KEYWORD: {
       Value key = pop;
 
-      int error = validateArguments(vm, 1, false, numArgsSupplied);
+      int error = validateArguments(vm, L"keyword-get", 1, false, numArgsSupplied);
       if (error) {
         return error;
       }
@@ -1862,7 +1862,7 @@ int invokeDynTailEval(VM *vm, Frame_t frame) {
         return error;
       }
 
-      error = validateArguments(vm, invocable.fn->numArgs, invocable.fn->usesVarArgs, numArgsSupplied);
+      error = validateArguments(vm, fnName(invocable.fn), invocable.fn->numArgs, invocable.fn->usesVarArgs, numArgsSupplied);
       if (error) {
         return error;
       }
