@@ -389,6 +389,20 @@
           (set v i (first remaining))
           (loop (inc i) (rest remaining)))))))
 
+(defn make-record-kw-accessor (name fields)
+  (let (num-fields (count fields)
+        kw-sym (gensym))
+    (let loop (i 0
+               cond-args '())
+      (if (eq i num-fields)
+       `(fn ~(symbol (str name "-kw-get")) (obj ~kw-sym)
+          (cond
+             ~@cond-args
+             :else nil))
+        (loop
+          (inc i)
+          (concat cond-args `((eq ~kw-sym ~(get fields i)) (get obj ~i))))))))
+
 (defn make-record-constructor (rname rfields)
 
   (let (init (let loop (i 0
@@ -400,11 +414,24 @@
                    (loop (inc i)
                          (cons cmd cmds)
                          (rest remaining))))))
+    (let (vec-fields (-> (map keyword rfields) list->vector))
 
-    `(defn ~(symbol (str "make-" (name rname))) ~rfields
-       (let (r (record [(quote ~rname) (quote ~(-> (map keyword rfields) list->vector))] ~(count rfields))) ;; TODO: rfields should be a vector
-         ~@init
-         r))))
+      `(defn ~(symbol (str "make-" (name rname))) ~rfields
+         (let (r (record [(quote ~rname)
+                          (quote ~vec-fields)
+                          ~(make-record-kw-accessor rname vec-fields)]
+                         ~(count rfields)))
+           ~@init
+           r)))))
+
+(defn record-name (r)
+  (-> r record-type (get 0)))
+
+(defn record-fields (r)
+  (-> r record-type (get 1)))
+
+(defn record-kw-accessor (r)
+  (-> r record-type (get 2)))
 
 (defn make-record-pred (rname)
   `(defn ~(symbol (str (name rname) "?")) (obj)
@@ -449,12 +476,6 @@
        ~@(make-record-mutators rname rfields)
        )))
 
-(defn record-name (r)
-  (-> r record-type (get 0)))
-
-(defn record-fields (r)
-  (-> r record-type (get 1)))
-
 (defn pr-record (r)
   (let (fields (record-fields r)
         num-fields (count fields))
@@ -468,11 +489,19 @@
                 (cons (pr-str (get fields i))
                       field-values)))))))
 
-
 (defrecord hi (one two three))
 (def x (make-hi "One" "Two" "Three"))
 (pr-str x)
+((record-kw-accessor x) x :one)
 
+(defn kw-get (r kw)
+  (let (fields (record-fields r)
+        num-fields (count fields))
+    (let loop (i 0)
+      (cond
+        (eq i num-fields) (throw (str "kw not found: " kw))
+        (eq kw (get fields i)) (get r i)
+        (loop (inc i))))))
 
 
 
