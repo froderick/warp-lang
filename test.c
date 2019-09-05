@@ -540,12 +540,13 @@ START_TEST(compilerBasic) {
       ck_assert_int_eq(codeUnit.constants[2].integer, 50);
 
       ck_assert_int_eq(codeUnit.code.numLocals, 0);
-      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 3);
+      ck_assert_int_eq(codeUnit.code.maxOperandStackSize, 2);
       ck_assert_int_eq(codeUnit.code.hasSourceTable, false);
 
       uint8_t expectedCode[] = {
           I_LOAD_CONST,  0, 0,
           I_DEF_VAR,     0, 1,
+          I_DROP,
           I_LOAD_VAR,    0, 1,
           I_LOAD_CONST,  0, 2,
           I_ADD,

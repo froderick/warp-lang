@@ -2109,6 +2109,12 @@ int swapEval(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
+// (8)        | (a, b -> b, a)
+int dropEval(VM *vm, Frame_t frame) {
+  Value a = popOperand(frame);
+  return R_SUCCESS;
+}
+
 // (8)        | (jumpAddr, handler ->)
 int setHandlerEval(VM *vm, Frame_t frame) {
   uint16_t jumpIndex = readIndex(frame);
@@ -2392,8 +2398,8 @@ InstTable instTableCreate() {
       [I_SWAP]             = { .name = "I_SWAP",            .print = printInst,           .eval = swapEval },
       [I_PUSH_HANDLER]     = { .name = "I_PUSH_HANDLER",     .print = printInstAndIndex,   .eval = setHandlerEval },
       [I_POP_HANDLER]      = { .name = "I_POP_HANDLER",   .print = printInst,           .eval = clearHandlerEval },
-
       [I_CONS]             = { .name = "I_CONS",            .print = printInst,           .eval = consEval },
+      [I_DROP]             = { .name = "I_DROP",            .print = printInst,           .eval = dropEval},
 
 //      [I_NEW]         = { .name = "I_NEW",         .print = printUnknown},
 //      [I_GET_FIELD]   = { .name = "I_GET_FIELD",   .print = printUnknown},

@@ -56,6 +56,7 @@ typedef enum InstType {
   I_PUSH_HANDLER,            // (8), jmpAddr (16)    | (handler ->)
   I_POP_HANDLER,             // (8),                 | (->)
   I_CONS,                    // (8),                 | (x, seq -> newseq)
+  I_DROP,                    // (8),                 | (a ->)
 
   // requires garbage collection
       I_NEW,         // (8), objlen (16) | (-> objectref)

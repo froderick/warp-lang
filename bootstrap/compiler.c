@@ -394,6 +394,10 @@ uint64_t computeOpStackSize(uint8_t *code, uint16_t length) {
         code++;
         currentOpStack--;
         break;
+      case I_DROP:
+        code++;
+        currentOpStack--;
+        break;
       default:
         explode("oops");
     }
@@ -675,6 +679,12 @@ void compileLet(Form *form, Output output) {
     for (uint16_t i = 0; i < form->let.forms.numForms; i++) {
       Form *f = &form->let.forms.forms[i];
       compile(f, output);
+
+      if (i + 1 < form->let.forms.numForms) {
+        // discard the unused return value
+        uint8_t code[] = { I_DROP };
+        codeAppend(output, sizeof(code), code);
+      }
     }
   }
   else {
