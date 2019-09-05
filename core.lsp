@@ -275,6 +275,11 @@
               (reverse done)
               (loop remaining done))))))
 
+(defn pr-quote-string (v)
+  (if (eq (get-type v) 'string)
+    (join (list "\"" v "\""))
+    v))
+
 (defn pr-list (v)
   (if (empty? v)
     "()"
@@ -283,7 +288,7 @@
       (if (empty? remaining)
         (join (cons "(" (reverse (cons ")" (interpose " " printed))))) ;; TODO: finish thread-last
         (loop
-          (cons (pr (first remaining)) printed)
+          (cons (pr-str (first remaining)) printed)
           (rest remaining))))))
 
 ; (pr-list (list 1 2 3))
@@ -296,10 +301,36 @@
       (if (= i (count v))
         (join (cons "[" (reverse (cons "]" (interpose " " printed))))) ;; TODO: finish thread-last
         (loop
-          (cons (pr (get v i)) printed)
+          (cons (pr-str (get v i)) printed)
           (inc i))))))
 
-(defn pr (v)
+(defn pr-str (v)
+  (let (type (get-type v))
+    (cond
+
+      ;; atoms
+      (nil? v) "nil"
+      (eq type 'uint) (uint-to-string v)
+      (eq type 'bool) (if v "true" "false")
+      (eq type 'char) (join (list "'" (char-to-string v) "'"))
+      (eq type 'string) (pr-quote-string v)
+      (eq type 'symbol) (-> v name)
+      (eq type 'keyword) (join (list ":" (-> v name)))
+
+      ;; collections
+      (eq type 'list) (pr-list v)
+      (eq type 'array) (pr-array v)
+      (eq type 'map) "<map>"
+      (eq type 'record) (pr-record v)
+
+      ;; un-printables
+      (eq type 'closure) "<closure>"
+      (eq type 'cfn) "<cfn>"
+      (eq type 'fn) "<fn>"
+
+      :else (throw-value "unhandled type" type))))
+
+(defn str-one (v)
   (let (type (get-type v))
     (cond
 
@@ -312,25 +343,14 @@
       (eq type 'symbol) (-> v name)
       (eq type 'keyword) (join (list ":" (-> v name)))
 
-      ;; collections
-      (eq type 'list) (pr-list v)
-      (eq type 'array) (pr-array v)
-      (eq type 'map) "<map>"
-      (eq type 'record) "<record>"
-
-      ;; un-printables
-      (eq type 'closure) "<closure>"
-      (eq type 'cfn) "<cfn>"
-      (eq type 'fn) "<fn>"
-
-      :else (throw-value "unhandled type" type))))
+      :else (pr-str v))))
 
 (defn str (& args)
   (let loop (strings nil
              remaining args)
     (if (empty? remaining)
       (join (reverse strings))
-      (loop (cons (pr (first remaining)) strings)
+      (loop (cons (str-one (first remaining)) strings)
             (rest remaining)))))
 
 (defn string-hash (s)
@@ -382,7 +402,7 @@
                          (rest remaining))))))
 
     `(defn ~(symbol (str "make-" (name rname))) ~rfields
-       (let (r (record [(quote ~rname) ~(list->vector rfields)] ~(count rfields))) ;; TODO: rfields should be a vector
+       (let (r (record [(quote ~rname) (quote ~(-> (map keyword rfields) list->vector))] ~(count rfields))) ;; TODO: rfields should be a vector
          ~@init
          r))))
 
@@ -441,16 +461,17 @@
     (let loop (i 0
                field-values '())
       (if (eq i num-fields)
-        (str "#" (name (record-name r)) "[" (join (interpose " " (reverse field-values))) "]")
+        (str "#" (name (record-name r)) "{" (join (interpose " " (reverse field-values))) "}")
         (loop
           (inc i)
-          (cons (pr (get fields i)) field-values))))))
+          (cons (pr-str (get r i)) ;; TODO: need thread-last
+                (cons (pr-str (get fields i))
+                      field-values)))))))
 
 
 (defrecord hi (one two three))
-(def x (make-hi :x :y :z))
-(pr-record x)
-
+(def x (make-hi "One" "Two" "Three"))
+(pr-str x)
 
 
 
