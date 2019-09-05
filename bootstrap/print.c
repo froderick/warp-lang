@@ -247,12 +247,7 @@ void printRecord(Ctx *ctx, Value result, Form *expr) {
 
   StringBuffer_t b = stringBufferMake(ctx->pool);
 
-  stringBufferAppendStr(b, L"#");
-
-  Symbol *symbol = deref(ctx->vm, record->symbol);
-  String *name = deref(ctx->vm, symbol->name);
-
-  stringBufferAppendStr(b, stringValue(name));
+  stringBufferAppendStr(b, L"#record");
   stringBufferAppendStr(b, L"[");
   stringBufferAppendStr(b, L"]");
 

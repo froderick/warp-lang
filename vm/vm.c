@@ -485,7 +485,7 @@ Map* makeMap(VM *vm) {
 
 void recordInitContents(Record *record) {
   record->header = 0;
-  record->symbol = W_NIL_VALUE;
+  record->type = W_NIL_VALUE;
 }
 
 Value* recordFields(Record *record) {
@@ -2563,7 +2563,7 @@ void relocateChildrenMapEntry(VM_t vm, void *obj) {
 
 void relocateChildrenRecord(VM_t vm, void *obj) {
   Record *record = obj;
-  relocate(vm, &record->symbol);
+  relocate(vm, &record->type);
   Value *fields = recordFields(record);
   uint64_t size = objectHeaderSize(record->header);
   for (uint64_t i=0; i<size; i++) {
@@ -3995,14 +3995,11 @@ int recordBuiltin(VM *vm, Frame_t frame) {
     numFields = unwrapUint(fieldsValue);
   }
 
-  Value protectedSymbol = popOperand(frame);
-  if (valueType(protectedSymbol) != VT_SYMBOL) {
-    explode("a symbol is required to identify a record: %s", getValueTypeName(vm, valueType(protectedSymbol)));
-  }
-  pushFrameRoot(vm, &protectedSymbol);
+  Value protectedRecordType= popOperand(frame);
+  pushFrameRoot(vm, &protectedRecordType);
 
   Record *record = makeRecord(vm, numFields);
-  record->symbol = protectedSymbol;
+  record->type = protectedRecordType;
 
   popFrameRoot(vm); // protectedSymbol
   pushOperand(frame, (Value)record);
@@ -4020,7 +4017,7 @@ int recordTypeBuiltin(VM *vm, Frame_t frame) {
   }
 
   Record *record = deref(vm, value);
-  pushOperand(frame, record->symbol);
+  pushOperand(frame, record->type);
   return R_SUCCESS;
 }
 

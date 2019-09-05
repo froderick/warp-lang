@@ -186,7 +186,7 @@ typedef struct Map {
 
 typedef struct Record {
   ObjectHeader header;
-  Value symbol;
+  Value type;
 } Record;
 
 typedef enum PortType {
