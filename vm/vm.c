@@ -3439,9 +3439,20 @@ int symbolBuiltin(VM *vm, Frame_t frame) {
 
 int keywordBuiltin(VM *vm, Frame_t frame) {
   Value protectedName = popOperand(frame);
-  if (!isString(protectedName)) {
-    raise(vm, "expected a string type: %s", getValueTypeName(vm, valueType(protectedName)));
-    return R_ERROR;
+  ValueType type = valueType(protectedName);
+
+  switch (type) {
+    case VT_STR:
+      // do nothing
+      break;
+    case VT_SYMBOL: {
+      Symbol *s = deref(vm, protectedName);
+      protectedName = s->name;
+      break;
+    }
+    default:
+      raise(vm, "expected a string type: %s", getValueTypeName(vm, valueType(protectedName)));
+      return R_ERROR;
   }
 
   pushFrameRoot(vm, &protectedName);
