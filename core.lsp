@@ -356,8 +356,18 @@
       :else (throw-value (str "can't hash this type of value: " type) v))))
 
 ; (defrecord hi (one two three))
-; (make-hi :x :y :z)
+; (def x (make-hi :x :y :z))
 ; (-> (make-hi :x :y :z) hi-one)
+
+(defn list->vector (l)
+  (let (v (make-vector (count l)))
+    (let loop (i 0
+               remaining l)
+      (if (empty? remaining)
+        v
+        (do
+          (set v i (first remaining))
+          (loop (inc i) (rest remaining)))))))
 
 (defn make-record-constructor (rname rfields)
 
@@ -372,13 +382,13 @@
                          (rest remaining))))))
 
     `(defn ~(symbol (str "make-" (name rname))) ~rfields
-       (let (r (record (quote ~rname) ~(count rfields)))
+       (let (r (record [(quote ~rname) ~(list->vector rfields)] ~(count rfields))) ;; TODO: rfields should be a vector
          ~@init
          r))))
 
 (defn make-record-pred (rname)
   `(defn ~(symbol (str (name rname) "?")) (obj)
-     (eq ~rname (record-type obj))))
+     (eq (quote ~rname) (-> obj record-type (get 0)))))
 
 (defn make-record-accessor (rname rfield idx)
   `(defn ~(symbol (str (name rname) "-" (name rfield))) (p)
@@ -418,6 +428,42 @@
        ~@(make-record-accessors rname rfields)
        ~@(make-record-mutators rname rfields)
        )))
+
+(defn record-name (r)
+  (-> r record-type (get 0)))
+
+(defn record-fields (r)
+  (-> r record-type (get 1)))
+
+(defn pr-record (r)
+  (let (fields (record-fields r)
+        num-fields (count fields))
+    (let loop (i 0
+               field-values '())
+      (if (eq i num-fields)
+        (str "#" (name (record-name r)) "[" (join (interpose " " (reverse field-values))) "]")
+        (loop
+          (inc i)
+          (cons (pr (get fields i)) field-values))))))
+
+
+(defrecord hi (one two three))
+(def x (make-hi :x :y :z))
+(pr-record x)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

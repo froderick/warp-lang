@@ -3937,6 +3937,22 @@ int listBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
+int makeVectorBuiltin(VM *vm, Frame_t frame) {
+
+  Value p = popOperand(frame);
+
+  if (!isInt(p)) {
+    raise(vm, "expected a number: %s", getValueTypeName(vm, valueType(p)));
+    return R_ERROR;
+  }
+
+  uint64_t length = unwrapUint(p);
+  Array *array = makeArray(vm, length);
+
+  pushOperand(frame, (Value)array);
+  return R_SUCCESS;
+}
+
 int vectorBuiltin(VM *vm, Frame_t frame) {
 
   Value params = popOperand(frame);
@@ -4441,6 +4457,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"set", 3, false, setBuiltin);
   defineCFn(vm, L"hash-map", 1, true, hashMapBuiltin);
   defineCFn(vm, L"list", 1, true, listBuiltin);
+  defineCFn(vm, L"make-vector", 1, false, makeVectorBuiltin);
   defineCFn(vm, L"vector", 1, true, vectorBuiltin);
   defineCFn(vm, L"record", 2, false, recordBuiltin);
   defineCFn(vm, L"record-type", 1, false, recordTypeBuiltin);
