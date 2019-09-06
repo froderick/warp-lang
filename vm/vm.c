@@ -4375,6 +4375,24 @@ int multBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
+int modBuiltin(VM *vm, Frame_t frame) {
+  Value b = popOperand(frame);
+  Value a = popOperand(frame);
+
+  if (valueType(a) != VT_UINT) {
+    raise(vm, "can only mod integers: %s", getValueTypeName(vm, valueType(a)));
+    return R_ERROR;
+  }
+  if (valueType(b) != VT_UINT) {
+    raise(vm, "can only mod integers: %s", getValueTypeName(vm, valueType(b)));
+    return R_ERROR;
+  }
+
+  Value c = wrapUint(unwrapUint(a) % unwrapUint(b));
+  pushOperand(frame, c);
+  return R_SUCCESS;
+}
+
 // (8),             | (value -> value)
 int nameBuiltin(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
@@ -4458,6 +4476,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"+", 2, false, addEval);
   defineCFn(vm, L"-", 2, false, subEval);
   defineCFn(vm, L"*", 2, false, multBuiltin);
+  defineCFn(vm, L"mod", 2, false, modBuiltin);
   defineCFn(vm, L"eq", 2, false, cmpEval);
   defineCFn(vm, L"join", 1, false, strJoinBuiltin);
   defineCFn(vm, L"symbol", 1, false, symbolBuiltin);
