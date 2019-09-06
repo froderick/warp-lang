@@ -962,7 +962,7 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Form* expr, Form *form, Error *err
 
         if (b->source == BS_CAPTURED && wcscmp(b->name.value, sym) == 0) {
           throws(tryEnvRefAnalyze(ctx, expr, i, &form->envRef, error));
-          break;
+          return R_SUCCESS;
         }
       }
 
