@@ -489,22 +489,87 @@
                 (cons (pr-str (get fields i))
                       field-values)))))))
 
-(defrecord hi (one two three))
-(def x (make-hi "One" "Two" "Three"))
-(pr-str x)
-((record-kw-accessor x) x :one)
-
-(defn kw-get (r kw)
-  (let (fields (record-fields r)
-        num-fields (count fields))
+(defn equals-str? (a b)
+  (if (not (eq (count a) (count b)))
+    false
     (let loop (i 0)
-      (cond
-        (eq i num-fields) (throw (str "kw not found: " kw))
-        (eq kw (get fields i)) (get r i)
-        (loop (inc i))))))
+      (if (eq i (count a))
+        true
+        (if (eq (get a i) (get b i))
+          (loop (inc i))
+          false)))))
+
+(defn equals? (a b)
+  (let (type (get-type a))
+    (cond
+      (eq type 'string) (equals-str? a b)
+      :else (eq a b))))
+
+; (defrecord hi (one two three))
+; (def x (make-hi "One" "Two" "Three"))
+; (pr-str x)
+; ((record-kw-accessor x) x :one)
+
+(defrecord map (size entries))
+(defrecord map-entry (key hash value))
+
+(defn create-map (& args)
+  (make-map 0 (make-vector 16)))
+
+(defn find-map-entry-index (m key hash)
+  (let (entries (map-entries m)
+        idx-search (fn idx-search (start stop)
+                     (let loop (i start)
+                       (cond
+                         (eq i stop) nil ;; entry not found
+                         (let (e (get entries i))
+                           (or (nil? e) (equals? key (map-entry-key e)))) i ;; entry found
+                         :else (loop (inc i)))))
+        index (mod hash (count entries))
+        entry-idx (idx-search index (count entries)))
+    (if entry-idx
+      entry-idx
+      (idx-search 0 index))))
+
+;; (defn keyword? (obj)
+;;   (eq (get-type obj) 'keyword))
+;;
+;;  (defn find-map-entry-index (m key hash)
+;;    (let (entries (map-entries m)
+;;          idx-search (fn idx-search (start stop)
+;;
+;;                       ;(if (keyword? entries)
+;;                       ;  (throw-value "wrong value in entries" entries))
+;;
+;;                       (let looper (i start)
+;;                         (cond
+;;                           (eq i stop) nil ;; entry not found
+;;                           (let (e (get entries i))
+;;                             (or (nil? e) (equals? key (map-entry-key e)))) i ;; entry found
+;;                           :else (looper (inc i)))))
+;;          index (mod hash (count entries))
+;;          entry-idx (idx-search index (count entries)))
+;;      (if entry-idx
+;;        entry-idx
+;;        (idx-search 0 index))))
+
+;; update:
+;; - the `3:	I_LOAD_LOCAL	3` in idx-search is wrong, it should be 2. when I edit it in the debugger to the right
+;;   value, this function appears to work just fine.
+
+(find-map-entry-index (create-map) :a (hash-code :a))
 
 
+;; seems to be going wrong loading the keyword in `21:	I_LOAD_LOCAL	2` rather than the vector in
+;; I actually can't find the captured `entries` vector anywhere in the locals for this function
 
+(defn test (a b)
+  (let (c :c
+        cl (fn cl (d e)
+             (let loop (f e)
+               (if (not (eq c :c))
+                 (throw-value "wrong value c" c)))))
+    (cl :d :e)))
 
 
 
