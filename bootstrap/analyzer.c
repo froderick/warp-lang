@@ -532,12 +532,16 @@ RetVal tryFnParse(Pool_t pool, Form* fnExpr, FormFn *fn, Form **formElements, Er
   }
 
   fn->forms.numForms = fnExpr->list.length - nonFormElems;
-  palloc(pool, *formElements, sizeof(Form) * fn->forms.numForms, "Expr array");
+
+  Form *fe;
+  palloc(pool, fe, sizeof(Form) * fn->forms.numForms, "Expr array");
 
   for (int i=0; i<fn->forms.numForms; i++) {
-    *formElements[i] = *itr->expr;
+    fe[i] = *itr->expr;
     itr = itr->next;
   }
+
+  *formElements = fe;
 
   return R_SUCCESS;
 
