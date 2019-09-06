@@ -973,6 +973,7 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Form* expr, Form *form, Error *err
        */
 
       Binding captured = *resolved->binding;
+      uint16_t capturedIndex = resolved->bindingIndex;
 
       for (uint16_t i=resolved->tableIndex + 1; i<= currentTableIndex; i++) {
         BindingTable *this = ctx->bindingTables.tables[i];
@@ -981,11 +982,12 @@ RetVal trySymbolAnalyze(AnalyzerContext *ctx, Form* expr, Form *form, Error *err
         bindingInitContents(&binding);
         textCopy(ctx->pool, &captured.name, &binding.name);
         binding.source = BS_CAPTURED;
-        binding.captured.bindingIndex = resolved->bindingIndex;
+        binding.captured.bindingIndex = capturedIndex;
 
         addBinding(ctx->pool, this, binding);
 
         captured = binding;
+        capturedIndex = this->usedSpace - 1;
       }
 
       throws(tryEnvRefAnalyze(ctx, expr, current->usedSpace - 1, &form->envRef, error));
