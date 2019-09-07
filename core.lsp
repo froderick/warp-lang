@@ -389,6 +389,13 @@
           (set v i (first remaining))
           (loop (inc i) (rest remaining)))))))
 
+(defn vector->list (v)
+  (let loop (i 0
+             done ())
+    (if (eq i (count v))
+      (reverse done)
+      (loop (inc i) (cons (get v i) done)))))
+
 (defn make-record-kw-accessor (name fields)
   (let (num-fields (count fields)
         kw-sym (gensym))
@@ -505,6 +512,38 @@
       (eq type 'string) (equals-str? a b)
       :else (eq a b))))
 
+(defmacro dovec (& args)
+
+  (if (not (> (count args) 1))
+    (throw-value "doseq requires at least two args" args))
+
+  (let (spec (first args)
+        forms (rest args))
+
+    (if (not (eq (count spec) 2))
+      (throw-value "doseq requires at least one alias and sequence" args))
+
+    (if (not (symbol? (first spec)))
+      (throw-value "aliases must be symbols" (second spec)))
+
+    (let (loop-sym (gensym)
+          i-sym (gensym)
+          alias (first spec)
+          vec-expr (second spec)
+          vec-sym (gensym))
+
+      `(let (~vec-sym ~vec-expr)
+         (let ~loop-sym (~i-sym 0)
+           (if (eq ~i-sym (count ~vec-sym))
+             nil
+             (let (~alias (get ~vec-sym ~i-sym))
+               ~@forms
+               (~loop-sym (inc ~i-sym)))))))))
+
+;; (dovec (y [1 2 3])
+;;        (println (str "A:" y))
+;;        (println (str "B:" y)))
+
 ; (defrecord hi (one two three))
 ; (def x (make-hi "One" "Two" "Three"))
 ; (pr-str x)
@@ -529,52 +568,102 @@
         entry-idx (idx-search index (count entries)))
     (if entry-idx
       entry-idx
-      (idx-search 0 index))))
+      (let (entry-idx (idx-search 0 index))
+        (if entry-idx
+          entry-idx
+          (throw "could not find an available entry"))))))
 
-;; (defn keyword? (obj)
-;;   (eq (get-type obj) 'keyword))
-;;
-;;  (defn find-map-entry-index (m key hash)
-;;    (let (entries (map-entries m)
-;;          idx-search (fn idx-search (start stop)
-;;
-;;                       ;(if (keyword? entries)
-;;                       ;  (throw-value "wrong value in entries" entries))
-;;
-;;                       (let looper (i start)
-;;                         (cond
-;;                           (eq i stop) nil ;; entry not found
-;;                           (let (e (get entries i))
-;;                             (or (nil? e) (equals? key (map-entry-key e)))) i ;; entry found
-;;                           :else (looper (inc i)))))
-;;          index (mod hash (count entries))
-;;          entry-idx (idx-search index (count entries)))
-;;      (if entry-idx
-;;        entry-idx
-;;        (idx-search 0 index))))
+; (find-map-entry-index (create-map) :a (hash-code :a))
 
-;; update:
-;; - the `3:	I_LOAD_LOCAL	3` in idx-search is wrong, it should be 2. when I edit it in the debugger to the right
-;;   value, this function appears to work just fine.
+(defn map-lookup (m key)
+  (let (hash (hash-code key)
+        idx (find-map-entry-index m key hash)
+        entry (get (map-entries m) idx))
+    (if (nil? entry)
+      nil
+      (map-entry-value entry))))
 
-(find-map-entry-index (create-map) :a (hash-code :a))
+;; TODO: need native floats to be fast here
+;; https://stackoverflow.com/questions/20788793/c-how-to-calculate-a-percentageperthousands-without-floating-point-precision
+
+(defn ratio (num denom)
+  (/ (+ (* 100 num) (/ denom 2)) denom))
+
+(defn calc-new-map-size (m)
+  (let (min-entries 16
+        min-load 40
+        max-load 70
+        num-entries (-> (map-entries m) count)
+        load (ratio (map-size m) num-entries))
+    (cond
+      (> load max-load) (* num-entries 2)
+      (and (> load min-entries) (< load min-load)) (/ num-entries 2)
+      :else nil)))
+
+(defn reuse-map-entry (m e)
+  (let (hash (hash-code (map-entry-hash e))
+        key (map-entry-key e)
+        idx (find-map-entry-index m key hash))
+    (set (map-entries m) idx e)))
+
+(defn resize-map (m new-size)
+  (let (old-entries (map-entries m))
+    (set-map-entries! m (make-vector new-size))
+    (dovec (e old-entries)
+      (if (not (nil? e))
+        (reuse-map-entry m e)))))
+
+(defn put-map-entry (m key value)
+  (let (hash (hash-code key)
+        idx (find-map-entry-index m key hash)
+        entry (get (map-entries m) idx))
+    (if (nil? entry)
+      (do
+        (set (map-entries m) idx (make-map-entry key hash value))
+        (set-map-size! m (-> m map-size inc))
+        (let (new-size (calc-new-map-size m)) ;; TODO: when-let
+          (if new-size
+            (resize-map m new-size)))) ;; TODO: when
+      (do
+        (set-map-entry-key! entry key)
+        (set-map-entry-hash! entry hash)
+        (set-map-entry-value! entry value)))))
+
+(defn drop-map-entry (m key)
+  (let (hash (hash-code key)
+        idx (find-map-entry-index m key hash)
+        entry (get (map-entries m) idx))
+    (if (not (nil? entry)) ;; TODO: when
+      (do
+        (set (map-entries m) idx nil)
+        (set-map-size! m (-> m map-size dec))
+        (let (new-size (calc-new-map-size m)) ;; TODO: when-let
+          (if new-size
+            (resize-map m new-size))))))) ;; TODO: when
+
+(defn range (n)
+  (let loop (i 0
+             done ())
+    (if (= i n)
+      (reverse done)
+      (loop (inc i) (cons i done)))))
+
+;; (def x (create-map))
+;;  (dovec (n (list->vector (range 20)))
+;;    (put-map-entry x (-> (str "k" n) keyword) :value))
 
 
-;; seems to be going wrong loading the keyword in `21:	I_LOAD_LOCAL	2` rather than the vector in
-;; I actually can't find the captured `entries` vector anywhere in the locals for this function
-
-(defn test (a b)
-  (let (c :c
-        cl (fn cl (d e)
-             (let loop (f e)
-               (if (not (eq c :c))
-                 (throw-value "wrong value c" c)))))
-    (cl :d :e)))
 
 
 
 
 
+
+
+
+; (def x (create-map))
+; (put-map-entry x :a 'A)
+; (map-lookup x :a)
 
 
 
