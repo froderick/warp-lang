@@ -4342,6 +4342,18 @@ int symbolEval(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
+int printBuiltin(VM *vm, Frame_t frame) {
+  Value a = popOperand(frame);
+  if (!isString(a)) {
+    raise(vm, "can only print a string: %s", getValueTypeName(vm, valueType(a)));
+    return R_ERROR;
+  }
+  String *s = deref(vm, a);
+  printf("%ls", stringValue(s));
+  pushOperand(frame, W_NIL_VALUE);
+  return R_SUCCESS;
+}
+
 // (8),             | (value -> value)
 int charToUintBuiltin(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
@@ -4371,6 +4383,24 @@ int multBuiltin(VM *vm, Frame_t frame) {
   }
 
   Value c = wrapUint(unwrapUint(a) * unwrapUint(b));
+  pushOperand(frame, c);
+  return R_SUCCESS;
+}
+
+int divBuiltin(VM *vm, Frame_t frame) {
+  Value b = popOperand(frame);
+  Value a = popOperand(frame);
+
+  if (valueType(a) != VT_UINT) {
+    raise(vm, "can only div integers: %s", getValueTypeName(vm, valueType(a)));
+    return R_ERROR;
+  }
+  if (valueType(b) != VT_UINT) {
+    raise(vm, "can only div integers: %s", getValueTypeName(vm, valueType(b)));
+    return R_ERROR;
+  }
+
+  Value c = wrapUint(unwrapUint(a) / unwrapUint(b));
   pushOperand(frame, c);
   return R_SUCCESS;
 }
@@ -4476,6 +4506,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"+", 2, false, addEval);
   defineCFn(vm, L"-", 2, false, subEval);
   defineCFn(vm, L"*", 2, false, multBuiltin);
+  defineCFn(vm, L"/", 2, false, divBuiltin);
   defineCFn(vm, L"mod", 2, false, modBuiltin);
   defineCFn(vm, L"eq", 2, false, cmpEval);
   defineCFn(vm, L"join", 1, false, strJoinBuiltin);
@@ -4494,6 +4525,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"uint-to-string", 1, false, uintToStringBuiltin);
   defineCFn(vm, L"throw", 1, false, throwBuiltin);
   defineCFn(vm, L"throw-value", 2, false, throwValueBuiltin);
+  defineCFn(vm, L"print", 1, false, printBuiltin);
   defineCFn(vm, L"open-file", 1, false, openFileBuiltin);
   defineCFn(vm, L"read-port", 1, false, readPortBuiltin);
   defineCFn(vm, L"read-char", 1, false, readCharBuiltin);
