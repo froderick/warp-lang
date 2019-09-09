@@ -174,6 +174,52 @@
 (defmacro do (& forms)
   `(let* '() ~@forms))
 
+(defmacro if-not (pred & branches)
+
+  (let (num-branches (count branches))
+    (if (or (< num-branches 1) (> num-branches 2))
+      (throw-value "if-not can only have one or two branches" branches)))
+
+  `(if (not ~pred)
+     ~(first branches)
+     ~(second branches)))
+
+(defmacro when (pred & forms)
+  `(if ~pred
+     (do ~@forms)
+     nil))
+
+(defmacro when-not (pred & forms)
+  `(if (not ~pred)
+     (do ~@forms)
+     nil))
+
+(defmacro if-let (spec & branches)
+
+  (if (not (eq (count spec) 2))
+    (throw-value "if-let can only have a single alias and test" spec))
+
+  (let (num-branches (count branches))
+    (if (or (< num-branches 1) (> num-branches 2))
+      (throw-value "if-let can only have one or two branches" branches)))
+
+  (let (alias (first spec)
+        test-expr (second spec)
+        if-expr (first branches)
+        else-expr (second branches))
+    `(let* (~alias ~test-expr)
+       (if ~alias ~if-expr ~else-expr))))
+
+(defmacro when-let (spec & forms)
+
+  (if (not (eq (count spec) 2))
+    (throw-value "when-let can only have a single alias and test" spec))
+
+  (let (alias (first spec)
+        test-expr (second spec))
+    `(let* (~alias ~test-expr)
+       (when ~alias ~@forms))))
+
 (defn last (x)
   (let* (remainder (rest x))
     (if (nil? remainder)
@@ -617,13 +663,12 @@
   (let (hash (hash-code key)
         idx (find-map-entry-index m key hash)
         entry (get (map-entries m) idx))
-    (if (nil? entry)
+    (if-not entry
       (do
         (set (map-entries m) idx (make-map-entry key hash value))
         (set-map-size! m (-> m map-size inc))
-        (let (new-size (calc-new-map-size m)) ;; TODO: when-let
-          (if new-size
-            (resize-map m new-size)))) ;; TODO: when
+        (when-let (new-size (calc-new-map-size m))
+          (resize-map m new-size)))
       (do
         (set-map-entry-key! entry key)
         (set-map-entry-hash! entry hash)
@@ -633,13 +678,11 @@
   (let (hash (hash-code key)
         idx (find-map-entry-index m key hash)
         entry (get (map-entries m) idx))
-    (if (not (nil? entry)) ;; TODO: when
-      (do
-        (set (map-entries m) idx nil)
-        (set-map-size! m (-> m map-size dec))
-        (let (new-size (calc-new-map-size m)) ;; TODO: when-let
-          (if new-size
-            (resize-map m new-size))))))) ;; TODO: when
+    (when entry
+      (set (map-entries m) idx nil)
+      (set-map-size! m (-> m map-size dec))
+      (when-let (new-size (calc-new-map-size m))
+        (resize-map m new-size)))))
 
 (defn range (n)
   (let loop (i 0
@@ -648,17 +691,9 @@
       (reverse done)
       (loop (inc i) (cons i done)))))
 
-;; (def x (create-map))
-;;  (dovec (n (list->vector (range 20)))
-;;    (put-map-entry x (-> (str "k" n) keyword) :value))
-
-
-
-
-
-
-
-
+(def x (create-map))
+(dovec (n (list->vector (range 20)))
+  (put-map-entry x (-> (str "k" n) keyword) :value))
 
 
 ; (def x (create-map))
