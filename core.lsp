@@ -367,7 +367,8 @@
       (eq type 'list) (pr-list v)
       (eq type 'array) (pr-array v)
       (eq type 'map) "<map>"
-      (eq type 'record) (pr-record v)
+      (eq type 'record) (let (w (record-writer v))
+                          (w v))
 
       ;; un-printables
       (eq type 'closure) "<closure>"
@@ -442,6 +443,154 @@
       (reverse done)
       (loop (inc i) (cons (get v i) done)))))
 
+(defmacro dovec (& args)
+
+  (if (not (> (count args) 1))
+    (throw-value "doseq requires at least two args" args))
+
+  (let (spec (first args)
+        forms (rest args))
+
+    (if (not (eq (count spec) 2))
+      (throw-value "doseq requires at least one alias and sequence" args))
+
+    (if (not (symbol? (first spec)))
+      (throw-value "aliases must be symbols" (second spec)))
+
+    (let (loop-sym (gensym)
+          i-sym (gensym)
+          alias (first spec)
+          vec-expr (second spec)
+          vec-sym (gensym))
+
+      `(let (~vec-sym ~vec-expr)
+         (let ~loop-sym (~i-sym 0)
+           (if (eq ~i-sym (count ~vec-sym))
+             nil
+             (let (~alias (get ~vec-sym ~i-sym))
+               ~@forms
+               (~loop-sym (inc ~i-sym)))))))))
+
+(defmacro dolist (& args)
+
+  (if (not (> (count args) 1))
+    (throw-value "dolist requires at least two args" args))
+
+  (let (spec (first args)
+        forms (rest args))
+
+    (if (not (eq (count spec) 2))
+      (throw-value "dolist requires at least one alias and sequence" args))
+
+    (if (not (symbol? (first spec)))
+      (throw-value "aliases must be symbols" (second spec)))
+
+    (let (loop-sym (gensym)
+          remaining-sym (gensym)
+          alias (first spec)
+          list-expr (second spec))
+
+      `(let ~loop-sym (~remaining-sym ~list-expr)
+         (if (eq nil ~remaining-sym)
+           nil
+           (let (~alias (first ~remaining-sym))
+             ~@forms
+             (~loop-sym (rest ~remaining-sym))))))))
+
+; (dolist (n (list 1 2 3 4))
+;   (print (str n)))
+
+
+(defn record-name (r)
+  (-> r record-type (get 0)))
+
+(defn record-fields (r)
+  (-> r record-type (get 1)))
+
+(defn record-kw-accessor (r)
+  (-> r record-type (get 2)))
+
+(defn record-writer (r)
+  (-> r record-type (get 3)))
+
+(defn record-kw-accessor-default (obj k)
+  (let (fields (record-fields obj))
+    (let loop (i 0)
+      (cond
+        (eq i (count fields)) nil
+        (eq k (get fields i)) (get obj i)
+        :else (loop (inc i))))))
+
+(defn odd? (n)
+  (not (eq (mod n 2) 0)))
+
+(defn even? (n)
+  (eq (mod n 2) 0))
+
+(defn vector? (n)
+  (eq (get-type n) 'array))
+
+(defn fn? (n)
+  (eq (get-type n) 'fn))
+
+(defn keyword? (n)
+  (eq (get-type n) 'keyword))
+
+(defn record? (n)
+  (eq (get-type n) 'record))
+
+;; the fields that make up a record-type:
+;; --------------------------------------
+;; 0 name        - the symbol that describes the record-type, by which it may be memoized
+;; 1 vec-fields  - a vector of field name symbols in index-order
+;; 2 kw-accessor - a generated function that efficiently looks up a record field by keyword-name
+;; 3 writer      - a function that uses the vec-fields metadata to write records
+
+;; returns a vec that represents the record-type information associated with a record
+(defn make-record-type (name vec-fields params)
+
+  (when-not (symbol? name)
+    (throw-value "records must be named by symbols" name))
+
+  (when-not (vector? vec-fields)
+    (throw-value "record fields must be stored in a vector" name))
+
+  (dovec (f vec-fields)
+    (when-not (keyword? f)
+      (throw-value "record field names must be named by keywords" f)))
+
+  (when params
+    (when-not (even? (count params))
+      (throw-value "defrecord takes an even number of parameters" (count params))))
+
+  (let (base [name
+              vec-fields
+              record-kw-accessor-default
+              pr-record])
+
+    (dolist (n (partition params))
+      (let (pname (first n)
+            pval (second n)
+            pindex (cond
+                     (eq pname :kw-accessor)
+                     (if (fn? pval) 2
+                       (throw-value "kw-accessor must be a function" pval))
+
+                     (eq pname :writer) 3
+                     (if (fn? pval) 3
+                       (throw-value "kw-accessor must be a function" pval))
+
+                     :else
+                       (throw-value "no such record-type parameter" pname)))
+        (set base pindex pval)))
+
+    base))
+
+(defn identity (i) i)
+
+; (make-record-type 'n '[a b c] nil)
+; (make-record-type 'n '[a b c] (list :kw-accessor identity :writer identity))
+
 (defn make-record-kw-accessor (name fields)
   (let (num-fields (count fields)
         kw-sym (gensym))
@@ -470,21 +619,14 @@
     (let (vec-fields (-> (map keyword rfields) list->vector))
 
       `(defn ~(symbol (str "make-" (name rname))) ~rfields
-         (let (r (record [(quote ~rname)
-                          (quote ~vec-fields)
-                          ~(make-record-kw-accessor rname vec-fields)]
-                         ~(count rfields)))
+         (let (rtype (make-record-type
+                       (quote ~rname)
+                       (quote ~vec-fields)
+                       (list :kw-accessor ~(make-record-kw-accessor rname vec-fields)))
+               r (record rtype ~(count rfields)))
            ~@init
            r)))))
 
-(defn record-name (r)
-  (-> r record-type (get 0)))
-
-(defn record-fields (r)
-  (-> r record-type (get 1)))
-
-(defn record-kw-accessor (r)
-  (-> r record-type (get 2)))
 
 (defn make-record-pred (rname)
   `(defn ~(symbol (str (name rname) "?")) (obj)
@@ -520,16 +662,31 @@
 
 (defmacro defrecord (& forms)
   (let (rname (first forms)
-        rfields (second forms))
+        rfields (second forms)
+        params (drop 2 forms))
+
+    (when params
+      (when-not (even? (count params))
+        (throw-value "defrecord takes an even number of parameters" (count params))))
+
+    (let loop (params (partition params))
+
+    ;; TODO: parse out parameters for use in constructor
+    ;; interesting, I can't pass handler functions literally through a macro, how does scheme do it?
+    ;; pass a symbol that can be resolved to the function later
 
     `(do
        ~(make-record-constructor rname rfields)
        ~(make-record-pred rname)
        ~@(make-record-accessors rname rfields)
        ~@(make-record-mutators rname rfields)
-       )))
+       ))))
 
 (defn pr-record (r)
+
+  (when-not (record? r)
+    (throw-value "not a record" r))
+
   (let (fields (record-fields r)
         num-fields (count fields))
     (let loop (i 0
@@ -558,33 +715,7 @@
       (eq type 'string) (equals-str? a b)
       :else (eq a b))))
 
-(defmacro dovec (& args)
 
-  (if (not (> (count args) 1))
-    (throw-value "doseq requires at least two args" args))
-
-  (let (spec (first args)
-        forms (rest args))
-
-    (if (not (eq (count spec) 2))
-      (throw-value "doseq requires at least one alias and sequence" args))
-
-    (if (not (symbol? (first spec)))
-      (throw-value "aliases must be symbols" (second spec)))
-
-    (let (loop-sym (gensym)
-          i-sym (gensym)
-          alias (first spec)
-          vec-expr (second spec)
-          vec-sym (gensym))
-
-      `(let (~vec-sym ~vec-expr)
-         (let ~loop-sym (~i-sym 0)
-           (if (eq ~i-sym (count ~vec-sym))
-             nil
-             (let (~alias (get ~vec-sym ~i-sym))
-               ~@forms
-               (~loop-sym (inc ~i-sym)))))))))
 
 ;; (dovec (y [1 2 3])
 ;;        (println (str "A:" y))
@@ -694,6 +825,45 @@
 (def x (create-map))
 (dovec (n (list->vector (range 20)))
   (put-map-entry x (-> (str "k" n) keyword) :value))
+
+(defn map->list (m)
+
+  (when-not (map? m)
+    (throw-value "not a map" m))
+
+  (let (entries (map-entries m)
+        num-entries (count entries))
+
+    (let loop (i 0
+               collected '())
+      (if (eq i num-entries)
+        (reverse collected)
+        (loop
+          (inc i)
+          (if-let (e (get entries i))
+            (cons (list (map-entry-key e) (map-entry-value e)) collected)
+            collected))))))
+
+(defn map-writer (m)
+
+  (when-not (map? m)
+    (throw-value "not a map" m))
+
+  (if (empty? m)
+    "{}"
+    (let loop (printed '()
+               remaining (map->list m))
+      (if (empty? remaining)
+        (join (cons "{" (reverse (cons "}" (interpose " " printed))))) ;; TODO: finish thread-last
+        (loop
+          (let (entry (first remaining)
+                k (first entry)
+                v (second entry))
+            (cons (pr-str v)
+                  (cons (pr-str k)
+                        printed)))
+          (rest remaining))))))
+
 
 
 ; (def x (create-map))
