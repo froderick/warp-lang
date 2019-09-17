@@ -472,7 +472,6 @@ void compileFnConstant(Form *form, Output output) {
   constantAppend(output, c);
 }
 
-
 void compileFn(Form *form, Output output) {
   compileFnConstant(form, output);
   uint16_t fnConstIndex = output.constants->numUsed - 1;

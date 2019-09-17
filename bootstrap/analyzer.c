@@ -1041,7 +1041,7 @@ RetVal tryListAnalyze(AnalyzerContext *ctx, Form *expr, Form *form, Error *error
   RetVal ret;
 
   if (expr->type != F_LIST) {
-    explode("not a map");
+    explode("not a list");
   }
 
   form->type = F_LIST;
@@ -1067,7 +1067,7 @@ RetVal tryVecAnalyze(AnalyzerContext *ctx, Form *expr, Form *form, Error *error)
   RetVal ret;
 
   if (expr->type != F_VEC) {
-    explode("not a map");
+    explode("not a vec");
   }
 
   form->type = F_VEC;

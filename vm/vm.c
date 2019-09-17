@@ -3481,6 +3481,10 @@ int countBuiltin(VM *vm, Frame_t frame) {
 
   Value result = W_NIL_VALUE;
   switch (valueType(value)) {
+    case VT_NIL: {
+      result = wrapUint(0);
+      break;
+    }
     case VT_ARRAY: {
       Array *k = deref(vm, value);
       uint64_t size = objectHeaderSize(k->header);

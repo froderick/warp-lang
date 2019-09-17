@@ -855,8 +855,13 @@
             (cons (list (map-entry-key e) (map-entry-value e)) collected)
             collected))))))
 
-
-
+;; (defn hash-map (& args)
+;;   (when-not (even? (count args))
+;;     (throw-value "hash-map takes an even number of parameters" (count args)))
+;;   (let (m (create-map))
+;;     (dolist (e (partition args))
+;;       (put-map-entry m (first e) (second e)))
+;;     m))
 
 ; (def x (create-map))
 ; (put-map-entry x :a 'A)
