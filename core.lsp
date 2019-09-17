@@ -547,7 +547,7 @@
 ;; 3 writer      - a function that uses the vec-fields metadata to write records
 
 ;; returns a vec that represents the record-type information associated with a record
-(defn make-record-type (name vec-fields params)
+(defn make-record-type (name vec-fields kw-accessor writer)
 
   (when-not (symbol? name)
     (throw-value "records must be named by symbols" name))
@@ -559,32 +559,19 @@
     (when-not (keyword? f)
       (throw-value "record field names must be named by keywords" f)))
 
-  (when params
-    (when-not (even? (count params))
-      (throw-value "defrecord takes an even number of parameters" (count params))))
+  (let (kw-accessor (or kw-accessor record-kw-accessor-default)
+        writer (or writer pr-record))
 
-  (let (base [name
-              vec-fields
-              record-kw-accessor-default
-              pr-record])
+    (when-not (fn? kw-accessor)
+      (throw-value "kw-accessor must be a function" kw-accessor))
 
-    (dolist (n (partition params))
-      (let (pname (first n)
-            pval (second n)
-            pindex (cond
-                     (eq pname :kw-accessor)
-                     (if (fn? pval) 2
-                       (throw-value "kw-accessor must be a function" pval))
+    (when-not (fn? writer)
+      (throw-value "writer must be a function" writer))
 
-                     (eq pname :writer) 3
-                     (if (fn? pval) 3
-                       (throw-value "kw-accessor must be a function" pval))
-
-                     :else
-                       (throw-value "no such record-type parameter" pname)))
-        (set base pindex pval)))
-
-    base))
+    [name
+     vec-fields
+     kw-accessor
+     writer]))
 
 (defn identity (i) i)
 
@@ -605,7 +592,21 @@
           (inc i)
           (concat cond-args `((eq ~kw-sym ~(get fields i)) (get obj ~i))))))))
 
-(defn make-record-constructor (rname rfields)
+(defn plist-get (plist k)
+  (let loop (remaining (partition plist))
+    (if
+      (empty? remaining) nil
+      (let (e (first remaining)
+            this-k (first e))
+        (if (eq k this-k)
+          (second e)
+          (loop (rest remaining)))))))
+
+(defn make-record-constructor (rname rfields params)
+
+  (when params
+    (when-not (even? (count params))
+      (throw-value "defrecord takes an even number of optional parameters" (count params))))
 
   (let (init (let loop (i 0
                         cmds '()
@@ -622,11 +623,11 @@
          (let (rtype (make-record-type
                        (quote ~rname)
                        (quote ~vec-fields)
-                       (list :kw-accessor ~(make-record-kw-accessor rname vec-fields)))
+                       ~(make-record-kw-accessor rname vec-fields)
+                       ~(plist-get params :writer))
                r (record rtype ~(count rfields)))
            ~@init
            r)))))
-
 
 (defn make-record-pred (rname)
   `(defn ~(symbol (str (name rname) "?")) (obj)
@@ -665,22 +666,12 @@
         rfields (second forms)
         params (drop 2 forms))
 
-    (when params
-      (when-not (even? (count params))
-        (throw-value "defrecord takes an even number of parameters" (count params))))
-
-    (let loop (params (partition params))
-
-    ;; TODO: parse out parameters for use in constructor
-    ;; interesting, I can't pass handler functions literally through a macro, how does scheme do it?
-    ;; pass a symbol that can be resolved to the function later
-
     `(do
-       ~(make-record-constructor rname rfields)
+       ~(make-record-constructor rname rfields params)
        ~(make-record-pred rname)
        ~@(make-record-accessors rname rfields)
        ~@(make-record-mutators rname rfields)
-       ))))
+       )))
 
 (defn pr-record (r)
 
@@ -726,7 +717,7 @@
 ; (pr-str x)
 ; ((record-kw-accessor x) x :one)
 
-(defrecord map (size entries))
+(defrecord map (size entries) :writer map-writer)
 (defrecord map-entry (key hash value))
 
 (defn create-map (& args)
@@ -815,6 +806,26 @@
       (when-let (new-size (calc-new-map-size m))
         (resize-map m new-size)))))
 
+(defn map-writer (m)
+
+  (when-not (map? m)
+    (throw-value "not a map" m))
+
+  (if (empty? m)
+    "{}"
+    (let loop (printed '()
+               remaining (map->list m))
+      (if (empty? remaining)
+        (join (cons "{" (reverse (cons "}" (interpose " " printed))))) ;; TODO: finish thread-last
+        (loop
+          (let (entry (first remaining)
+                k (first entry)
+                v (second entry))
+            (cons (pr-str v)
+                  (cons (pr-str k)
+                        printed)))
+          (rest remaining))))))
+
 (defn range (n)
   (let loop (i 0
              done ())
@@ -844,25 +855,6 @@
             (cons (list (map-entry-key e) (map-entry-value e)) collected)
             collected))))))
 
-(defn map-writer (m)
-
-  (when-not (map? m)
-    (throw-value "not a map" m))
-
-  (if (empty? m)
-    "{}"
-    (let loop (printed '()
-               remaining (map->list m))
-      (if (empty? remaining)
-        (join (cons "{" (reverse (cons "}" (interpose " " printed))))) ;; TODO: finish thread-last
-        (loop
-          (let (entry (first remaining)
-                k (first entry)
-                v (second entry))
-            (cons (pr-str v)
-                  (cons (pr-str k)
-                        printed)))
-          (rest remaining))))))
 
 
 
