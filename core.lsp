@@ -2,6 +2,19 @@
 ;; pre-macro primitives
 ;;
 
+(def list (fn list (& args) args))
+
+(def vector (fn vector (& args)
+              (let* (v (make-vector (count args))
+                     loop (fn loop (i remaining)
+                            (if (empty? remaining)
+                              v
+                              (do
+                                (set v i (first remaining))
+                                (loop (inc i) (rest remaining))))))
+                (loop 0 args)
+                v)))
+
 (def nil? (fn nil? (x) (eq nil x)))
 (def zero? (fn zero? (n) (eq n 0)))
 (def second (fn second (seq) (first (rest seq))))
@@ -134,6 +147,9 @@
                         (eq (count old) 1) (throw "requires a list with an even number of items")
                         :else (_partition (drop 2 old) (cons (list (first old) (second old)) new)))))
     (_partition coll '())))
+
+(defn symbol? (n)
+  (eq (get-type n) 'symbol))
 
 (defmacro let (& forms)
   (if (symbol? (first forms))
