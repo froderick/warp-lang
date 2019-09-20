@@ -2,49 +2,11 @@
 ;; pre-macro primitives
 ;;
 
-(def nil? (fn nil? (x) (eq nil x)))
-(def zero? (fn zero? (n) (eq n 0)))
-(def second (fn second (seq) (first (rest seq))))
-(def inc (fn inc (n) (+ n 1)))
-(def dec (fn dec (n) (- n 1)))
-
-(def nth (fn nth (i seq)
-             (if (zero? i)
-                 (first seq)
-                 (nth (dec i) (rest seq)))))
-
-(def drop (fn drop (i seq)
-             (if (zero? i)
-                 seq
-               (drop (dec i) (rest seq)))))
-
-(def reverse (fn reverse (seq)
-                 (let* (_reverse (fn _reverse (old new)
-                                    (if (nil? old)
-                                        new
-                                      (let* (n (first old)
-                                              old (rest old))
-                                        (_reverse old (cons n new))))))
-                   (_reverse seq nil))))
-
-(def concat (fn concat (& seqs)
-              (let* (concat-two (fn concat-two (seq-a seq-b)
-                                 (if (nil? seq-a)
-                                   seq-b
-                                   (concat-two (rest seq-a) (cons (first seq-a) seq-b))))
-                    concat-n (fn concat-n (concated remaining)
-                               (if (nil? remaining)
-                                 concated
-                                 (let* (next (first remaining)
-                                       todo (rest remaining))
-                                   (concat-n (concat-two (reverse concated) next) todo)))))
-                (concat-n '() seqs))))
-
 (def gensym-state 0)
 
 (def gensym (fn gensym ()
               (let* (n gensym-state
-                    _ (def gensym-state (inc n)))
+                    _ (def gensym-state (+ n 1)))
                 (symbol (join (list "gensym-" (uint-to-string n)))))))
 
 ; TODO: add auto-gensym support with macro-syntax for generating bindings with it to avoid lexical capture
@@ -62,16 +24,23 @@
 (defmacro defn (name fnargs & forms)
   `(def ~name (fn ~name ~fnargs ~@forms)))
 
-(defn empty? (seq)
-  (nil? seq))
+(defn nil? (x) (eq nil x))
+(defn zero? (n) (eq n 0))
+(defn odd? (n) (not (eq (mod n 2) 0)))
+(defn even? (n) (eq (mod n 2) 0))
+(defn pair? (n) (eq (get-type n) 'list))
+(defn vector? (n) (eq (get-type n) 'array))
+(defn fn? (n) (eq (get-type n) 'fn))
+(defn keyword? (n) (eq (get-type n) 'keyword))
+(defn record? (n) (eq (get-type n) 'record))
 
 (defmacro and (& seq)
-  (if (empty? seq)
+  (if (nil? seq)
     true
     (let* (n (first seq)
           seq (rest seq)
           sym (gensym))
-      (if (empty? seq)
+      (if (nil? seq)
         `(let* (~sym ~n)
            (if ~sym true false))
         `(let* (~sym ~n)
@@ -80,33 +49,40 @@
              false))))))
 
 (defmacro or (& seq)
-  (if (empty? seq)
+  (if (nil? seq)
     nil
     (let* (n (first seq)
           seq (rest seq)
           sym (gensym))
-      (if (empty? seq)
+      (if (nil? seq)
         `(let* (~sym ~n) ~sym))
         `(let* (~sym ~n)
            (if ~sym
              ~sym
              (or ~@seq))))))
 
-;;(defmacro list (& seq)
-;;  (if (empty? seq)
-;;    nil
-;;    (let* (n (first seq)
-;;          seq (rest seq))
-;;      (if (empty? seq)
-;;        `(cons ~n nil)
-;;        `(cons ~n (list ~@seq))))))
-
-(defn not (a)
-  (if a false true))
+;; operating on lists ;;;;;;;;;;;;;;;;;;
 
 (defn list? (x)
   (let* (t (get-type x))
     (or (eq t 'nil) (eq t 'list))))
+
+(defn not (a) (if a false true))
+
+(defn second (seq) (first (rest seq)))
+
+(defn nth (i seq)
+  (if (zero? i)
+      (first seq)
+      (nth (- i 1) (rest seq))))
+
+(defn drop (i seq)
+  (if (zero? i)
+      seq
+    (drop (- i 1) (rest seq))))
+
+(defn empty? (seq)
+  (nil? seq))
 
 ;; todo: throw exceptions on invalid input
 (defmacro cond (& seq)
@@ -118,6 +94,15 @@
       `(if ~test
          ~expr
          (cond ~@seq)))))
+
+(defn reverse (seq)
+  (let* (_reverse (fn _reverse (old new)
+                     (if (nil? old)
+                         new
+                       (let* (n (first old)
+                               old (rest old))
+                         (_reverse old (cons n new))))))
+    (_reverse seq nil)))
 
 (defn map (f coll)
   (let* (_map (fn _map (old new)
@@ -146,6 +131,31 @@
       `(let* (~fn-name (fn ~fn-name ~arg-names ~@(rest forms)))
          (~fn-name ~@arg-values)))
       `(let* ~@forms)))
+
+(defn concat (& seqs)
+  (let* (concat-two (fn concat-two (seq-a seq-b)
+                     (if (nil? seq-a)
+                       seq-b
+                       (concat-two (rest seq-a) (cons (first seq-a) seq-b))))
+         concat-n (fn concat-n (concated remaining)
+                    (if (nil? remaining)
+                      concated
+                      (let* (next (first remaining)
+                            todo (rest remaining))
+                        (concat-n (concat-two (reverse concated) next) todo)))))
+    (concat-n '() seqs)))
+
+;;(defmacro list (& seq)
+;;  (if (empty? seq)
+;;    nil
+;;    (let* (n (first seq)
+;;          seq (rest seq))
+;;      (if (empty? seq)
+;;        `(cons ~n nil)
+;;        `(cons ~n (list ~@seq))))))
+
+(defn inc (n) (+ n 1))
+(defn dec (n) (- n 1))
 
 (defmacro -> (x & exprs)
   (let loop (x x
@@ -256,56 +266,6 @@
           catch-forms (drop 2 catch))
       `(with-handler (fn (~e-binding) ~@catch-forms)
          ~@(butlast forms)))))
-
-;;
-;; used for testing
-;;
-
-(defn fib (n)
-  (let* (_fib (fn _fib (prev1 prev2 n)
-                 (if (= n 0)
-                     prev2
-                   (_fib prev2 (+ prev1 prev2) (- n 1)))))
-    (_fib 0 1 n)))
-
-(defn fib2 (start)
-  (let loop (prev1 0
-             prev2 1
-             n start)
-    (if (= n 0)
-      prev2
-      (loop prev2 (+ prev1 prev2) (- n 1)))))
-
-(defn large (n)
-  (let* (_large (fn _large (n seq)
-                  (if (zero? n)
-                    seq
-                    (_large (dec n) (cons n seq)))))
-    (_large n nil)))
-
-(defn example ()
-  (and (+ 1 2) (+ 3 'x)))
-
-(defn split (coll)
-  (let loop (old coll
-             coll-a '()
-             coll-b '())
-    (cond
-      (empty? old) (list (reverse coll-a) (reverse coll-b))
-      (= (count old) 1) (throw "requires a list with an even number of items")
-      :else (loop
-              (drop 2 old)
-              (cons (first old) coll-a)
-              (cons (second old) coll-b)))))
-
-;; (defn count (seq)
-;;   (let* (_count (fn _count (i remaining)
-;;                  (if (empty? remaining)
-;;                    i
-;;                    (_count (inc i) (rest remaining)))))
-;;     (_count 0 seq)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn interpose (sep coll)
   (if (empty? coll)
@@ -520,24 +480,6 @@
         (eq i (count fields)) nil
         (eq k (get fields i)) (get obj i)
         :else (loop (inc i))))))
-
-(defn odd? (n)
-  (not (eq (mod n 2) 0)))
-
-(defn even? (n)
-  (eq (mod n 2) 0))
-
-(defn vector? (n)
-  (eq (get-type n) 'array))
-
-(defn fn? (n)
-  (eq (get-type n) 'fn))
-
-(defn keyword? (n)
-  (eq (get-type n) 'keyword))
-
-(defn record? (n)
-  (eq (get-type n) 'record))
 
 ;; the fields that make up a record-type:
 ;; --------------------------------------
@@ -873,3 +815,52 @@
 
 
 
+;;
+;; used for testing
+;;
+
+(defn fib (n)
+  (let* (_fib (fn _fib (prev1 prev2 n)
+                 (if (= n 0)
+                     prev2
+                   (_fib prev2 (+ prev1 prev2) (- n 1)))))
+    (_fib 0 1 n)))
+
+(defn fib2 (start)
+  (let loop (prev1 0
+             prev2 1
+             n start)
+    (if (= n 0)
+      prev2
+      (loop prev2 (+ prev1 prev2) (- n 1)))))
+
+(defn large (n)
+  (let* (_large (fn _large (n seq)
+                  (if (zero? n)
+                    seq
+                    (_large (dec n) (cons n seq)))))
+    (_large n nil)))
+
+(defn example ()
+  (and (+ 1 2) (+ 3 'x)))
+
+(defn split (coll)
+  (let loop (old coll
+             coll-a '()
+             coll-b '())
+    (cond
+      (empty? old) (list (reverse coll-a) (reverse coll-b))
+      (= (count old) 1) (throw "requires a list with an even number of items")
+      :else (loop
+              (drop 2 old)
+              (cons (first old) coll-a)
+              (cons (second old) coll-b)))))
+
+;; (defn count (seq)
+;;   (let* (_count (fn _count (i remaining)
+;;                  (if (empty? remaining)
+;;                    i
+;;                    (_count (inc i) (rest remaining)))))
+;;     (_count 0 seq)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

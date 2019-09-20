@@ -4490,8 +4490,102 @@ int metaBuiltin(VM *vm, Frame_t frame) {
       result = cons->metadata;
       break;
     }
-    default: raise(vm, "only lists can have metadata: %s", getValueTypeName(vm, type));
+    default:
+      raise(vm, "only lists can have metadata: %s", getValueTypeName(vm, type));
       return R_ERROR;
+  }
+
+  pushOperand(frame, result);
+  return R_SUCCESS;
+}
+
+int concatBuiltin(VM *vm, Frame_t frame) {
+
+  Value params = popOperand(frame);
+
+  Value result;
+  switch (valueType(params)) {
+
+    case VT_NIL:
+      result = W_NIL_VALUE;
+      break;
+
+    case VT_LIST: {
+
+      Value protectedParams = params;
+      pushFrameRoot(vm, &protectedParams);
+
+      Value protectedParam = W_NIL_VALUE;
+      pushFrameRoot(vm, &protectedParam);
+
+      Value protectedIntermediate = W_NIL_VALUE;
+      pushFrameRoot(vm, &protectedIntermediate);
+
+      Value protectedFinal = W_NIL_VALUE;
+      pushFrameRoot(vm, &protectedFinal);
+
+      int err = R_SUCCESS;
+
+      // concat everything together
+      while (protectedParams != W_NIL_VALUE) {
+
+        {
+          Cons *paramCons = deref(vm, protectedParams);
+
+          ValueType t = valueType(paramCons->value);
+          if (t != VT_NIL && t != VT_LIST) {
+            raise(vm, "all arguments to concat must be valid lists: %s",
+                  getValueTypeName(vm, valueType(protectedParam)));
+            err = R_ERROR;
+            goto cleanup;
+          }
+
+          protectedParam = paramCons->value;
+          protectedParams = paramCons->next;
+        }
+
+        while (protectedParam != W_NIL_VALUE) {
+
+          Cons *push = makeCons(vm);
+          Cons *pop = deref(vm, protectedParam);
+
+          // push onto intermediate
+          push->value = pop->value;
+          push->next = protectedIntermediate;
+          protectedIntermediate = (Value) push;
+
+          // pop off param
+          protectedParam = pop->next;
+        }
+      }
+
+      // reverse it into the correct order
+      while (protectedIntermediate != W_NIL_VALUE) {
+
+        Cons *push = makeCons(vm);
+        Cons *pop = deref(vm, protectedIntermediate);
+
+        push->value = pop->value;
+        push->next = protectedFinal;
+        protectedFinal = (Value)push;
+
+        protectedIntermediate = pop->next;
+      }
+
+      cleanup:
+      popFrameRoot(vm); // protectedFinal;
+      popFrameRoot(vm); // protectedIntermediate
+      popFrameRoot(vm); // protectedParam
+      popFrameRoot(vm); // protectedParams
+      if (err != R_SUCCESS) {
+        return R_ERROR;
+      }
+
+      result = (Value)protectedFinal;
+      break;
+    }
+    default:
+      explode("var-args, should have been a list");
   }
 
   pushOperand(frame, result);
@@ -4546,6 +4640,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"name", 1, false, nameBuiltin); // TODO: make type-specific instructions, move to std lib
   defineCFn(vm, L"meta", 1, false, metaBuiltin); // TODO: make the meta property on a pair optional, put in std lib?
   defineCFn(vm, L"with-meta", 2, false, withMetaBuiltin);
+  defineCFn(vm, L"concat", 1, true, concatBuiltin);
 }
 
 void vmConfigInitContents(VMConfig *config) {
