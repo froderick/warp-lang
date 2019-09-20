@@ -4501,30 +4501,30 @@ int metaBuiltin(VM *vm, Frame_t frame) {
 void initCFns(VM *vm) {
 
   defineCFn(vm, L"cons", 2, false, consEval);
-  defineCFn(vm, L"first", 1, false, firstEval);
-  defineCFn(vm, L"rest", 1, false, restEval);
-  defineCFn(vm, L"set-macro", 1, false, setMacroEval);
-  defineCFn(vm, L"get-macro", 1, false, getMacroEval);
+  defineCFn(vm, L"first", 1, false, firstEval);        // TODO: rename to car instruction
+  defineCFn(vm, L"rest", 1, false, restEval);          // TODO: rename to cdr instruction
+  defineCFn(vm, L"set-macro", 1, false, setMacroEval); // TODO: adopt generic metadata
+  defineCFn(vm, L"get-macro", 1, false, getMacroEval); // TODO: adopt generic metadata
   defineCFn(vm, L"gc", 0, false, gcEval);
-  defineCFn(vm, L"get-type", 1, false, getTypeEval);
-  defineCFn(vm, L"+", 2, false, addEval);
-  defineCFn(vm, L"-", 2, false, subEval);
-  defineCFn(vm, L"*", 2, false, multBuiltin);
-  defineCFn(vm, L"/", 2, false, divBuiltin);
-  defineCFn(vm, L"mod", 2, false, modBuiltin);
-  defineCFn(vm, L"eq", 2, false, cmpEval);
-  defineCFn(vm, L"join", 1, false, strJoinBuiltin);
-  defineCFn(vm, L"symbol", 1, false, symbolBuiltin);
-  defineCFn(vm, L"keyword", 1, false, keywordBuiltin);
-  defineCFn(vm, L"array", 1, false, arrayBuiltin);
-  defineCFn(vm, L"count", 1, false, countBuiltin);
-  defineCFn(vm, L"get", 2, false, getBuiltin);
-  defineCFn(vm, L"set", 3, false, setBuiltin);
-  defineCFn(vm, L"hash-map", 1, true, hashMapBuiltin);
-  defineCFn(vm, L"list", 1, true, listBuiltin);
-  defineCFn(vm, L"make-vector", 1, false, makeVectorBuiltin);
-  defineCFn(vm, L"vector", 1, true, vectorBuiltin);
-  defineCFn(vm, L"record", 2, false, recordBuiltin);
+  defineCFn(vm, L"get-type", 1, false, getTypeEval);   // TODO: make instruction
+  defineCFn(vm, L"+", 2, false, addEval);              // TODO: make instruction
+  defineCFn(vm, L"-", 2, false, subEval);              // TODO: make instruction
+  defineCFn(vm, L"*", 2, false, multBuiltin);          // TODO: make instruction
+  defineCFn(vm, L"/", 2, false, divBuiltin);           // TODO: make instruction
+  defineCFn(vm, L"mod", 2, false, modBuiltin);         // TODO: make instruction
+  defineCFn(vm, L"eq", 2, false, cmpEval);             // TODO: make instruction
+  defineCFn(vm, L"join", 1, false, strJoinBuiltin);    // TODO: move to std lib
+  defineCFn(vm, L"symbol", 1, false, symbolBuiltin);   // TODO: make instruction
+  defineCFn(vm, L"keyword", 1, false, keywordBuiltin); // TODO: make instruction
+  defineCFn(vm, L"array", 1, false, arrayBuiltin);     // TODO: move to std lib
+  defineCFn(vm, L"count", 1, false, countBuiltin);     // TODO: make type-specific instructions, move to std lib
+  defineCFn(vm, L"get", 2, false, getBuiltin);         // TODO: make type-specific instructions, move to std lib
+  defineCFn(vm, L"set", 3, false, setBuiltin);         // TODO: make type-specific instructions, move to std lib
+  defineCFn(vm, L"hash-map", 1, true, hashMapBuiltin); // TODO: move to std lib
+  defineCFn(vm, L"list", 1, true, listBuiltin);        // TODO: move to std lib
+  defineCFn(vm, L"make-vector", 1, false, makeVectorBuiltin); // TODO: make instruction
+  defineCFn(vm, L"vector", 1, true, vectorBuiltin);    // TODO: move to std lib
+  defineCFn(vm, L"record", 2, false, recordBuiltin);   // TODO: make instruction
   defineCFn(vm, L"record-type", 1, false, recordTypeBuiltin);
   defineCFn(vm, L"uint-to-string", 1, false, uintToStringBuiltin);
   defineCFn(vm, L"throw", 1, false, throwBuiltin);
@@ -4536,15 +4536,15 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"unread-char", 2, false, unreadCharBuiltin);
   defineCFn(vm, L"close-port", 1, false, closePortBuiltin);
   defineCFn(vm, L"byte-array", 1, false, byteArrayBuiltin);
-  defineCFn(vm, L"<", 2, false, ltEval);
-  defineCFn(vm, L"<=", 2, false, lteEval);
-  defineCFn(vm, L">", 2, false, gtEval);
-  defineCFn(vm, L">=", 2, false, gteEval);
-  defineCFn(vm, L"symbol?", 1, false, symbolEval);
+  defineCFn(vm, L"<", 2, false, ltEval); // TODO: make instruction
+  defineCFn(vm, L"<=", 2, false, lteEval); // TODO: make instruction
+  defineCFn(vm, L">", 2, false, gtEval);  // TODO: make instruction
+  defineCFn(vm, L">=", 2, false, gteEval); // TODO: make instruction
+  defineCFn(vm, L"symbol?", 1, false, symbolEval); // TODO: move to std lib
   defineCFn(vm, L"char-to-uint", 1, false, charToUintBuiltin);
   defineCFn(vm, L"char-to-string", 1, false, charToStringBuiltin);
-  defineCFn(vm, L"name", 1, false, nameBuiltin);
-  defineCFn(vm, L"meta", 1, false, metaBuiltin);
+  defineCFn(vm, L"name", 1, false, nameBuiltin); // TODO: make type-specific instructions, move to std lib
+  defineCFn(vm, L"meta", 1, false, metaBuiltin); // TODO: make the meta property on a pair optional, put in std lib?
   defineCFn(vm, L"with-meta", 2, false, withMetaBuiltin);
 }
 
