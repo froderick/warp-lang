@@ -92,7 +92,7 @@
 
 (def join (fn join (args)
   (let* (total-len (reduce + 0 (map count args))
-         v (make-vector total-len)
+         v (char-array total-len)
          loop (fn loop (i remaining)
                 (if (empty? remaining)
                   nil

@@ -4454,7 +4454,7 @@ int makeStringBuiltin(VM *vm, Frame_t frame) {
 
   Value protectedArray = popOperand(frame);
   ValueType type = valueType(protectedArray);
-  if (type != VT_ARRAY) {
+  if (type != VT_CHAR_ARRAY) {
     raise(vm, "an array of chars is required: %s", getValueTypeName(vm, type));
     return R_ERROR;
   }
@@ -4463,27 +4463,14 @@ int makeStringBuiltin(VM *vm, Frame_t frame) {
   {
     Array *a = (Array *) protectedArray;
     len = objectHeaderSize(a->header);
-
-    Value this;
-    ValueType thisType;
-    for (uint64_t i=0; i<len; i++) {
-      this = arrayElements(a)[i];
-      thisType = valueType(this);
-      if (thisType != VT_CHAR) {
-        raise(vm, "an array of chars is required: %s", getValueTypeName(vm, type));
-        return R_ERROR;
-      }
-    }
   }
 
   pushFrameRoot(vm, &protectedArray);
 
   String *s = (String*)makeString(vm, len);
-  Array *a = (Array*)protectedArray;
+  CharArray *a = deref(vm, protectedArray);
 
-  for (uint64_t i=0; i<len; i++) {
-    stringValue(s)[i] = unwrapChar(arrayElements(a)[i]);
-  }
+  wcpncpy(stringValue(s), charArrayElements(a), len);
 
   popFrameRoot(vm); // protectedArray
 
@@ -4527,6 +4514,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"unread-char", 2, false, unreadCharBuiltin);
   defineCFn(vm, L"close-port", 1, false, closePortBuiltin);
   defineCFn(vm, L"byte-array", 1, false, byteArrayBuiltin);
+  defineCFn(vm, L"char-array", 1, false, charArrayBuiltin);
   defineCFn(vm, L"<", 2, false, ltEval); // TODO: make instruction
   defineCFn(vm, L"<=", 2, false, lteEval); // TODO: make instruction
   defineCFn(vm, L">", 2, false, gtEval);  // TODO: make instruction
