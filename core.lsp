@@ -53,6 +53,58 @@
                                    (concat-n (concat-two (reverse concated) next) todo)))))
                 (concat-n '() seqs))))
 
+(def map (fn map (f coll)
+  (let* (_map (fn _map (old new)
+                 (if (empty? old)
+                     new
+                     (_map (rest old) (cons (f (first old)) new)))))
+    (reverse (_map coll (list))))))
+
+(def reduce (fn reduce (f state coll)
+  (let* (loop (fn loop (state remaining)
+                (if (empty? remaining)
+                  state
+                  (loop (f state (first remaining)) (rest remaining)))))
+    (loop state coll))))
+
+; (reduce + 0 (list 1 2 3))
+; (reduce + 0 (map count (list "one" "two" "three")))
+
+(def filter (fn filter (f coll)
+  (let* (loop (fn loop (collected remaining)
+                (if (empty? remaining)
+                  (reverse collected)
+                  (let* (n (first remaining))
+                    (loop
+                      (if (f n) (cons n collected) collected)
+                      (rest remaining))))))
+    (loop () coll))))
+
+; (filter symbol? (list 1 :a 'b "c"))
+
+(def copy-string-to-vec (fn copy-string-to-vec (s from-index v to-index)
+  (if (< from-index (count s))
+    (let* ()
+      (set v to-index (get s from-index))
+      (copy-string-to-vec s (inc from-index) v (inc to-index))))))
+
+; (copy-string-to-vec "hi mom" 0 x 3)
+
+(def join (fn join (args)
+  (let* (total-len (reduce + 0 (map count args))
+         v (make-vector total-len)
+         loop (fn loop (i remaining)
+                (if (empty? remaining)
+                  nil
+                  (let* (s (first remaining)
+                         len (count s))
+                    (copy-string-to-vec s 0 v i)
+                    (loop (+ i len) (rest remaining))))))
+    (loop 0 args)
+    (make-string v))))
+
+; (join "a" "b" "c")
+
 (def gensym-state 0)
 
 (def gensym (fn gensym ()
@@ -131,14 +183,6 @@
       `(if ~test
          ~expr
          (cond ~@seq)))))
-
-(defn map (f coll)
-  (let* (_map (fn _map (old new)
-                 (if (empty? old)
-                     new
-                     (_map (rest old) (cons (f (first old)) new)))))
-
-    (reverse (_map coll (list)))))
 
 (defn partition (coll)
   (let* (_partition (fn _partition (old new)

@@ -3354,72 +3354,6 @@ bool isInt(Value value) {
   return valueType(value) == VT_UINT;
 }
 
-/*
- * joins a sequence of strings together into one big string
- *
- * pop the args list off the stack
- * iterate over the list and compute the total size of all the strings in the list
- * push the args list back on the stack so gc can find it
- * allocate a new string that is the total size
- * pop the args list back off the stack, deref and copy each one into the new list
- * push the new string onto the stack
- */
-int strJoinBuiltin(VM *vm, Frame_t frame) {
-
-  Value strings = popOperand(frame);
-  if (!isSeq(strings)) {
-    raise(vm, "expected a list type: %s", getValueTypeName(vm, valueType(strings)));
-    return R_ERROR;
-  }
-  pushFrameRoot(vm, &strings);
-
-  uint64_t totalLength = 0;
-
-  Value cursor = strings;
-  while (valueType(cursor) != VT_NIL) {
-
-    Cons *seq = deref(vm, cursor);
-
-    if (!isString(seq->value)) {
-      raise(vm, "expected a string type: %s", getValueTypeName(vm, valueType(seq->value)));
-      goto cleanup;
-    }
-
-    String *string = deref(vm, seq->value);
-    totalLength += string->length;
-
-    cursor = seq->next;
-  }
-
-  Value resultRef = makeString(vm, totalLength);
-  String *result = deref(vm, resultRef);
-
-  uint64_t totalSizeWritten = 0;
-
-  cursor = strings;
-  while (valueType(cursor) != VT_NIL) {
-    Cons *seq = deref(vm, cursor);
-
-    String *string = deref(vm, seq->value);
-
-    wchar_t *writePtr = (void*)result + result->valueOffset + totalSizeWritten;
-    size_t textSize = string->length * sizeof(wchar_t);
-    memcpy(writePtr, stringValue(string), textSize);
-    totalSizeWritten += textSize;
-
-    cursor = seq->next;
-  }
-
-  popFrameRoot(vm);
-  pushOperand(frame, resultRef);
-  return R_SUCCESS;
-
-  cleanup:
-    popFrameRoot(vm);
-    return R_ERROR;
-
-}
-
 int symbolBuiltin(VM *vm, Frame_t frame) {
   Value protectedName = popOperand(frame);
 
@@ -4434,6 +4368,48 @@ int metaBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
+int makeStringBuiltin(VM *vm, Frame_t frame) {
+
+  Value protectedArray = popOperand(frame);
+  ValueType type = valueType(protectedArray);
+  if (type != VT_ARRAY) {
+    raise(vm, "an array of chars is required: %s", getValueTypeName(vm, type));
+    return R_ERROR;
+  }
+
+  uint64_t len;
+  {
+    Array *a = (Array *) protectedArray;
+    len = objectHeaderSize(a->header);
+
+    Value this;
+    ValueType thisType;
+    for (uint64_t i=0; i<len; i++) {
+      this = arrayElements(a)[i];
+      thisType = valueType(this);
+      if (thisType != VT_CHAR) {
+        raise(vm, "an array of chars is required: %s", getValueTypeName(vm, type));
+        return R_ERROR;
+      }
+    }
+  }
+
+  pushFrameRoot(vm, &protectedArray);
+
+  String *s = (String*)makeString(vm, len);
+  Array *a = (Array*)protectedArray;
+
+  for (uint64_t i=0; i<len; i++) {
+    stringValue(s)[i] = unwrapChar(arrayElements(a)[i]);
+  }
+
+  popFrameRoot(vm); // protectedArray
+
+  Value result = (Value)s;
+  pushOperand(frame, result);
+  return R_SUCCESS;
+}
+
 void initCFns(VM *vm) {
 
   defineCFn(vm, L"cons", 2, false, consEval);
@@ -4449,7 +4425,6 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"/", 2, false, divBuiltin);           // TODO: make instruction
   defineCFn(vm, L"mod", 2, false, modBuiltin);         // TODO: make instruction
   defineCFn(vm, L"eq", 2, false, cmpEval);             // TODO: make instruction
-  defineCFn(vm, L"join", 1, false, strJoinBuiltin);    // TODO: move to std lib
   defineCFn(vm, L"symbol", 1, false, symbolBuiltin);   // TODO: make instruction
   defineCFn(vm, L"keyword", 1, false, keywordBuiltin); // TODO: make instruction
   defineCFn(vm, L"array", 1, false, arrayBuiltin);     // TODO: move to std lib
@@ -4479,6 +4454,7 @@ void initCFns(VM *vm) {
   defineCFn(vm, L"name", 1, false, nameBuiltin); // TODO: make type-specific instructions, move to std lib
   defineCFn(vm, L"meta", 1, false, metaBuiltin); // TODO: make the meta property on a pair optional, put in std lib?
   defineCFn(vm, L"with-meta", 2, false, withMetaBuiltin);
+  defineCFn(vm, L"make-string", 1, false, makeStringBuiltin);
 }
 
 void vmConfigInitContents(VMConfig *config) {
