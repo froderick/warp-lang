@@ -38,6 +38,7 @@ typedef enum ValueType {
   VT_PORT,
   VT_BYTE_ARRAY,
   VT_CHAR,
+  VT_CHAR_ARRAY,
 } ValueType;
 
 #define W_GC_FORWARDING_BIT      0x8000000000000000L   /* header contains forwarding pointer */
@@ -60,6 +61,7 @@ typedef enum ValueType {
 #define W_RECORD_TYPE     0xau
 #define W_PORT_TYPE       0xbu
 #define W_BYTE_ARRAY_TYPE 0xcu
+#define W_CHAR_ARRAY_TYPE 0xdu
 
 /*
  * This is the first field inside all heap objects. It must come first so that the GC can
@@ -207,9 +209,15 @@ typedef struct ByteArray {
   ObjectHeader header;
 } ByteArray;
 
+typedef struct CharArray {
+  ObjectHeader header;
+} CharArray;
+
 Value* arrayElements(Array *array);
 
 uint8_t* byteArrayElements(ByteArray *array);
+
+wchar_t* charArrayElements(CharArray *array);
 
 /*
  * VM code eval contract

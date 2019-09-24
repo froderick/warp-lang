@@ -39,7 +39,11 @@ uint64_t objectHeaderSizeBytes(ObjectHeader h) {
     }
     case W_BYTE_ARRAY_TYPE: {
       uint64_t size = h & W_HEADER_SIZE_MASK;
-      return sizeof(Array) + (size * sizeof(uint8_t));
+      return sizeof(ByteArray) + (size * sizeof(uint8_t));
+    }
+    case W_CHAR_ARRAY_TYPE: {
+      uint64_t size = h & W_HEADER_SIZE_MASK;
+      return sizeof(CharArray) + (size * sizeof(wchar_t));
     }
     case W_RECORD_TYPE: {
       uint64_t size = h & W_HEADER_SIZE_MASK;
@@ -65,6 +69,7 @@ ValueType objectHeaderValueType(ObjectHeader header) {
     case W_RECORD_TYPE: return VT_RECORD;
     case W_PORT_TYPE: return VT_PORT;
     case W_BYTE_ARRAY_TYPE: return VT_BYTE_ARRAY;
+    case W_CHAR_ARRAY_TYPE: return VT_CHAR_ARRAY;
     default:
     explode("unknown type: %u", objectHeaderType(header));
   }
@@ -426,6 +431,30 @@ ByteArray* makeByteArray(VM *vm, uint64_t size) {
   uint8_t *elements = byteArrayElements(array);
   for (uint64_t i=0; i<size; i++) {
     elements[i] = 0;
+  }
+
+  return array;
+}
+
+void charArrayInitContents(CharArray *array) {
+  array->header = 0;
+}
+
+wchar_t* charArrayElements(CharArray *array) {
+  return ((void*)array) + sizeof(CharArray);
+}
+
+CharArray* makeCharArray(VM *vm, uint64_t size) {
+
+  uint64_t sizeBytes = padAllocSize(sizeof(CharArray) + (size * sizeof(Value)));
+  CharArray *array = alloc(vm, sizeBytes);
+
+  charArrayInitContents(array);
+  array->header = makeObjectHeader(W_CHAR_ARRAY_TYPE, size);
+
+  wchar_t *elements = charArrayElements(array);
+  for (uint64_t i=0; i<size; i++) {
+    elements[i] = L'\0';
   }
 
   return array;
@@ -3480,6 +3509,23 @@ int getBuiltin(VM *vm, Frame_t frame) {
       result = elements[index];
       break;
     }
+    case VT_CHAR_ARRAY: {
+      if (!isInt(key)) {
+        raise(vm, "expected a number: %s", getValueTypeName(vm, valueType(key)));
+        return R_ERROR;
+      }
+      uint64_t index = unwrapUint(key);
+
+      CharArray *k = deref(vm, coll);
+      if (index >= objectHeaderSize(k->header)) {
+        raise(vm, "index out of bounds: %" PRIu64, index);
+        return R_ERROR;
+      }
+
+      wchar_t *elements = charArrayElements(k);
+      result = wrapChar(elements[index]);
+      break;
+    }
     case VT_STR: {
       if (!isInt(key)) {
         raise(vm, "expected a number: %s", getValueTypeName(vm, valueType(key)));
@@ -3550,6 +3596,24 @@ int setBuiltin(VM *vm, Frame_t frame) {
 
       Value *elements = arrayElements(k);
       elements[index] = value;
+      result = coll;
+      break;
+    }
+    case VT_CHAR_ARRAY: {
+      if (!isInt(key)) {
+        raise(vm, "expected a number: %s", getValueTypeName(vm, valueType(key)));
+        return R_ERROR;
+      }
+      uint64_t index = unwrapUint(key);
+
+      CharArray *k = deref(vm, coll);
+      if (index >= objectHeaderSize(k->header)) {
+        raise(vm, "index out of bounds: %" PRIu64, index);
+        return R_ERROR;
+      }
+
+      wchar_t *elements = charArrayElements(k);
+      elements[index] = unwrapChar(value);
       result = coll;
       break;
     }
@@ -4211,6 +4275,24 @@ int byteArrayBuiltin(VM *vm, Frame_t frame) {
   }
 
   ByteArray *array = makeByteArray(vm, length);
+
+  pushOperand(frame, (Value)array);
+  return R_SUCCESS;
+}
+
+int charArrayBuiltin(VM *vm, Frame_t frame) {
+
+  uint64_t length;
+  {
+    Value val = popOperand(frame);
+    if (valueType(val) != VT_UINT) {
+      raise(vm, "need an integer to describe the size of an array: %s", getValueTypeName(vm, valueType(val)));
+      return R_ERROR;
+    }
+    length = unwrapUint(val);
+  }
+
+  CharArray *array = makeCharArray(vm, length);
 
   pushOperand(frame, (Value)array);
   return R_SUCCESS;

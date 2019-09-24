@@ -270,6 +270,13 @@ void printByteArray(Ctx *ctx, Value result, Form *expr) {
   expr->string.value = copyText(ctx->pool, function, expr->string.length);
 }
 
+void printCharArray(Ctx *ctx, Value result, Form *expr) {
+  expr->type = F_STRING;
+  wchar_t function[] = L"<char-array>";
+  expr->string.length = wcslen(function);
+  expr->string.value = copyText(ctx->pool, function, expr->string.length);
+}
+
 PrintGeneric getPrintGeneric(Ctx *ctx, ValueType type) {
   switch (type) {
     case VT_NIL:        return printNil;
@@ -288,6 +295,7 @@ PrintGeneric getPrintGeneric(Ctx *ctx, ValueType type) {
     case VT_RECORD:     return printRecord;
     case VT_PORT:       return printPort;
     case VT_BYTE_ARRAY: return printByteArray;
+    case VT_CHAR_ARRAY: return printCharArray;
     default: explode("unhandled type: %s", getValueTypeName(ctx->vm, type));
   }
 }
