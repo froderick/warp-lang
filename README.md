@@ -1,3 +1,15 @@
+## cleanup plans
+ - [ ] cleanly organize things under src/libs so that the code is easy to read
+ - [ ] digest the notes, get rid of that folder
+ - [ ] write something interesting in the language (like a web server), and show it off in the readme
+ - [ ] move to more conventional snake case syntax
+ - [ ] fix memory chaos through explicit allocator passing and bump arena allocators
+ - [ ] summarize the critical walls I ran into in this project, what the ultimate goals were
+ - [ ] use clang tools for memory bug catching
+
+
+
+
 ## Building
 
 ```

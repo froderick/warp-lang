@@ -1,3 +1,0 @@
-#!./repl
-
-(println "hithere")

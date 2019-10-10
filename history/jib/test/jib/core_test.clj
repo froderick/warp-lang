@@ -1,1 +1,0 @@
-(ns jib.core-test)
