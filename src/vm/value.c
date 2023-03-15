@@ -358,7 +358,7 @@ CharArray* makeCharArray(VM *vm, uint64_t size) {
   return array;
 }
 
-void _mapEntryInitContents(MapEntry *e) {
+static void _mapEntryInitContents(MapEntry *e) {
   e->header = 0;
   e->used = false;
   e->key = W_NIL_VALUE;
@@ -377,7 +377,7 @@ MapEntry* makeMapEntry(VM *vm) {
   return entry;
 }
 
-void _mapInitContents(Map *m) {
+static void _mapInitContents(Map *m) {
   m->header = 0;
   m->size = 0;
   m->entries = W_NIL_VALUE;
@@ -433,7 +433,7 @@ Record* makeRecord(VM *vm, uint64_t numFields) {
 
 typedef int (*CFnInvoke) (VM_t vm, Frame_t frame);
 
-Value makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
+static Value _makeCFn(VM *vm, const wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke ptr) {
   CFn *fn = NULL;
 
   uint64_t nameLength = wcslen(name);
@@ -465,7 +465,7 @@ void defineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke 
   Value protectedSymbol = symbolIntern(vm, &protectedName);
   pushFrameRoot(vm, &protectedSymbol);
 
-  Value value = makeCFn(vm, name, numArgs, varArgs, ptr);
+  Value value = _makeCFn(vm, name, numArgs, varArgs, ptr);
 
   Symbol *symbol = deref(vm, protectedSymbol);
   symbol->valueDefined = true;
@@ -479,25 +479,25 @@ void defineCFn(VM *vm, wchar_t *name, uint16_t numArgs, bool varArgs, CFnInvoke 
  * value type definitions
  */
 
-bool isTruthyYes(Value v) { return true; }
-bool isTruthyNo(Value v) { return false; }
-bool isTruthyBool(Value v) { return unwrapBool(v); }
+static bool _isTruthyYes(Value v) { return true; }
+static bool _isTruthyNo(Value v) { return false; }
+static bool _isTruthyBool(Value v) { return unwrapBool(v); }
 
-void relocateChildrenFn(VM_t vm, void *obj) {
+static void _relocateChildrenFn(VM_t vm, void *obj) {
   Fn *fn = obj;
   for (uint16_t i=0; i<fn->numConstants; i++) {
     relocate(vm, &fnConstants(fn)[i]);
   }
 }
 
-void relocateChildrenList(VM_t vm, void *obj) {
+static void _relocateChildrenList(VM_t vm, void *obj) {
   Cons *cons = obj;
   relocate(vm, &cons->value);
   relocate(vm, &cons->next);
   relocate(vm, &cons->metadata);
 }
 
-void relocateChildrenClosure(VM_t vm, void *obj) {
+static void _relocateChildrenClosure(VM_t vm, void *obj) {
   Closure *closure = obj;
   relocate(vm, &closure->fn);
   for (uint16_t i=0; i<closure->numCaptures; i++) {
@@ -505,7 +505,7 @@ void relocateChildrenClosure(VM_t vm, void *obj) {
   }
 }
 
-void relocateChildrenSymbol(VM_t vm, void *obj) {
+static void _relocateChildrenSymbol(VM_t vm, void *obj) {
   Symbol *s = obj;
 
   {
@@ -546,12 +546,12 @@ void relocateChildrenSymbol(VM_t vm, void *obj) {
   }
 }
 
-void relocateChildrenKeyword(VM_t vm, void *obj) {
+static void _relocateChildrenKeyword(VM_t vm, void *obj) {
   Keyword *k = obj;
   relocate(vm, &k->name);
 }
 
-void relocateChildrenArray(VM_t vm, void *obj) {
+static void _relocateChildrenArray(VM_t vm, void *obj) {
   Array *k = obj;
   Value *elements = arrayElements(k);
   uint64_t size = objectHeaderSize(k->header);
@@ -560,12 +560,12 @@ void relocateChildrenArray(VM_t vm, void *obj) {
   }
 }
 
-void relocateChildrenMap(VM_t vm, void *obj) {
+static void _relocateChildrenMap(VM_t vm, void *obj) {
   Map *map = obj;
   relocate(vm, &map->entries);
 }
 
-void relocateChildrenMapEntry(VM_t vm, void *obj) {
+static void _relocateChildrenMapEntry(VM_t vm, void *obj) {
   MapEntry *mapEntry = obj;
   if (mapEntry->used) {
     relocate(vm, &mapEntry->key);
@@ -573,7 +573,7 @@ void relocateChildrenMapEntry(VM_t vm, void *obj) {
   }
 }
 
-void relocateChildrenRecord(VM_t vm, void *obj) {
+static void _relocateChildrenRecord(VM_t vm, void *obj) {
   Record *record = obj;
   relocate(vm, &record->type);
   Value *fields = recordFields(record);
@@ -597,52 +597,52 @@ ValueTypeTable valueTypeTableCreate() {
   // init with known value types
   ValueTypeInfo valueTypes [] = {
       [VT_NIL]       = {.name = "nil",
-                        .isTruthy = &isTruthyNo,
+                        .isTruthy = &_isTruthyNo,
                         .relocateChildren = NULL},
       [VT_UINT]      = {.name = "uint",
-                        .isTruthy = &isTruthyYes,
+                        .isTruthy = &_isTruthyYes,
                         .relocateChildren = NULL},
       [VT_BOOL]      = {.name = "bool",
-                        .isTruthy = &isTruthyBool,
+                        .isTruthy = &_isTruthyBool,
                         .relocateChildren = NULL},
       [VT_FN]        = {.name = "fn",
-                        .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenFn},
+                        .isTruthy = &_isTruthyYes,
+                        .relocateChildren = &_relocateChildrenFn},
       [VT_STR]       = {.name = "str",
-                        .isTruthy = &isTruthyYes,
+                        .isTruthy = &_isTruthyYes,
                         .relocateChildren = NULL},
       [VT_SYMBOL]    = {.name = "symbol",
-                        .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenSymbol},
+                        .isTruthy = &_isTruthyYes,
+                        .relocateChildren = &_relocateChildrenSymbol},
       [VT_KEYWORD]   = {.name = "keyword",
-                        .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenKeyword},
+                        .isTruthy = &_isTruthyYes,
+                        .relocateChildren = &_relocateChildrenKeyword},
       [VT_LIST]      = {.name = "list",
-                        .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenList},
+                        .isTruthy = &_isTruthyYes,
+                        .relocateChildren = &_relocateChildrenList},
       [VT_CLOSURE]   = {.name = "closure",
-                        .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenClosure},
+                        .isTruthy = &_isTruthyYes,
+                        .relocateChildren = &_relocateChildrenClosure},
       [VT_CFN]       = {.name = "cfn",
-                        .isTruthy = &isTruthyYes,
+                        .isTruthy = &_isTruthyYes,
                         .relocateChildren = NULL},
       [VT_ARRAY]     = {.name = "array",
-                        .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenArray},
+                        .isTruthy = &_isTruthyYes,
+                        .relocateChildren = &_relocateChildrenArray},
       [VT_MAP]       = {.name = "map",
-                        .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenMap},
+                        .isTruthy = &_isTruthyYes,
+                        .relocateChildren = &_relocateChildrenMap},
       [VT_MAP_ENTRY] = {.name = "map-entry",
-                        .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenMapEntry},
+                        .isTruthy = &_isTruthyYes,
+                        .relocateChildren = &_relocateChildrenMapEntry},
       [VT_RECORD]    = {.name = "record",
-                        .isTruthy = &isTruthyYes,
-                        .relocateChildren = &relocateChildrenRecord},
+                        .isTruthy = &_isTruthyYes,
+                        .relocateChildren = &_relocateChildrenRecord},
       [VT_PORT]      = {.name = "port",
-                        .isTruthy = &isTruthyYes,
+                        .isTruthy = &_isTruthyYes,
                         .relocateChildren = NULL},
       [VT_BYTE_ARRAY]= {.name = "byte-array",
-                        .isTruthy = &isTruthyYes,
+                        .isTruthy = &_isTruthyYes,
                         .relocateChildren = NULL},
 
   };

@@ -1,4 +1,6 @@
 ## cleanup plans
+ - [X] make private functions static
+ - [ ] prefix public functions with `wl_`
  - [ ] cleanly organize things under src/libs so that the code is easy to read
  - [ ] digest the notes, get rid of that folder
  - [ ] write something interesting in the language (like a web server), and show it off in the readme

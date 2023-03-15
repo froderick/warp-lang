@@ -25,7 +25,7 @@ void clearException(VM *vm) {
 
 // exception handling
 
-Value _exceptionMake(VM *vm, ExceptionParams p) {
+Value exceptionMake(VM *vm, ExceptionParams p) {
 
   Array *protectedFrames;
   {
@@ -191,7 +191,7 @@ Value exceptionMakeRaised(VM *vm, Raised *raised) {
   p.protectedValue = NULL;
   p.raised = raised;
 
-  Value v = _exceptionMake(vm, p);
+  Value v = exceptionMake(vm, p);
 
   popFrameRoot(vm); // protectedMessage
 
@@ -211,7 +211,7 @@ Value exceptionMakeKw(VM *vm, Raised *raised, wchar_t *kwName) {
   p.protectedValue = &protectedValue;
   p.raised = raised;
 
-  Value v = _exceptionMake(vm, p);
+  Value v = exceptionMake(vm, p);
 
   popFrameRoot(vm); // protectedValue
   popFrameRoot(vm); // protectedName

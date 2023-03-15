@@ -13,9 +13,9 @@
  * Loading Constants as Values
  */
 
-Value _hydrateConstant(VM *vm, Constant c);
+static Value _hydrateConstant(VM *vm, Constant c);
 
-Value _fnHydrate(VM *vm, FnConstant *fnConst) {
+static Value _fnHydrate(VM *vm, FnConstant *fnConst) {
 
   Fn *fn = NULL;
   {
@@ -96,7 +96,7 @@ Value _fnHydrate(VM *vm, FnConstant *fnConst) {
   return (Value)fn;
 }
 
-Value _symbolHydrate(VM *vm, SymbolConstant symConst) {
+static Value _symbolHydrate(VM *vm, SymbolConstant symConst) {
 
   Value protectedName = makeStringValue(vm, symConst.value, symConst.length);
   pushFrameRoot(vm, &protectedName);
@@ -107,7 +107,7 @@ Value _symbolHydrate(VM *vm, SymbolConstant symConst) {
   return value;
 }
 
-Value _keywordHydrate(VM *vm, KeywordConstant kwConst) {
+static Value _keywordHydrate(VM *vm, KeywordConstant kwConst) {
   Value protectedName = makeStringValue(vm, kwConst.value, kwConst.length);
   pushFrameRoot(vm, &protectedName);
 
@@ -119,7 +119,7 @@ Value _keywordHydrate(VM *vm, KeywordConstant kwConst) {
 
 // TODO: I had another thought, can we get rid of the nested graph of constants and flatten it entirely?
 
-Value _hydrateConstant(VM *vm, Constant c) {
+static Value _hydrateConstant(VM *vm, Constant c) {
   Value v;
   switch (c.type) {
     case CT_BOOL:
@@ -153,13 +153,13 @@ Value _hydrateConstant(VM *vm, Constant c) {
   return v;
 }
 
-void _invocableInitContents(Invocable *i) {
+static void _invocableInitContents(Invocable *i) {
   i->ref = W_NIL_VALUE;    // the reference to the initially invoked value (could be closure or fn)
   i->fn = NULL;      // always points to the actual fn
   i->closure = NULL; // points to the closure, if there is one
 }
 
-int _makeInvocable(VM *vm, Value pop, Invocable *invocable) {
+static int _makeInvocable(VM *vm, Value pop, Invocable *invocable) {
 
   _invocableInitContents(invocable);
   invocable->ref = pop;
@@ -186,7 +186,7 @@ int _makeInvocable(VM *vm, Value pop, Invocable *invocable) {
   return R_SUCCESS;
 }
 
-void _protectInvocable(VM *vm, Invocable *invocable) {
+static void _protectInvocable(VM *vm, Invocable *invocable) {
   pushFrameRoot(vm, &invocable->ref);
   pushFrameRoot(vm, (Value*)&invocable->fn);
   if (invocable->closure != NULL) {
@@ -194,7 +194,7 @@ void _protectInvocable(VM *vm, Invocable *invocable) {
   }
 }
 
-void _unprotectInvocable(VM *vm, Invocable *invocable) {
+static void _unprotectInvocable(VM *vm, Invocable *invocable) {
   popFrameRoot(vm);
   popFrameRoot(vm);
   if (invocable->closure != NULL) {
@@ -202,7 +202,7 @@ void _unprotectInvocable(VM *vm, Invocable *invocable) {
   }
 }
 
-void _populateArgs(Frame_t from, Frame_t to, uint16_t numArgs) {
+static void _populateArgs(Frame_t from, Frame_t to, uint16_t numArgs) {
   for (uint16_t i = 0; i < numArgs; i++) {
     Value arg = popOperand(from);
 
@@ -211,7 +211,7 @@ void _populateArgs(Frame_t from, Frame_t to, uint16_t numArgs) {
   }
 }
 
-void _preprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarArgs, uint64_t numArgsSupplied) {
+static void _preprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVarArgs, uint64_t numArgsSupplied) {
   if (usesVarArgs) {
 
     uint16_t numVarArgs;
@@ -244,7 +244,7 @@ void _preprocessArguments(VM *vm, Frame_t parent, uint16_t numArgs, bool usesVar
   }
 }
 
-void _invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invocable, uint16_t numArgsSupplied) {
+static void _invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *invocable, uint16_t numArgsSupplied) {
 
   _protectInvocable(vm, invocable);
 
@@ -271,7 +271,7 @@ void _invokePopulateLocals(VM *vm, Frame_t parent, Frame_t child, Invocable *inv
   _unprotectInvocable(vm, invocable);
 }
 
-bool _handleRaise(VM *vm) {
+static bool _handleRaise(VM *vm) {
   Value exception = vm->exception;
 
   if (vm->current != NULL) { // a stack is available, look for a handler
@@ -342,7 +342,7 @@ bool _handleRaise(VM *vm) {
  */
 
 // (8), typeIndex (16) | (-> value)
-int _loadConstEval(VM *vm, Frame_t frame) {
+static int _loadConstEval(VM *vm, Frame_t frame) {
   uint16_t constantIndex = readIndex(frame);
   Value constant = getConst(frame, constantIndex);
   pushOperand(frame, constant);
@@ -350,7 +350,7 @@ int _loadConstEval(VM *vm, Frame_t frame) {
 }
 
 // (8), typeIndex (16) | (-> value)
-int _loadLocalEval(VM *vm, Frame_t frame) {
+static int _loadLocalEval(VM *vm, Frame_t frame) {
   uint16_t localIndex = readIndex(frame);
   Value v = getLocal(frame, localIndex);
   pushOperand(frame, v);
@@ -358,14 +358,14 @@ int _loadLocalEval(VM *vm, Frame_t frame) {
 }
 
 // (8), typeIndex  (16) | (objectref ->)
-int _storeLocalEval(VM *vm, Frame_t frame) {
+static int _storeLocalEval(VM *vm, Frame_t frame) {
   uint16_t localIndex = readIndex(frame);
   Value v = popOperand(frame);
   setLocal(frame, localIndex, v);
   return R_SUCCESS;
 }
 
-int _validateArguments(VM *vm, wchar_t *name, uint16_t numArgs, bool usesVarArgs, uint64_t numArgsSupplied) {
+static int _validateArguments(VM *vm, wchar_t *name, uint16_t numArgs, bool usesVarArgs, uint64_t numArgsSupplied) {
 
   if (!usesVarArgs) {
     if (numArgsSupplied != numArgs) {
@@ -396,7 +396,7 @@ int _validateArguments(VM *vm, wchar_t *name, uint16_t numArgs, bool usesVarArgs
   return R_SUCCESS;
 }
 
-int _invokeCFn(VM *vm, Frame_t frame, Value cFn, uint16_t numArgsSupplied) {
+static int _invokeCFn(VM *vm, Frame_t frame, Value cFn, uint16_t numArgsSupplied) {
   CFn *protectedFn = deref(vm, cFn);
   pushFrameRoot(vm, (Value*)&protectedFn);
 
@@ -423,7 +423,7 @@ int _invokeCFn(VM *vm, Frame_t frame, Value cFn, uint16_t numArgsSupplied) {
 }
 
 // (8)              | (objectref, args... -> ...)
-int _invokeDynEval(VM *vm, Frame_t frame) {
+static int _invokeDynEval(VM *vm, Frame_t frame) {
   uint16_t numArgsSupplied = readIndex(frame);
   Value pop = popOperand(frame);
   switch (valueType(pop)) {
@@ -484,7 +484,7 @@ int _invokeDynEval(VM *vm, Frame_t frame) {
  */
 
 // (8)              | (objectref, args... -> ...)
-int _invokeDynTailEval(VM *vm, Frame_t frame) {
+static int _invokeDynTailEval(VM *vm, Frame_t frame) {
   uint16_t numArgsSupplied = readIndex(frame);
   Value pop = popOperand(frame);
   switch (valueType(pop)) {
@@ -532,7 +532,7 @@ int _invokeDynTailEval(VM *vm, Frame_t frame) {
 }
 
 // (8)              | (args... -> ...)
-int _invokeDynTailEvalRecurse(VM *vm, Frame_t frame) {
+static int _invokeDynTailEvalRecurse(VM *vm, Frame_t frame) {
   uint16_t numArgs = readIndex(frame);
   _populateArgs(frame, frame, numArgs);
   setPc(frame, 0);
@@ -540,21 +540,21 @@ int _invokeDynTailEvalRecurse(VM *vm, Frame_t frame) {
 }
 
 // (8)              | (objectref ->)
-int _retEval(VM *vm, Frame_t frame) {
+static int _retEval(VM *vm, Frame_t frame) {
   Value v = popOperand(frame);
   setResult(frame, v);
   return R_SUCCESS;
 }
 
 // (8), offset (16) | (->)
-int _jmpEval(VM *vm, Frame_t frame) {
+static int _jmpEval(VM *vm, Frame_t frame) {
   uint16_t newPc = readIndex(frame);
   setPc(frame, newPc);
   return R_SUCCESS;
 }
 
 // (8), offset (16) | (value ->)
-int _jmpIfEval(VM *vm, Frame_t frame) {
+static int _jmpIfEval(VM *vm, Frame_t frame) {
   Value test = popOperand(frame);
   bool truthy = isTruthy(vm, test);
   uint16_t newPc = readIndex(frame);
@@ -565,7 +565,7 @@ int _jmpIfEval(VM *vm, Frame_t frame) {
 }
 
 // (8), offset (16) | (value ->)
-int _jmpIfNotEval(VM *vm, Frame_t frame) {
+static int _jmpIfNotEval(VM *vm, Frame_t frame) {
   Value test = popOperand(frame);
   bool truthy = isTruthy(vm, test);
   uint16_t newPc = readIndex(frame);
@@ -576,7 +576,7 @@ int _jmpIfNotEval(VM *vm, Frame_t frame) {
 }
 
 // (8), offset (16)  | (value ->)
-int _defVarEval(VM *vm, Frame_t frame) {
+static int _defVarEval(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
   uint16_t constantIndex = readIndex(frame);
@@ -595,7 +595,7 @@ int _defVarEval(VM *vm, Frame_t frame) {
 }
 
 // (8), offset 16  | (-> value)
-int _loadVarEval(VM *vm, Frame_t frame) {
+static int _loadVarEval(VM *vm, Frame_t frame) {
 
   uint16_t constantIndex = readIndex(frame);
   Value value = getConst(frame, constantIndex);
@@ -627,7 +627,7 @@ int _loadVarEval(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-void _closureInitContents(Closure *cl) {
+static void _closureInitContents(Closure *cl) {
   cl->header = 0;
   cl->fn = W_NIL_VALUE;
   cl->numCaptures = 0;
@@ -635,7 +635,7 @@ void _closureInitContents(Closure *cl) {
 }
 
 // (8), offset (16) | (captures... -> value)
-int _loadClosureEval(VM *vm, Frame_t frame) {
+static int _loadClosureEval(VM *vm, Frame_t frame) {
   Fn *protectedFn;
   {
     uint16_t constantIndex = readIndex(frame);
@@ -677,7 +677,7 @@ int _loadClosureEval(VM *vm, Frame_t frame) {
 }
 
 // (8)        | (a, b -> b, a)
-int _swapEval(VM *vm, Frame_t frame) {
+static int _swapEval(VM *vm, Frame_t frame) {
   Value a = popOperand(frame);
   Value b = popOperand(frame);
   pushOperand(frame, a);
@@ -686,13 +686,13 @@ int _swapEval(VM *vm, Frame_t frame) {
 }
 
 // (8)        | (a, b -> b, a)
-int _dropEval(VM *vm, Frame_t frame) {
+static int _dropEval(VM *vm, Frame_t frame) {
   Value a = popOperand(frame);
   return R_SUCCESS;
 }
 
 // (8)        | (jumpAddr, handler ->)
-int _setHandlerEval(VM *vm, Frame_t frame) {
+static int _setHandlerEval(VM *vm, Frame_t frame) {
   uint16_t jumpIndex = readIndex(frame);
 
   Value handler = popOperand(frame);
@@ -707,29 +707,29 @@ int _setHandlerEval(VM *vm, Frame_t frame) {
 }
 
 // (8)        | (->)
-int _clearHandlerEval(VM *vm, Frame_t frame) {
+static int _clearHandlerEval(VM *vm, Frame_t frame) {
   popFrameHandler(vm);
   return R_SUCCESS;
 }
 
 
-void _printInst(int *i, const char* name, uint8_t *code) {
+static void _printInst(int *i, const char* name, uint8_t *code) {
   printf("%i:\t%s\n", *i, name);
 }
 
-void _printInstAndIndex(int *i, const char* name, uint8_t *code) {
+static void _printInstAndIndex(int *i, const char* name, uint8_t *code) {
   printf("%i:\t%s\t%u\n", *i, name, code[*i + 1] << 8 | code[*i + 2]);
   *i = *i + 2;
 }
 
-void _printInstAndIndex2x(int *i, const char* name, uint8_t *code) {
+static void _printInstAndIndex2x(int *i, const char* name, uint8_t *code) {
   uint16_t index1 = code[*i + 1] << 8 | code[*i + 2];
   uint16_t index2 = code[*i + 3] << 8 | code[*i + 4];
   printf("%i:\t%s\t%u, %u\n", *i, name, index1, index2);
   *i = *i + 4;
 }
 
-void _printUnknown(int *i, const char* name, uint8_t *code) {
+static void _printUnknown(int *i, const char* name, uint8_t *code) {
   printf("%i:\t<UNKNOWN>/%u\n", *i, code[*i]);
 }
 
@@ -787,11 +787,11 @@ InstTable instTableCreate() {
   return table;
 }
 
-const char* _getInstName(InstTable *instTable, uint8_t inst) {
+static const char* _getInstName(InstTable *instTable, uint8_t inst) {
   return instTable->instructions[inst].name;
 }
 
-void _frameEval(VM *vm) {
+static void _frameEval(VM *vm) {
   uint8_t inst;
   Eval eval;
 

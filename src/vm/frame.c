@@ -8,7 +8,7 @@
  * Call Stack Implementation
  */
 
-void _stackSegmentInitContents(StackSegment *segment) {
+static void _stackSegmentInitContents(StackSegment *segment) {
   segment->data = NULL;
   segment->dataEnd = NULL;
   segment->allocPtr = NULL;
@@ -44,7 +44,7 @@ StackSegment* makeSegment(uint64_t segmentSize) {
   return segment;
 }
 
-void _freeSegment(StackSegment *segment) {
+static void _freeSegment(StackSegment *segment) {
   if (segment != NULL) {
     free(segment->data);
     _stackSegmentInitContents(segment);
@@ -52,7 +52,7 @@ void _freeSegment(StackSegment *segment) {
   }
 }
 
-void* _stackAllocate(Stack *stack, size_t size, char *description) {
+static void* _stackAllocate(Stack *stack, size_t size, char *description) {
 
   if (size == 0) {
     return NULL;
@@ -83,7 +83,7 @@ void* _stackAllocate(Stack *stack, size_t size, char *description) {
 /*
  * unwinds the stack allocation to immediately before the specified address
  */
-void _stackFree(Stack *stack, void *ptr) {
+static void _stackFree(Stack *stack, void *ptr) {
 
   if (stack->root == NULL) {
     explode("stack is not initialized");
@@ -110,7 +110,7 @@ void _stackFree(Stack *stack, void *ptr) {
   stack->current->allocPtr = ptr;
 }
 
-uint64_t _stackSize(Stack *stack) {
+static uint64_t _stackSize(Stack *stack) {
 
   uint64_t result = 0;
 
@@ -123,7 +123,7 @@ uint64_t _stackSize(Stack *stack) {
   return result;
 }
 
-void _stackClear(Stack *stack) {
+static void _stackClear(Stack *stack) {
 
   StackSegment *cursor = stack->root;
   while (cursor != NULL) {
@@ -135,7 +135,7 @@ void _stackClear(Stack *stack) {
   stack->current = NULL;
 }
 
-void _stackFreeContents(Stack *stack) {
+static void _stackFreeContents(Stack *stack) {
   if (stack != NULL) {
     _stackClear(stack);
   }
@@ -325,7 +325,7 @@ wchar_t* getFileName(Frame_t frame) {
   return NULL;
 }
 
-void _frameInitContents(Frame *frame) {
+static void _frameInitContents(Frame *frame) {
   frame->parent = NULL;
   frame->fnRef = W_NIL_VALUE;
   frame->fn = NULL;
@@ -446,7 +446,7 @@ FrameHandler_t frameHandlerNext(FrameHandler_t handler) {
   return handler->next;
 }
 
-void _frameHandlerInitContents(FrameHandler *handler) {
+static void _frameHandlerInitContents(FrameHandler *handler) {
   handler->value = W_NIL_VALUE;
   handler->jumpAddr = 0;
   handler->next = NULL;

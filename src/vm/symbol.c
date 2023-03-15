@@ -26,14 +26,14 @@ uint32_t stringHash(String *s) {
   return h;
 }
 
-void _tableEntryInitContents(TableEntry *e) {
+static void _tableEntryInitContents(TableEntry *e) {
   e->used = false;
   e->name = W_NIL_VALUE;
   e->nameHash = 0;
   e->value = W_NIL_VALUE;
 }
 
-void _tableInitContents(Table *t) {
+static void _tableInitContents(Table *t) {
   t->numAllocatedEntries = 0;
   t->entries = NULL;
   t->size = 0;
@@ -114,7 +114,7 @@ Value tableLookup(VM *vm, Table *table, Value name) {
   }
 }
 
-void _putEntryWithHash(VM *vm, Table *table, Value insertMe, Value name, uint32_t hash) {
+static void _putEntryWithHash(VM *vm, Table *table, Value insertMe, Value name, uint32_t hash) {
   TableEntry *found = findEntry(vm, table, deref(vm, name), hash);
   if (!found ->used) {
     table->size++;
@@ -125,7 +125,7 @@ void _putEntryWithHash(VM *vm, Table *table, Value insertMe, Value name, uint32_
   found->value = insertMe;
 }
 
-void _putEntry(VM *vm, Table *table, Value name, Value insertMe) {
+static void _putEntry(VM *vm, Table *table, Value name, Value insertMe) {
   String *s = deref(vm, name);
   uint32_t hash = stringHash(s);
   _putEntryWithHash(vm, table, insertMe, name, hash);

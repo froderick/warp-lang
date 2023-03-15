@@ -72,14 +72,14 @@ void vmFree(VM *vm) {
  * code printing utils based on InstTable metadata
  */
 
-void _printCodeArray(InstTable *table, uint8_t *code, uint16_t codeLength) {
+static void _printCodeArray(InstTable *table, uint8_t *code, uint16_t codeLength) {
   for (int i=0; i<codeLength; i++) {
     Inst inst = table->instructions[code[i]];
     inst.print(&i, inst.name, code);
   }
 }
 
-void _printFnConstant(InstTable *table, FnConstant fnConst) {
+static void _printFnConstant(InstTable *table, FnConstant fnConst) {
 
   for (uint16_t i=0; i<fnConst.numConstants; i++) {
     Constant c = fnConst.constants[i];
@@ -93,7 +93,7 @@ void _printFnConstant(InstTable *table, FnConstant fnConst) {
   _printCodeArray(table, fnConst.code.code, fnConst.code.codeLength);
 }
 
-void _printCodeUnit(InstTable *table, CodeUnit *unit) {
+static void _printCodeUnit(InstTable *table, CodeUnit *unit) {
 
   for (uint16_t i=0; i<unit->numConstants; i++) {
     Constant c = unit->constants[i];

@@ -55,7 +55,7 @@ void collect(VM *vm);
 /*
  * Allocates, returns R_OOM if allocation fails. Doesn't attempt collection.
  */
-int _alloc(GC *gc, uint64_t length, void **ptr) {
+static int _alloc(GC *gc, uint64_t length, void **ptr) {
 
   if (length < sizeof(ObjectHeader)) {
     explode("alloc length is too small, %" PRIu64, length);
@@ -154,7 +154,7 @@ uint64_t now() {
   return millis;
 }
 
-void _relocateTable(VM *vm, Table *table) {
+static void _relocateTable(VM *vm, Table *table) {
   for (uint64_t i=0; i<table->numAllocatedEntries; i++) {
     TableEntry *entry = &table->entries[i];
     if (entry->used) {
@@ -164,7 +164,7 @@ void _relocateTable(VM *vm, Table *table) {
   }
 }
 
-void _relocateChildren(VM *vm, ValueType type, void *obj) {
+static void _relocateChildren(VM *vm, ValueType type, void *obj) {
   RelocateChildren relocate = vm->valueTypeTable.valueTypes[type].relocateChildren;
   if (relocate != NULL) {
     relocate(vm, obj);

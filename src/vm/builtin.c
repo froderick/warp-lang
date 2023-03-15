@@ -35,7 +35,7 @@ int consEval(VM *vm, Frame_t frame) {
 }
 
 // (8),             | (seq -> x)
-int firstEval(VM *vm, Frame_t frame) {
+static int _firstEval(VM *vm, Frame_t frame) {
 
   Value seq = popOperand(frame);
   ValueType seqType = valueType(seq);
@@ -59,7 +59,7 @@ int firstEval(VM *vm, Frame_t frame) {
 }
 
 // (8),             | (seq -> seq)
-int restEval(VM *vm, Frame_t frame) {
+static int _restEval(VM *vm, Frame_t frame) {
 
   Value seq = popOperand(frame);
   ValueType seqType = valueType(seq);
@@ -83,7 +83,7 @@ int restEval(VM *vm, Frame_t frame) {
 }
 
 // (8),             | (name -> nil)
-int setMacroEval(VM *vm, Frame_t frame) {
+static int _setMacroEval(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
   ValueType type = valueType(value);
@@ -125,7 +125,7 @@ int setMacroEval(VM *vm, Frame_t frame) {
 }
 
 // (8),             | (name -> bool)
-int getMacroEval(VM *vm, Frame_t frame) {
+static int _getMacroEval(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
 
   ValueType type = valueType(value);
@@ -142,14 +142,14 @@ int getMacroEval(VM *vm, Frame_t frame) {
 }
 
 // (8),             | (name -> bool)
-int gcEval(VM *vm, Frame_t frame) {
+static int _gcEval(VM *vm, Frame_t frame) {
   collect(vm);
   pushOperand(frame, W_NIL_VALUE);
   return R_SUCCESS;
 }
 
 // (8),             | (value -> value)
-int getTypeEval(VM *vm, Frame_t frame) {
+static int _getTypeEval(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
   ValueType type = valueType(value);
 
@@ -270,7 +270,7 @@ int cmpEval(VM *vm, Frame_t frame) {
 }
 
 // (8)              | (a, b -> bool)
-int ltEval(VM *vm, Frame_t frame) {
+static int _ltEval(VM *vm, Frame_t frame) {
   Value a = popOperand(frame);
   Value b = popOperand(frame);
   Value c = wrapBool(b < a);
@@ -278,7 +278,7 @@ int ltEval(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int lteEval(VM *vm, Frame_t frame) {
+static int _lteEval(VM *vm, Frame_t frame) {
   Value a = popOperand(frame);
   Value b = popOperand(frame);
   Value c = wrapBool(b <= a);
@@ -286,7 +286,7 @@ int lteEval(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int gtEval(VM *vm, Frame_t frame) {
+static int _gtEval(VM *vm, Frame_t frame) {
   Value a = popOperand(frame);
   Value b = popOperand(frame);
   Value c = wrapBool(b > a);
@@ -294,7 +294,7 @@ int gtEval(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int gteEval(VM *vm, Frame_t frame) {
+static int _gteEval(VM *vm, Frame_t frame) {
   Value a = popOperand(frame);
   Value b = popOperand(frame);
   Value c = wrapBool(b >= a);
@@ -302,19 +302,19 @@ int gteEval(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-bool isSeq(Value value) {
+static bool isSeq(Value value) {
   return valueType(value) == VT_LIST || valueType(value) == VT_NIL;
 }
 
-bool isString(Value value) {
+static bool isString(Value value) {
   return valueType(value) == VT_STR;
 }
 
-bool isInt(Value value) {
+static bool isInt(Value value) {
   return valueType(value) == VT_UINT;
 }
 
-int symbolBuiltin(VM *vm, Frame_t frame) {
+static int _symbolBuiltin(VM *vm, Frame_t frame) {
   Value protectedName = popOperand(frame);
 
   if (!isString(protectedName)) {
@@ -331,7 +331,7 @@ int symbolBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int keywordBuiltin(VM *vm, Frame_t frame) {
+static int _keywordBuiltin(VM *vm, Frame_t frame) {
   Value protectedName = popOperand(frame);
   ValueType type = valueType(protectedName);
 
@@ -357,7 +357,7 @@ int keywordBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int arrayBuiltin(VM *vm, Frame_t frame) {
+static int _arrayBuiltin(VM *vm, Frame_t frame) {
   Value sizeValue = popOperand(frame);
   if (!isInt(sizeValue)) {
     raise(vm, "expected a number: %s", getValueTypeName(vm, valueType(sizeValue)));
@@ -370,7 +370,7 @@ int arrayBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int countBuiltin(VM *vm, Frame_t frame) {
+static int _countBuiltin(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
 
   Value result = W_NIL_VALUE;
@@ -415,9 +415,7 @@ int countBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-Value mapLookup(VM *vm, Map *map, Value key);
-
-int getBuiltin(VM *vm, Frame_t frame) {
+static int _getBuiltin(VM *vm, Frame_t frame) {
   Value key = popOperand(frame);
   Value coll = popOperand(frame);
 
@@ -505,7 +503,7 @@ int getBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int setBuiltin(VM *vm, Frame_t frame) {
+static int _setBuiltin(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
   Value key = popOperand(frame);
   Value coll = popOperand(frame);
@@ -593,7 +591,7 @@ int setBuiltin(VM *vm, Frame_t frame) {
  * hash map
  */
 
-uint32_t hashCode(VM *vm, Value v) {
+static uint32_t hashCode(VM *vm, Value v) {
   switch (valueType(v)) {
 
     case VT_NIL:  return 0;
@@ -634,9 +632,9 @@ uint32_t hashCode(VM *vm, Value v) {
   }
 }
 
-bool equals(VM_t vm, Value this, Value that);
+static bool equals(VM_t vm, Value this, Value that);
 
-bool equalsStr(VM_t vm, Value this, Value that) {
+static bool equalsStr(VM_t vm, Value this, Value that) {
 
   if (valueType(that) != VT_STR) {
     return false;
@@ -659,7 +657,7 @@ bool equalsStr(VM_t vm, Value this, Value that) {
   }
 }
 
-bool equalsList(VM_t vm, Value this, Value that) {
+static bool equalsList(VM_t vm, Value this, Value that) {
 
   if (valueType(that) != VT_LIST) {
     return false;
@@ -694,7 +692,7 @@ bool equalsList(VM_t vm, Value this, Value that) {
   }
 }
 
-bool equals(VM_t vm, Value this, Value that) {
+static bool equals(VM_t vm, Value this, Value that) {
   switch (valueType(this)) {
 
     case VT_STR: return equalsStr(vm, this, that);
@@ -719,7 +717,7 @@ bool equals(VM_t vm, Value this, Value that) {
   }
 }
 
-MapEntry* findMapEntry(VM *vm, Map *map, Value key, uint32_t hash) {
+static MapEntry* findMapEntry(VM *vm, Map *map, Value key, uint32_t hash) {
 
   Array *array = deref(vm, map->entries);
   uint64_t numEntries = objectHeaderSize(array->header);
@@ -755,7 +753,7 @@ Value mapLookup(VM *vm, Map *map, Value key) {
   }
 }
 
-void _putMapEntryWithHash(VM *vm, Map *map, Value insertMe, Value key, uint32_t hash) {
+static void _putMapEntryWithHash(VM *vm, Map *map, Value insertMe, Value key, uint32_t hash) {
   MapEntry *found = findMapEntry(vm, map, key, hash);
   if (!found->used) {
     map->size++;
@@ -766,12 +764,12 @@ void _putMapEntryWithHash(VM *vm, Map *map, Value insertMe, Value key, uint32_t 
   found->value = insertMe;
 }
 
-void _putMapEntry(VM *vm, Map *map, Value key, Value insertMe) {
+static void _putMapEntry(VM *vm, Map *map, Value key, Value insertMe) {
   uint32_t hash = hashCode(vm, key);
   _putMapEntryWithHash(vm, map, insertMe, key, hash);
 }
 
-void mapResize(VM *vm, Map **protectedMap, uint64_t targetEntries) {
+static void mapResize(VM *vm, Map **protectedMap, uint64_t targetEntries) {
 
   Array *protectedNewEntries = makeArray(vm, targetEntries);
   pushFrameRoot(vm, (Value*)&protectedNewEntries);
@@ -824,7 +822,7 @@ void putMapEntry(VM *vm, Map **protectedMap, Value key, Value insertMe) {
   }
 }
 
-int hashMapBuiltin(VM *vm, Frame_t frame) {
+static int _hashMapBuiltin(VM *vm, Frame_t frame) {
   Value params = popOperand(frame);
 
   Value result;
@@ -869,7 +867,7 @@ int hashMapBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int makeVectorBuiltin(VM *vm, Frame_t frame) {
+static int _makeVectorBuiltin(VM *vm, Frame_t frame) {
 
   Value p = popOperand(frame);
 
@@ -886,7 +884,7 @@ int makeVectorBuiltin(VM *vm, Frame_t frame) {
 }
 
 
-int recordBuiltin(VM *vm, Frame_t frame) {
+static int _recordBuiltin(VM *vm, Frame_t frame) {
 
   uint16_t numFields;
   {
@@ -908,7 +906,7 @@ int recordBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int recordTypeBuiltin(VM *vm, Frame_t frame) {
+static int _recordTypeBuiltin(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
   ValueType type = valueType(value);
@@ -923,7 +921,7 @@ int recordTypeBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int uintToStringBuiltin(VM *vm, Frame_t frame) {
+static int _uintToStringBuiltin(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
   ValueType type = valueType(value);
@@ -945,7 +943,7 @@ int uintToStringBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int charToStringBuiltin(VM *vm, Frame_t frame) {
+static int _charToStringBuiltin(VM *vm, Frame_t frame) {
 
   Value value = popOperand(frame);
   ValueType type = valueType(value);
@@ -967,7 +965,7 @@ int charToStringBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int throwBuiltin(VM *vm, Frame_t frame) {
+static int _throwBuiltin(VM *vm, Frame_t frame) {
 
   Value msg = popOperand(frame);
   if (valueType(msg) != VT_STR) {
@@ -983,14 +981,14 @@ int throwBuiltin(VM *vm, Frame_t frame) {
 
   pushFrameRoot(vm, p.protectedMessage);
 
-  Value exception = _exceptionMake(vm, p);
+  Value exception = exceptionMake(vm, p);
   setException(vm, exception);
 
   popFrameRoot(vm); // protectedMessage
   return R_ERROR;
 }
 
-int throwValueBuiltin(VM *vm, Frame_t frame) {
+static int _throwValueBuiltin(VM *vm, Frame_t frame) {
 
   Value v = popOperand(frame);
 
@@ -1009,7 +1007,7 @@ int throwValueBuiltin(VM *vm, Frame_t frame) {
   pushFrameRoot(vm, p.protectedMessage);
   pushFrameRoot(vm, p.protectedValue);
 
-  Value exception = _exceptionMake(vm, p);
+  Value exception = exceptionMake(vm, p);
   setException(vm, exception);
 
   popFrameRoot(vm); // protectedValue
@@ -1017,14 +1015,14 @@ int throwValueBuiltin(VM *vm, Frame_t frame) {
   return R_ERROR;
 }
 
-void portInitContents(Port *port) {
+static void portInitContents(Port *port) {
   port->header = 0;
   port->type = PT_NONE;
   port->fileDesc = 0;
   port->closed = false;
 }
 
-Value makeFilePort(VM *vm, FILE *f) {
+static Value makeFilePort(VM *vm, FILE *f) {
 
   uint64_t size = padAllocSize(sizeof(Port));
   Port *port = alloc(vm, size);
@@ -1037,7 +1035,7 @@ Value makeFilePort(VM *vm, FILE *f) {
   return (Value)port;
 }
 
-int openFileBuiltin(VM *vm, Frame_t frame) {
+static int _openFileBuiltin(VM *vm, Frame_t frame) {
 
   Value val = popOperand(frame);
   if (valueType(val) != VT_STR) {
@@ -1072,7 +1070,7 @@ int openFileBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int readPortBuiltin(VM *vm, Frame_t frame) {
+static int _readPortBuiltin(VM *vm, Frame_t frame) {
 
   Value val = popOperand(frame);
   if (valueType(val) != VT_PORT) {
@@ -1106,7 +1104,7 @@ int readPortBuiltin(VM *vm, Frame_t frame) {
   }
 }
 
-int readCharBuiltin(VM *vm, Frame_t frame) {
+static int _readCharBuiltin(VM *vm, Frame_t frame) {
 
   Value val = popOperand(frame);
   if (valueType(val) != VT_PORT) {
@@ -1138,7 +1136,7 @@ int readCharBuiltin(VM *vm, Frame_t frame) {
   }
 }
 
-int unreadCharBuiltin(VM *vm, Frame_t frame) {
+static int _unreadCharBuiltin(VM *vm, Frame_t frame) {
 
   Value charVal = popOperand(frame);
   if (valueType(charVal) != VT_CHAR) {
@@ -1168,7 +1166,7 @@ int unreadCharBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int closePortBuiltin(VM *vm, Frame_t frame) {
+static int _closePortBuiltin(VM *vm, Frame_t frame) {
 
   Value val = popOperand(frame);
   if (valueType(val) != VT_PORT) {
@@ -1187,7 +1185,7 @@ int closePortBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int byteArrayBuiltin(VM *vm, Frame_t frame) {
+static int _byteArrayBuiltin(VM *vm, Frame_t frame) {
 
   uint64_t length;
   {
@@ -1205,7 +1203,7 @@ int byteArrayBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int charArrayBuiltin(VM *vm, Frame_t frame) {
+static int _charArrayBuiltin(VM *vm, Frame_t frame) {
 
   uint64_t length;
   {
@@ -1223,7 +1221,7 @@ int charArrayBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int printBuiltin(VM *vm, Frame_t frame) {
+static int _printBuiltin(VM *vm, Frame_t frame) {
   Value a = popOperand(frame);
   if (!isString(a)) {
     raise(vm, "can only print a string: %s", getValueTypeName(vm, valueType(a)));
@@ -1236,7 +1234,7 @@ int printBuiltin(VM *vm, Frame_t frame) {
 }
 
 // (8),             | (value -> value)
-int charToUintBuiltin(VM *vm, Frame_t frame) {
+static int _charToUintBuiltin(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
   ValueType type = valueType(value);
 
@@ -1250,7 +1248,7 @@ int charToUintBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int multBuiltin(VM *vm, Frame_t frame) {
+static int _multBuiltin(VM *vm, Frame_t frame) {
   Value b = popOperand(frame);
   Value a = popOperand(frame);
 
@@ -1268,7 +1266,7 @@ int multBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int divBuiltin(VM *vm, Frame_t frame) {
+static int _divBuiltin(VM *vm, Frame_t frame) {
   Value b = popOperand(frame);
   Value a = popOperand(frame);
 
@@ -1286,7 +1284,7 @@ int divBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int modBuiltin(VM *vm, Frame_t frame) {
+static int _modBuiltin(VM *vm, Frame_t frame) {
   Value b = popOperand(frame);
   Value a = popOperand(frame);
 
@@ -1305,7 +1303,7 @@ int modBuiltin(VM *vm, Frame_t frame) {
 }
 
 // (8),             | (value -> value)
-int nameBuiltin(VM *vm, Frame_t frame) {
+static int _nameBuiltin(VM *vm, Frame_t frame) {
   Value value = popOperand(frame);
   ValueType type = valueType(value);
 
@@ -1330,7 +1328,7 @@ int nameBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int withMetaBuiltin(VM *vm, Frame_t frame) {
+static int _withMetaBuiltin(VM *vm, Frame_t frame) {
   Value meta = popOperand(frame);
   Value obj = popOperand(frame);
 
@@ -1356,7 +1354,7 @@ int withMetaBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int metaBuiltin(VM *vm, Frame_t frame) {
+static int _metaBuiltin(VM *vm, Frame_t frame) {
   Value obj = popOperand(frame);
 
   ValueType type = valueType(obj);
@@ -1375,7 +1373,7 @@ int metaBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-int makeStringBuiltin(VM *vm, Frame_t frame) {
+static int _makeStringBuiltin(VM *vm, Frame_t frame) {
 
   Value protectedArray = popOperand(frame);
   ValueType type = valueType(protectedArray);
@@ -1406,48 +1404,48 @@ int makeStringBuiltin(VM *vm, Frame_t frame) {
 
 void initCFns(VM *vm) {
 
-  defineCFn(vm, L"cons", 2, false, consEval);
-  defineCFn(vm, L"first", 1, false, firstEval);        // TODO: rename to car instruction
-  defineCFn(vm, L"rest", 1, false, restEval);          // TODO: rename to cdr instruction
-  defineCFn(vm, L"set-macro", 1, false, setMacroEval); // TODO: adopt generic metadata
-  defineCFn(vm, L"get-macro", 1, false, getMacroEval); // TODO: adopt generic metadata
-  defineCFn(vm, L"gc", 0, false, gcEval);
-  defineCFn(vm, L"get-type", 1, false, getTypeEval);   // TODO: make instruction
-  defineCFn(vm, L"+", 2, false, addEval);              // TODO: make instruction
-  defineCFn(vm, L"-", 2, false, subEval);              // TODO: make instruction
-  defineCFn(vm, L"*", 2, false, multBuiltin);          // TODO: make instruction
-  defineCFn(vm, L"/", 2, false, divBuiltin);           // TODO: make instruction
-  defineCFn(vm, L"mod", 2, false, modBuiltin);         // TODO: make instruction
-  defineCFn(vm, L"eq", 2, false, cmpEval);             // TODO: make instruction
-  defineCFn(vm, L"symbol", 1, false, symbolBuiltin);   // TODO: make instruction
-  defineCFn(vm, L"keyword", 1, false, keywordBuiltin); // TODO: make instruction
-  defineCFn(vm, L"array", 1, false, arrayBuiltin);     // TODO: move to std lib
-  defineCFn(vm, L"count", 1, false, countBuiltin);     // TODO: make type-specific instructions, move to std lib
-  defineCFn(vm, L"get", 2, false, getBuiltin);         // TODO: make type-specific instructions, move to std lib
-  defineCFn(vm, L"set", 3, false, setBuiltin);         // TODO: make type-specific instructions, move to std lib
-  defineCFn(vm, L"hash-map", 1, true, hashMapBuiltin); // TODO: move to std lib
-  defineCFn(vm, L"make-vector", 1, false, makeVectorBuiltin); // TODO: make instruction
-  defineCFn(vm, L"record", 2, false, recordBuiltin);   // TODO: make instruction
-  defineCFn(vm, L"record-type", 1, false, recordTypeBuiltin);
-  defineCFn(vm, L"uint-to-string", 1, false, uintToStringBuiltin);
-  defineCFn(vm, L"throw", 1, false, throwBuiltin);
-  defineCFn(vm, L"throw-value", 2, false, throwValueBuiltin);
-  defineCFn(vm, L"print", 1, false, printBuiltin);
-  defineCFn(vm, L"open-file", 1, false, openFileBuiltin);
-  defineCFn(vm, L"read-port", 1, false, readPortBuiltin);
-  defineCFn(vm, L"read-char", 1, false, readCharBuiltin);
-  defineCFn(vm, L"unread-char", 2, false, unreadCharBuiltin);
-  defineCFn(vm, L"close-port", 1, false, closePortBuiltin);
-  defineCFn(vm, L"byte-array", 1, false, byteArrayBuiltin);
-  defineCFn(vm, L"char-array", 1, false, charArrayBuiltin);
-  defineCFn(vm, L"<", 2, false, ltEval); // TODO: make instruction
-  defineCFn(vm, L"<=", 2, false, lteEval); // TODO: make instruction
-  defineCFn(vm, L">", 2, false, gtEval);  // TODO: make instruction
-  defineCFn(vm, L">=", 2, false, gteEval); // TODO: make instruction
-  defineCFn(vm, L"char-to-uint", 1, false, charToUintBuiltin);
-  defineCFn(vm, L"char-to-string", 1, false, charToStringBuiltin);
-  defineCFn(vm, L"name", 1, false, nameBuiltin); // TODO: make type-specific instructions, move to std lib
-  defineCFn(vm, L"meta", 1, false, metaBuiltin); // TODO: make the meta property on a pair optional, put in std lib?
-  defineCFn(vm, L"with-meta", 2, false, withMetaBuiltin);
-  defineCFn(vm, L"make-string", 1, false, makeStringBuiltin);
+  defineCFn(vm, L"cons",           2, false, consEval);
+  defineCFn(vm, L"first",          1, false, _firstEval);           // TODO: rename to car instruction
+  defineCFn(vm, L"rest",           1, false, _restEval);            // TODO: rename to cdr instruction
+  defineCFn(vm, L"set-macro",      1, false, _setMacroEval);        // TODO: adopt generic metadata
+  defineCFn(vm, L"get-macro",      1, false, _getMacroEval);        // TODO: adopt generic metadata
+  defineCFn(vm, L"gc",             0, false, _gcEval);
+  defineCFn(vm, L"get-type",       1, false, _getTypeEval);         // TODO: make instruction
+  defineCFn(vm, L"+",              2, false, addEval);              // TODO: make instruction
+  defineCFn(vm, L"-",              2, false, subEval);              // TODO: make instruction
+  defineCFn(vm, L"*",              2, false, _multBuiltin);         // TODO: make instruction
+  defineCFn(vm, L"/",              2, false, _divBuiltin);          // TODO: make instruction
+  defineCFn(vm, L"mod",            2, false, _modBuiltin);          // TODO: make instruction
+  defineCFn(vm, L"eq",             2, false, cmpEval);              // TODO: make instruction
+  defineCFn(vm, L"symbol",         1, false, _symbolBuiltin);       // TODO: make instruction
+  defineCFn(vm, L"keyword",        1, false, _keywordBuiltin);      // TODO: make instruction
+  defineCFn(vm, L"array",          1, false, _arrayBuiltin);        // TODO: move to std lib
+  defineCFn(vm, L"count",          1, false, _countBuiltin);        // TODO: make type-specific instructions, move to std lib
+  defineCFn(vm, L"get",            2, false, _getBuiltin);          // TODO: make type-specific instructions, move to std lib
+  defineCFn(vm, L"set",            3, false, _setBuiltin);          // TODO: make type-specific instructions, move to std lib
+  defineCFn(vm, L"hash-map",       1, true,  _hashMapBuiltin);      // TODO: move to std lib
+  defineCFn(vm, L"make-vector",    1, false, _makeVectorBuiltin);   // TODO: make instruction
+  defineCFn(vm, L"record",         2, false, _recordBuiltin);       // TODO: make instruction
+  defineCFn(vm, L"record-type",    1, false, _recordTypeBuiltin);
+  defineCFn(vm, L"uint-to-string", 1, false, _uintToStringBuiltin);
+  defineCFn(vm, L"throw",          1, false, _throwBuiltin);
+  defineCFn(vm, L"throw-value",    2, false, _throwValueBuiltin);
+  defineCFn(vm, L"print",          1, false, _printBuiltin);
+  defineCFn(vm, L"open-file",      1, false, _openFileBuiltin);
+  defineCFn(vm, L"read-port",      1, false, _readPortBuiltin);
+  defineCFn(vm, L"read-char",      1, false, _readCharBuiltin);
+  defineCFn(vm, L"unread-char",    2, false, _unreadCharBuiltin);
+  defineCFn(vm, L"close-port",     1, false, _closePortBuiltin);
+  defineCFn(vm, L"byte-array",     1, false, _byteArrayBuiltin);
+  defineCFn(vm, L"char-array",     1, false, _charArrayBuiltin);
+  defineCFn(vm, L"<",              2, false, _ltEval);              // TODO: make instruction
+  defineCFn(vm, L"<=",             2, false, _lteEval);             // TODO: make instruction
+  defineCFn(vm, L">",              2, false, _gtEval);              // TODO: make instruction
+  defineCFn(vm, L">=",             2, false, _gteEval);             // TODO: make instruction
+  defineCFn(vm, L"char-to-uint",   1, false, _charToUintBuiltin);
+  defineCFn(vm, L"char-to-string", 1, false, _charToStringBuiltin);
+  defineCFn(vm, L"name",           1, false, _nameBuiltin);        // TODO: make type-specific instructions, move to std lib
+  defineCFn(vm, L"meta",           1, false, _metaBuiltin);        // TODO: make the meta property on a pair optional, put in std lib?
+  defineCFn(vm, L"with-meta",      2, false, _withMetaBuiltin);
+  defineCFn(vm, L"make-string",    1, false, _makeStringBuiltin);
 }

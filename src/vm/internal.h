@@ -305,9 +305,7 @@ CharArray* makeCharArray(VM *vm, uint64_t size);
 #define W_MAP_MIN_ENTRIES 16
 #define W_MAP_MIN_LOAD .40
 #define W_MAP_MAX_LOAD .70
-void _mapEntryInitContents(MapEntry *e);
 MapEntry* makeMapEntry(VM *vm);
-void _mapInitContents(Map *m);
 Map* makeMap(VM *vm);
 
 void recordInitContents(Record *record);
@@ -335,7 +333,7 @@ typedef struct ExceptionParams {
   Raised *raised;          // includes native frame line info
 } ExceptionParams;
 
-Value _exceptionMake(VM *vm, ExceptionParams p);
+Value exceptionMake(VM *vm, ExceptionParams p);
 Value exceptionMakeRaised(VM *vm, Raised *raised);
 Value exceptionMakeKw(VM *vm, Raised *raised, wchar_t *kwName);
 void raisedInitContents(Raised *r);
