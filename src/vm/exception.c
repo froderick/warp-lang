@@ -3,6 +3,9 @@
 #include <libgen.h>
 #include "../errors.h"
 #include "internal.h"
+#include "exception.h"
+#include "builtin.h"
+#include "frame.h"
 
 bool hasException(VM *vm) {
   return vm->exception != W_NIL_VALUE;

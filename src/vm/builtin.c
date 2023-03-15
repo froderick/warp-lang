@@ -7,6 +7,11 @@
 
 #include "../errors.h"
 #include "internal.h"
+#include "exception.h"
+#include "builtin.h"
+#include "symbol.h"
+#include "frame.h"
+#include "heap.h"
 
 /*
  * builtin procedures, some of which are also used as instructions
@@ -883,7 +888,6 @@ static int _makeVectorBuiltin(VM *vm, Frame_t frame) {
   return R_SUCCESS;
 }
 
-
 static int _recordBuiltin(VM *vm, Frame_t frame) {
 
   uint16_t numFields;
@@ -1015,7 +1019,7 @@ static int _throwValueBuiltin(VM *vm, Frame_t frame) {
   return R_ERROR;
 }
 
-static void portInitContents(Port *port) {
+static void _portInitContents(Port *port) {
   port->header = 0;
   port->type = PT_NONE;
   port->fileDesc = 0;
@@ -1027,7 +1031,7 @@ static Value makeFilePort(VM *vm, FILE *f) {
   uint64_t size = padAllocSize(sizeof(Port));
   Port *port = alloc(vm, size);
 
-  portInitContents(port);
+  _portInitContents(port);
   port->header = makeObjectHeader(W_PORT_TYPE, size);
   port->type = PT_FILE;
   port->fileDesc = f;

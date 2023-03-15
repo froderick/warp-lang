@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include "../errors.h"
 #include "internal.h"
+#include "symbol.h"
+#include "heap.h"
+#include "value.h"
 
 /*
  * value definitions

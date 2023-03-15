@@ -8,6 +8,11 @@
 #include <errno.h>
 
 #include "internal.h"
+#include "symbol.h"
+#include "heap.h"
+#include "value.h"
+#include "eval.h"
+#include "builtin.h"
 
 void vmConfigInitContents(VMConfig *config) {
   config->gcOnAlloc = false;

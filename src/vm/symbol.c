@@ -3,6 +3,8 @@
 #include <libgen.h>
 #include "../errors.h"
 #include "internal.h"
+#include "symbol.h"
+#include "heap.h"
 
 /*
  * SymbolTable
@@ -62,7 +64,7 @@ void tableInit(Table *table) {
   }
 }
 
-TableEntry* findEntry(VM *vm, Table *table, String* name, uint32_t hash) {
+static TableEntry* _findEntry(VM *vm, Table *table, String* name, uint32_t hash) {
 
   uint64_t index = hash % table->numAllocatedEntries;
 
@@ -104,7 +106,7 @@ Value tableLookup(VM *vm, Table *table, Value name) {
   String *s = deref(vm, name);
   uint32_t hash = stringHash(s);
 
-  TableEntry *found = findEntry(vm, table, s, hash);
+  TableEntry *found = _findEntry(vm, table, s, hash);
 
   if (found->used) {
     return found->value;
@@ -115,7 +117,7 @@ Value tableLookup(VM *vm, Table *table, Value name) {
 }
 
 static void _putEntryWithHash(VM *vm, Table *table, Value insertMe, Value name, uint32_t hash) {
-  TableEntry *found = findEntry(vm, table, deref(vm, name), hash);
+  TableEntry *found = _findEntry(vm, table, deref(vm, name), hash);
   if (!found ->used) {
     table->size++;
     found->used = true;

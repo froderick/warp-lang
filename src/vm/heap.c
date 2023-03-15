@@ -3,6 +3,7 @@
 #include <libgen.h>
 #include "../errors.h"
 #include "internal.h"
+#include "frame.h"
 
 /*
  * alloc/gc impl

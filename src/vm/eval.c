@@ -3,15 +3,25 @@
 #include <libgen.h>
 #include <time.h>
 #include <inttypes.h>
-#include "../bootstrap/print.h"
-#include "../errors.h"
 #include <errno.h>
+
+#include "../errors.h"
+#include "exception.h"
+#include "builtin.h"
+#include "frame.h"
+#include "heap.h"
 
 #include "internal.h"
 
 /*
  * Loading Constants as Values
  */
+
+typedef struct Invocable {
+  Value ref;
+  Fn *fn;
+  Closure *closure;
+} Invocable;
 
 static Value _hydrateConstant(VM *vm, Constant c);
 
