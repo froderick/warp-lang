@@ -1,18 +1,20 @@
 # Warp
 
+<img src="resources/logo/warp_logo_300.png" alt="Logo" align="right"/>
+
 ## About
 
 Warp is a research programming language used to explore how the parts of a
 modern programming language stack fit together.
-
-_This project is far from complete and not actively supported, please do not hook up your pace maker to it.__
 
 The key features of Warp are the following:
 * A bytecode-based virtual machine
 * Garbage-collected memory allocation
 * Lisp syntax and macros
 * Tail Recursion
-* an interactive, REPL-friendly environment
+* An interactive REPL environment
+
+_Warp is far from complete and not actively supported, please do not hook up your pace maker to it._
 
 ## A Very Small Example
 
@@ -25,8 +27,6 @@ The key features of Warp are the following:
       prev2
       (loop prev2 (+ prev1 prev2) (- n 1)))))
 ```
-
-For instructions on how to run Warp code, see [this document](docs/HowToRunCode.md).
 
 For more examples, check out the [standard library](src/core.lsp).
 
