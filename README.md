@@ -1,8 +1,6 @@
 # Warp
 
-<img src="resources/logo/warp_logo_300.png" alt="Logo" align="right"/>
-
-## About
+<img src="resources/logo/warp_logo_300.png" alt="Logo"  align="right"/>
 
 Warp is a research programming language used to explore how the parts of a
 modern programming language stack fit together.
@@ -33,15 +31,16 @@ For more examples, check out the [standard library](src/core.lsp).
 ## Building and Runing
 
 ```sh
-$ brew install check cmake
+brew install check cmake
 ```
 
 Then, in the root of the repo:
 
 ``` sh
-$ mkdir -p build
-$ cmake ../
-$ make all
+mkdir -p build
+cd build
+cmake ../
+make all
 ```
 
 This will generate a binary called `repl-main`, which is the primary means of
