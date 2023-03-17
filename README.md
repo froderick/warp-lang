@@ -2,8 +2,7 @@
 
 <img src="resources/logo/warp_logo_300.png" alt="Logo"  align="right"/>
 
-Warp is a research programming language used to explore how the parts of a
-modern programming language stack fit together.
+Warp is a programming language and runtime that explores many aspects of modern, high-level language design.
 
 The key features of Warp are the following:
 * A bytecode-based virtual machine
